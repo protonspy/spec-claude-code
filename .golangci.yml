@@ -1,0 +1,32 @@
+# golangci-lint configuration (v2 schema — golangci-lint v2.x).
+#
+# Deliberately conservative: only the standard, high-signal analyzers are
+# enabled so CI stays green-friendly instead of drowning in style nits. Add more
+# linters here as the codebase grows.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck # unchecked errors
+    - govet # go vet's analyzers
+    - ineffassign # assignments never read
+    - staticcheck # staticcheck (SA/S/ST) suite
+    - unused # unused code
+  exclusions:
+    rules:
+      # Test code is intentionally lax about unchecked errors (Close/Chdir/…) and
+      # uses patterns staticcheck false-positives on (e.g. Hash("a") != Hash("a")
+      # to assert determinism).
+      - path: _test\.go
+        linters:
+          - errcheck
+          - staticcheck
+      # QF1001 (apply De Morgan's law) and S1016 (struct literal -> conversion)
+      # are style suggestions where the explicit form reads clearer; keep it.
+      - linters:
+          - staticcheck
+        text: "QF1001"
+      - linters:
+          - staticcheck
+        text: "S1016"

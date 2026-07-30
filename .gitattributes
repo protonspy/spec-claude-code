@@ -1,0 +1,26 @@
+# Normalize line endings to LF in the repository and working tree. scc runs on
+# Windows/WSL where autocrlf otherwise makes the entire tree show as Modified and
+# breaks gofmt/line-ending-sensitive checks on Windows CI. LF everywhere keeps
+# manifest hashes, Go source, and shell hooks consistent across platforms.
+* text=auto eol=lf
+
+# Go, docs, shell hooks, and config are always LF.
+*.go    text eol=lf
+*.mod   text eol=lf
+*.sum   text eol=lf
+*.sh    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.tmpl  text eol=lf
+*.mjs   text eol=lf
+*.js    text eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.ico   binary
+*.gz    binary
+*.zip   binary
