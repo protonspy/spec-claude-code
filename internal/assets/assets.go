@@ -1,6 +1,6 @@
 // Package assets is the template set compiled into the binary: the rules, the
-// review agents, and the artifact templates, all of it plain Markdown embedded
-// with //go:embed.
+// review agents, the knowledge-base skills and their commands, and the artifact
+// templates, all of it plain Markdown embedded with //go:embed.
 //
 // There are two kinds of template here and the difference matters:
 //
@@ -40,7 +40,9 @@ import (
 // It is not the binary's version. Two scc releases that ship identical templates
 // share a template version, which keeps `scc update` a no-op across them instead
 // of touching every managed file to record a number nobody read.
-const Version = "1"
+//
+// 2: the knowledge-base skills and their commands.
+const Version = "2"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -104,9 +106,40 @@ func Workspace() []File {
 			Rel:  claude(paths.AgentsSeg, agent),
 		})
 	}
+	// The knowledge base's authors. Every one of these produces an artifact
+	// `scc validate` already checks — a workspace that ships the eight validators
+	// and no skill teaching the formats would demand conformance to documents
+	// nobody was told how to write.
+	for _, skill := range KnowledgeSkills {
+		set = append(set, File{
+			Name: "claude/skills/" + skill + "/SKILL.md",
+			Rel:  claude(paths.SkillsSeg, skill, "SKILL.md"),
+		})
+		// One command per skill, so the human has an explicit entry point where the
+		// model has a description. Namespaced, because slash commands share a flat
+		// namespace with every other source Claude Code loads them from and `/adr`
+		// would collide on contact.
+		cmd := commandPrefix + skill + ".md"
+		set = append(set, File{
+			Name: "claude/commands/" + cmd,
+			Rel:  claude(paths.CommandsSeg, cmd),
+		})
+	}
 	sort.Slice(set, func(i, j int) bool { return set[i].Rel < set[j].Rel })
 	return set
 }
+
+// KnowledgeSkills names the skills scc ships, each one the author of a `docs/`
+// artifact a validator checks. Both the skill directory and its slash command are
+// derived from this list, so the two cannot drift apart.
+//
+// The methodology is deliberately absent from it: the cycles, verification, and
+// delivery are rules under `.claude/rules/`, read when the concern is live. A skill
+// restating a rule is a second copy of one fact, and the copy goes stale.
+var KnowledgeSkills = []string{"adr", "codewiki", "glossary", "prd", "stack", "wiki"}
+
+// commandPrefix namespaces the scaffolded slash commands.
+const commandPrefix = "scc-"
 
 // Dirs returns the directories `scc init` creates even when it has no file to put
 // in them. An agent that can see specs/, plans/, and docs/wiki/ knows where its
@@ -115,6 +148,8 @@ func Dirs() []string {
 	return []string{
 		path.Join(paths.ClaudeDir, paths.RulesSeg),
 		path.Join(paths.ClaudeDir, paths.AgentsSeg),
+		path.Join(paths.ClaudeDir, paths.SkillsSeg),
+		path.Join(paths.ClaudeDir, paths.CommandsSeg),
 		paths.SpecsSeg,
 		paths.PlansSeg,
 		path.Join(paths.DocsSeg, paths.WikiSeg),

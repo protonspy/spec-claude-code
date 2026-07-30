@@ -29,6 +29,8 @@ specs/<feature>/   requirements.md · design.md · tasks.md
 plans/<name>.md    one file: structure, plus a checklist and/or spec references
 docs/              the knowledge base — wiki, adr, codewiki, glossary, stack
 .claude/rules/     the methodology above
+.claude/skills/    how to author each part of docs/ — invoked when it applies
+.claude/commands/  the same skills on demand, as /scc-wiki, /scc-adr, /scc-prd, …
 ```
 
 ## Checking your work

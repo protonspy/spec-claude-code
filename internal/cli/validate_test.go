@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 	"github.com/protonspy/spec-claude-code/internal/validate"
 )
@@ -46,6 +47,34 @@ func TestFreshArtifactsPassTheirOwnValidators(t *testing.T) {
 	// keep in sync.
 	if len(doc.Validators) != len(validate.All()) {
 		t.Errorf("validators = %+v, want one entry per validator (%d)", doc.Validators, len(validate.All()))
+	}
+}
+
+// The shipped skills pass scc's own Agent Skills validator — and there are shipped
+// skills for it to pass. The count check is the point: without it this test stays
+// green on a workspace containing no skills at all, which is what it asserted for as
+// long as none shipped.
+func TestScaffoldedSkillsPassTheSkillValidator(t *testing.T) {
+	root := initWorkspace(t)
+
+	entries, err := os.ReadDir(paths.Skills(root))
+	if err != nil {
+		t.Fatalf("init scaffolded no skills directory: %v", err)
+	}
+	var got []string
+	for _, e := range entries {
+		if e.IsDir() {
+			got = append(got, e.Name())
+		}
+	}
+	if len(got) != len(assets.KnowledgeSkills) {
+		t.Errorf("scaffolded skills = %v, want %v", got, assets.KnowledgeSkills)
+	}
+
+	stdout, stderr, code := run(t, "skill", "validate", "--root", root, "--json")
+	if code != ExitOK {
+		t.Errorf("skill validate on the skills scc itself ships exited %d\nstdout: %s\nstderr: %s",
+			code, stdout, stderr)
 	}
 }
 

@@ -459,7 +459,7 @@ Phase 2 — init
 Phase 3 — the template set
 - [x] 3.1 (Unit) .claude/rules/: the nine rule files
 - [x] 3.2 (Unit) CLAUDE.md and the two review agents
-- [ ] 3.3 (Unit) shipped skills — none ship; the design never says which would (§9)
+- [x] 3.3 (Unit) shipped skills — the six §6 names, each with its scc- slash command
 - [x] 3.4 (Unit) spec templates (optional sections marked optional) and the plan template
 
 Phase 4 — creating work
@@ -475,7 +475,7 @@ Phase 5 — markdown
 Phase 6 — skill
 - [x] 6.1 (TDD) validate: Agent Skills conformance against the published spec
 - [x] 6.2 (Unit) cli: scc skill validate, exit 2 on findings
-- [x] 6.3 (Unit) the shipped skills pass their own validator (vacuously true; see 3.3)
+- [x] 6.3 (Unit) the shipped skills pass their own validator — count asserted, not vacuous
 
 Phase 7 — spec
 - [x] 7.1 (TDD) internal/ears: all five patterns plus complex, clause order enforced
@@ -544,11 +544,18 @@ data to them is meaningless, while artifact templates *do* take data because the
 authored from birth and never tracked in the manifest. Two functions make the difference
 impossible to get wrong at a call site.
 
-**Deviation: no skills ship, so 3.3 and 6.3 are hollow.** The design lists skills among
-what the binary scaffolds but never says which. Nothing was invented to fill the gap.
-`skill validate` is complete and tested against fixtures, and the test asserting that
-shipped skills pass it will start meaning something the moment one ships. **One line in
-the design saying which skills ship, if any, closes this.**
+**Resolved: six skills ship, so 3.3 and 6.3 now assert something.** The design listed
+skills among what the binary scaffolds and never said which, so for v0.3.0 none did and
+both checkboxes were vacuous. §6 now names them, picked mechanically — one skill per
+`docs/` artifact a validator checks (`wiki`, `codewiki`, `glossary`, `stack`, `adr`),
+plus `prd` as the entry point for work too large for one spec. Each ships with a
+namespaced slash command derived from the same list. The methodology stays in
+`.claude/rules/`: a skill restating a rule is a second copy of one fact.
+
+3.3 and 6.3 are no longer satisfiable by an empty workspace —
+`TestScaffoldedSkillsPassTheSkillValidator` asserts the scaffolded count before it
+asserts the clean run, which is the part that was missing while the test was hollow.
+Template version bumped to `2`.
 
 **Also settled along the way**, all of it now in the rules the binary scaffolds, because
 a validator needs a written convention to check against: ADR frontmatter (`status`,

@@ -100,7 +100,7 @@ Usage:
   %s <command> [flags]
 
 Commands:
-  init      Scaffold a workspace: rules, review agents, layout, manifest
+  init      Scaffold a workspace: rules, agents, skills, commands, layout, manifest
   spec      Create and inspect specs — new | list | show | delete | validate
   plan      Create and inspect plans — new | list | delete | validate
   skill     Agent Skills conformance — validate
