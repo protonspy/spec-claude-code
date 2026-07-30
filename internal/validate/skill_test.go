@@ -294,3 +294,35 @@ func TestFindingsAreOrderedAcrossSkills(t *testing.T) {
 		t.Errorf("first finding is %s, want the alpha skill", got[0].File)
 	}
 }
+
+// The spec's limits are in characters. Counting bytes agrees only for ASCII, and would
+// fail a description that is inside its 1024 characters but past 1024 bytes — the
+// false positive on a valid skill that TestLengthLimitsComeFromTheSpec guards for ASCII.
+func TestLengthLimitsCountCharactersNotBytes(t *testing.T) {
+	// Two bytes per rune, so a description exactly at the limit is twice over in bytes.
+	desc := strings.Repeat("é", skillDescriptionMax)
+	if len(desc) <= skillDescriptionMax {
+		t.Fatalf("test premise broken: %d bytes is not over the %d limit", len(desc), skillDescriptionMax)
+	}
+	root := t.TempDir()
+	writeSkill(t, root, "accented", "---\nname: accented\ndescription: "+desc+"\n---\n\nBody.\n")
+	if hasRule(skills(t, root), "skill.description-too-long") {
+		t.Errorf("a description of exactly %d characters was reported as too long", skillDescriptionMax)
+	}
+
+	// And one character over is still caught, so the fix did not simply disable the check.
+	root = t.TempDir()
+	writeSkill(t, root, "accented", "---\nname: accented\ndescription: "+desc+"é\n---\n\nBody.\n")
+	if !hasRule(skills(t, root), "skill.description-too-long") {
+		t.Error("a description one character over the limit was accepted")
+	}
+}
+
+func TestCompatibilityLimitCountsCharacters(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "picky", "---\nname: picky\ndescription: A skill. Use when testing.\ncompatibility: "+
+		strings.Repeat("é", skillCompatibilityMax)+"\n---\n\nBody.\n")
+	if hasRule(skills(t, root), "skill.compatibility-too-long") {
+		t.Errorf("a compatibility field of exactly %d characters was reported as too long", skillCompatibilityMax)
+	}
+}

@@ -384,3 +384,75 @@ func TestEverythingMergesAndCounts(t *testing.T) {
 		}
 	}
 }
+
+// A citation is a path inside the checkout. A traversing target must be refused before
+// it reaches os.ReadFile, or a Markdown page decides what scc opens on the machine.
+func TestCodewikiCitationsCannotEscapeTheWorkspace(t *testing.T) {
+	root := t.TempDir()
+	// A real file one level above the workspace, which the traversal below would reach.
+	write(t, filepath.Join(root, "..", "outside-the-workspace.txt"), "secret\nsecret\n")
+	defer os.Remove(filepath.Join(root, "..", "outside-the-workspace.txt"))
+
+	for _, target := range []string{
+		"../outside-the-workspace.txt",
+		"docs/../../outside-the-workspace.txt",
+	} {
+		t.Run(target, func(t *testing.T) {
+			dir := t.TempDir()
+			write(t, filepath.Join(dir, "..", "outside-the-workspace.txt"), "secret\nsecret\n")
+			defer os.Remove(filepath.Join(dir, "..", "outside-the-workspace.txt"))
+			write(t, filepath.Join(paths.Codewiki(dir), "app.md"),
+				"# App\n\n## Section\n\n["+target+":1-2]()\n")
+
+			got := runValidator(t, Codewiki, dir)
+			if !contains(got, "codewiki.citation-invalid") {
+				t.Errorf("rules = %v, want codewiki.citation-invalid for %q", got, target)
+			}
+			// The give-away that the read happened anyway: a resolved citation is
+			// range-checked, so out-of-range means scc opened the outside file.
+			if contains(got, "codewiki.citation-out-of-range") {
+				t.Errorf("rules = %v: %q was read despite escaping the workspace", got, target)
+			}
+		})
+	}
+}
+
+// An absolute citation escapes just as surely, and filepath.Join would silently graft
+// it onto root on Windows while honoring it on Unix.
+func TestCodewikiCitationsCannotBeAbsolute(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(paths.Codewiki(root), "app.md"),
+		"# App\n\n## Section\n\n[/etc/passwd:1-2]()\n")
+
+	got := runValidator(t, Codewiki, root)
+	if !contains(got, "codewiki.citation-invalid") {
+		t.Errorf("rules = %v, want codewiki.citation-invalid", got)
+	}
+}
+
+// baseName drops a Go major-version suffix so the last real path segment is what gets
+// compared against stack.md. Every major from 2 up is a valid suffix, and the two-digit
+// ones are the easy range to lose: a leading-digit character class that starts at 2
+// silently rejects v10 through v19.
+func TestBaseNameDropsEveryMajorVersionSuffix(t *testing.T) {
+	for _, tc := range []struct{ module, want string }{
+		{"github.com/go-chi/chi/v5", "chi"},
+		{"github.com/go-chi/chi/v2", "chi"},
+		{"github.com/go-chi/chi/v9", "chi"},
+		{"github.com/go-chi/chi/v10", "chi"},
+		{"github.com/go-chi/chi/v11", "chi"},
+		{"github.com/go-chi/chi/v19", "chi"},
+		{"github.com/go-chi/chi/v20", "chi"},
+		{"github.com/go-chi/chi/v100", "chi"},
+		// v1 is never written as a path suffix, and v0 is not a major version. Neither
+		// is a segment that merely starts with v.
+		{"github.com/go-chi/chi/v1", "v1"},
+		{"github.com/go-chi/chi/v0", "v0"},
+		{"github.com/spf13/viper", "viper"},
+		{"gopkg.in/yaml.v3", "yaml.v3"},
+	} {
+		if got := baseName(tc.module); got != tc.want {
+			t.Errorf("baseName(%q) = %q, want %q", tc.module, got, tc.want)
+		}
+	}
+}

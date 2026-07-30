@@ -179,4 +179,8 @@ func baseName(module string) string {
 }
 
 // majorVersionRe matches a Go module's major-version path suffix: v2, v5, v11.
-var majorVersionRe = regexp.MustCompile(`^v[2-9]\d*$`)
+//
+// Every integer from 2 up, which is two alternatives rather than one character class:
+// a bare 2-9, or a multi-digit number whose leading digit may be 1 (v10, v11). A single
+// `v[2-9]\d*` looks equivalent and is not — it rejects the whole v10-v19 range.
+var majorVersionRe = regexp.MustCompile(`^v([2-9]|[1-9]\d+)$`)
