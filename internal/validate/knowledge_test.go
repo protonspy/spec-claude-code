@@ -384,3 +384,125 @@ func TestEverythingMergesAndCounts(t *testing.T) {
 		}
 	}
 }
+
+// A citation is a path inside the checkout. A traversing target must be refused before
+// it reaches os.ReadFile, or a Markdown page decides what scc opens on the machine.
+func TestCodewikiCitationsCannotEscapeTheWorkspace(t *testing.T) {
+	root := t.TempDir()
+	// A real file one level above the workspace, which the traversal below would reach.
+	write(t, filepath.Join(root, "..", "outside-the-workspace.txt"), "secret\nsecret\n")
+	defer os.Remove(filepath.Join(root, "..", "outside-the-workspace.txt"))
+
+	for _, target := range []string{
+		"../outside-the-workspace.txt",
+		"docs/../../outside-the-workspace.txt",
+	} {
+		t.Run(target, func(t *testing.T) {
+			dir := t.TempDir()
+			write(t, filepath.Join(dir, "..", "outside-the-workspace.txt"), "secret\nsecret\n")
+			defer os.Remove(filepath.Join(dir, "..", "outside-the-workspace.txt"))
+			// Past the end of the two-line fixture, so the out-of-range assertion
+			// below can actually distinguish a blocked citation from a read one.
+			write(t, filepath.Join(paths.Codewiki(dir), "app.md"),
+				"# App\n\n## Section\n\n["+target+":1-3]()\n")
+
+			got := runValidator(t, Codewiki, dir)
+			if !contains(got, "codewiki.citation-invalid") {
+				t.Errorf("rules = %v, want codewiki.citation-invalid for %q", got, target)
+			}
+			// The give-away that the read happened anyway: a resolved citation is
+			// range-checked, so out-of-range means scc opened the outside file.
+			if contains(got, "codewiki.citation-out-of-range") {
+				t.Errorf("rules = %v: %q was read despite escaping the workspace", got, target)
+			}
+		})
+	}
+}
+
+// An absolute citation escapes just as surely, and filepath.Join would silently graft
+// it onto root on Windows while honoring it on Unix.
+func TestCodewikiCitationsCannotBeAbsolute(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(paths.Codewiki(root), "app.md"),
+		"# App\n\n## Section\n\n[/etc/passwd:1-2]()\n")
+
+	got := runValidator(t, Codewiki, root)
+	if !contains(got, "codewiki.citation-invalid") {
+		t.Errorf("rules = %v, want codewiki.citation-invalid", got)
+	}
+}
+
+// baseName drops a Go major-version suffix so the last real path segment is what gets
+// compared against stack.md. Every major from 2 up is a valid suffix, and the two-digit
+// ones are the easy range to lose: a leading-digit character class that starts at 2
+// silently rejects v10 through v19.
+func TestBaseNameDropsEveryMajorVersionSuffix(t *testing.T) {
+	for _, tc := range []struct{ module, want string }{
+		{"github.com/go-chi/chi/v5", "chi"},
+		{"github.com/go-chi/chi/v2", "chi"},
+		{"github.com/go-chi/chi/v9", "chi"},
+		{"github.com/go-chi/chi/v10", "chi"},
+		{"github.com/go-chi/chi/v11", "chi"},
+		{"github.com/go-chi/chi/v19", "chi"},
+		{"github.com/go-chi/chi/v20", "chi"},
+		{"github.com/go-chi/chi/v100", "chi"},
+		// v1 is never written as a path suffix, and v0 is not a major version. Neither
+		// is a segment that merely starts with v.
+		{"github.com/go-chi/chi/v1", "v1"},
+		{"github.com/go-chi/chi/v0", "v0"},
+		{"github.com/spf13/viper", "viper"},
+		{"gopkg.in/yaml.v3", "yaml.v3"},
+	} {
+		if got := baseName(tc.module); got != tc.want {
+			t.Errorf("baseName(%q) = %q, want %q", tc.module, got, tc.want)
+		}
+	}
+}
+
+// Lexical containment is not enough. A symlink inside the workspace pointing out of it
+// spells no "..", so a Clean-based check passes it through — and isFile and os.ReadFile
+// both follow it. The escape is silent in exactly the way the traversal case was.
+func TestCodewikiCitationsCannotEscapeThroughASymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	secret := filepath.Join(outside, "secret.txt")
+	write(t, secret, "secret\nsecret\n")
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err) // unprivileged Windows
+	}
+
+	// The cited range runs past the end of the two-line fixture on purpose. Citing 1-2
+	// would sit inside the file, so out-of-range would stay silent whether or not the
+	// read happened and the second assertion below would prove nothing.
+	write(t, filepath.Join(paths.Codewiki(root), "app.md"),
+		"# App\n\n## Section\n\n[link.txt:1-3]()\n")
+
+	got := runValidator(t, Codewiki, root)
+	if !contains(got, "codewiki.citation-invalid") {
+		t.Errorf("rules = %v, want codewiki.citation-invalid: the link left the workspace", got)
+	}
+	if contains(got, "codewiki.citation-out-of-range") {
+		t.Errorf("rules = %v: the outside file was read through the symlink", got)
+	}
+}
+
+// The counterpart, and the reason the root is resolved rather than compared raw: a
+// workspace that itself sits under a symlink still validates its own files. macOS does
+// this to every t.TempDir() by putting /var behind /private/var.
+func TestCodewikiValidatesAWorkspaceBehindASymlink(t *testing.T) {
+	real := t.TempDir()
+	write(t, filepath.Join(real, "main.go"), "one\ntwo\n")
+	write(t, filepath.Join(paths.Codewiki(real), "app.md"),
+		"# App\n\n## Section\n\n[main.go:1-2]()\n")
+
+	link := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if got := runValidator(t, Codewiki, link); len(got) != 0 {
+		t.Errorf("rules = %v, want none: a citation inside a symlinked workspace is not an escape", got)
+	}
+}
