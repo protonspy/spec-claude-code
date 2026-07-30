@@ -30,3 +30,13 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# The locally built binary (`make build`).
+/scc
+/scc.exe
+
+# Release/publish staging: cross-compiled tarballs, downloaded CI artifacts, and
+# the assembled npm publish tree. All reproducible from a tag — never committed.
+/dist/
+/artifacts/
+npm/dist/

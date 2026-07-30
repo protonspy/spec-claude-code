@@ -1,0 +1,42 @@
+{
+  "name": "@protonspy/scc",
+  "version": "0.0.0",
+  "description": "Spec-driven development for Claude Code — a single Go binary that turns the SDD workflow into a mechanically validated contract for humans and AI agents.",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "spec-driven-development",
+    "sdd",
+    "cli",
+    "ai",
+    "agents"
+  ],
+  "homepage": "https://github.com/protonspy/spec-claude-code#readme",
+  "bugs": {
+    "url": "https://github.com/protonspy/spec-claude-code/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/protonspy/spec-claude-code.git"
+  },
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "scc": "bin/scc.js"
+  },
+  "files": [
+    "bin/scc.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "optionalDependencies": {
+    "@protonspy/scc-linux-x64": "0.0.0",
+    "@protonspy/scc-linux-arm64": "0.0.0",
+    "@protonspy/scc-darwin-x64": "0.0.0",
+    "@protonspy/scc-darwin-arm64": "0.0.0",
+    "@protonspy/scc-win32-x64": "0.0.0",
+    "@protonspy/scc-win32-arm64": "0.0.0"
+  }
+}

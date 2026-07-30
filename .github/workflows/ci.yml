@@ -1,0 +1,100 @@
+name: ci
+
+# Test + validate gate. Runs on:
+#   - every pull request — validate changes before they can merge.
+#   - push to main — validate the merge result on the default branch, since the
+#     release workflow is manual (workflow_dispatch) and does not run on push,
+#     so a merge would otherwise go unverified.
+#   - workflow_call — reusable, so the manual release pipeline requires this gate
+#     before building or publishing any binaries.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    # Windows is a first-class target and the tool is path/line-ending heavy, so
+    # exercise the suite on all three OSes. fail-fast is off so one platform's
+    # failure still lets the others report.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          # Build/test with a current, patched toolchain. Keep this pin AHEAD of
+          # go.mod's directive and do NOT switch to go-version-file: go.mod —
+          # install-compat with older toolchains rides on GOTOOLCHAIN=auto.
+          # Pinned to .12 for the GO-2026-5856 crypto/tls fix; the float '1.25'
+          # still resolves to .11 on hosted runners (manifest lag). Float back
+          # once runners catch up.
+          go-version: '1.25.12'
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      # The race detector needs a C toolchain + external linker, which the
+      # Windows runners don't provide out of the box, so run race+coverage on
+      # Linux/macOS and a plain (still cgo-free) test pass on Windows.
+      - name: test (race + coverage)
+        if: runner.os != 'Windows'
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: test (coverage, no race)
+        if: runner.os == 'Windows'
+        # Force bash so the coverprofile arg parses like Linux/macOS; the Windows
+        # runner's default PowerShell mangles `-coverprofile=coverage.out ./...`
+        # into a bogus `.out` package pattern.
+        shell: bash
+        run: go test -coverprofile=coverage.out ./...
+
+  lint:
+    name: lint & vulncheck
+    # gofmt and the static analyzers only need to run once; keep them on Linux
+    # (the Windows runner checks code out with CRLF endings, which gofmt -l would
+    # flag on every file).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25.12' # GO-2026-5856 crypto/tls fix; see the test job's note
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # Scan the module (and its dependencies) for known-vulnerable, *reachable*
+      # code paths. This is meant to fail the build — shipping binaries built on a
+      # flagged stdlib/dep is exactly what we're guarding against.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      # golangci-lint runs the conservative set configured in .golangci.yml.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8.0.0
+        with:
+          version: v2.12.2

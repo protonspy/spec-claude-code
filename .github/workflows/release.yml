@@ -1,0 +1,222 @@
+name: release
+
+# Manual, versioned release — the only way a new version ships.
+#
+# Trigger from the Actions tab ("Run workflow") or:
+#   gh workflow run release.yml --field version=v0.1.0
+#   (or: make release VERSION=v0.1.0)
+#
+# It runs the full pipeline for the given version: CI gate → cross-platform
+# binaries → publish every npm package (the launcher + 6 platform binaries, all
+# at the same version) → tag the commit + GitHub Release. Nothing is released on
+# push; releasing is always a deliberate manual action.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (vX.Y.Z)'
+        required: true
+        type: string
+
+# Least privilege at the workflow level: only the final "release" job needs to
+# write (create the tag + GitHub Release). validate/build/npm-publish keep the
+# read-only default and override to what they actually need.
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          case "$VERSION" in
+            v[0-9]*.[0-9]*.[0-9]*) echo "releasing $VERSION" ;;
+            *) echo "::error::version must look like vX.Y.Z (got '$VERSION')"; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0   # tags — needed to tell a retry from a re-release
+
+      # A version is immutable. Re-dispatching an already-released version from a
+      # NEW commit is the one failure this pipeline cannot report: npm-publish
+      # skips every package that is already on the registry, the tag stays put,
+      # and the whole run goes green having shipped nothing. Fail loudly instead.
+      #
+      # Re-dispatching the SAME commit is still allowed: that is the intended way
+      # to resume a run that died between npm-publish and the tag/Release step.
+      - name: Refuse to re-release an existing version from a different commit
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if ! git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "$VERSION is unreleased — proceeding"
+            exit 0
+          fi
+          tagged=$(git rev-list -n1 "refs/tags/$VERSION")
+          if [ "$tagged" != "$SHA" ]; then
+            echo "::error::$VERSION is already released and points at $tagged, but this run is on $SHA."
+            echo "::error::Publishing is idempotent, so re-running would ship nothing. Bump the version instead."
+            exit 1
+          fi
+          echo "$VERSION already tagged at this exact commit — resuming a partial release"
+
+  # Reuse the full CI gate (gofmt, vet, build, race tests, vulncheck) — no
+  # binaries are built or published unless this passes.
+  ci:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: ci
+    runs-on: ubuntu-latest
+    # Cross-compile only; no write access needed. Keep the read-only default
+    # (inherited from the workflow-level permissions above) explicit here.
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25.12' # see ci.yml's note before changing
+          cache: true
+
+      - name: Build & package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          bin=scc
+          [ "$GOOS" = "windows" ] && bin=scc.exe
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/protonspy/spec-claude-code/internal/cli.version=${VERSION}" \
+            -o "dist/${bin}" ./cmd/scc
+          name="scc_${VERSION}_${GOOS}_${GOARCH}"
+          cd dist
+          if [ "$GOOS" = "windows" ]; then
+            zip -q "${name}.zip" "${bin}"
+          else
+            tar -czf "${name}.tar.gz" "${bin}"
+          fi
+          rm -f "${bin}"
+
+      # Upload only what this run built, never `dist/*` — a stale tarball sitting
+      # in the checked-out dist/ would otherwise ride along into every Release.
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: scc-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/scc_${{ inputs.version }}_*
+          if-no-files-found: error
+          retention-days: 7
+
+  # Publish every npm package at the requested version. Authenticates with the
+  # NPM_TOKEN secret (must be an Automation token, which bypasses 2FA);
+  # id-token: write lets --provenance attach a signed build attestation.
+  npm-publish:
+    name: publish npm packages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for npm --provenance attestation
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing requires npm >= 11.5.1 (newer than what ships with
+      # Node). Pin the major line so the release toolchain is reproducible.
+      - name: Upgrade npm
+        run: npm install -g npm@11
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Assemble npm packages
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node npm/scripts/build-packages.mjs "$VERSION" artifacts
+
+      - name: Publish (platform packages first, then the launcher)
+        env:
+          # Automation token (bypasses 2FA). setup-node wrote an .npmrc that
+          # reads this. --provenance still attaches a signed attestation via the
+          # job's id-token: write permission.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Idempotent publish: skip any package@version already on the registry so
+          # re-running after a partial failure can finish instead of hard-failing on
+          # the first already-published package (mirrors the Makefile's npm-publish).
+          publish() {
+            local dir="$1"
+            local name ver
+            name=$(node -p "require('./$dir/package.json').name")
+            ver=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "skip $name@$ver (already published)"
+              return 0
+            fi
+            echo ">> publishing $name@$ver"
+            npm publish "$dir" --access public --provenance
+          }
+          # The platform packages must land before the launcher that depends on them.
+          for d in npm/dist/scc-*/; do
+            publish "${d%/}"
+          done
+          publish npm/dist/scc
+
+  # Tag the released commit and create the GitHub Release — only after npm
+  # publishing succeeds, so a failed publish never leaves a dangling tag/release.
+  release:
+    name: tag + GitHub release
+    needs: npm-publish
+    runs-on: ubuntu-latest
+    # This is the only job that mutates the repo (creates the tag + Release), so
+    # scope write access here instead of granting it workflow-wide.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum * | tee checksums.txt
+
+      - name: Create tag + release
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        with:
+          tag_name: ${{ inputs.version }}
+          name: ${{ inputs.version }}
+          target_commitish: ${{ github.sha }}
+          make_latest: 'true'
+          files: dist/*

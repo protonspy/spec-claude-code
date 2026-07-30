@@ -1,0 +1,3 @@
+# The assembled publish tree, built from release artifacts by
+# scripts/build-packages.mjs. Reproducible from a tag — never committed.
+dist/
