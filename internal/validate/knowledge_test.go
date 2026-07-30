@@ -401,8 +401,10 @@ func TestCodewikiCitationsCannotEscapeTheWorkspace(t *testing.T) {
 			dir := t.TempDir()
 			write(t, filepath.Join(dir, "..", "outside-the-workspace.txt"), "secret\nsecret\n")
 			defer os.Remove(filepath.Join(dir, "..", "outside-the-workspace.txt"))
+			// Past the end of the two-line fixture, so the out-of-range assertion
+			// below can actually distinguish a blocked citation from a read one.
 			write(t, filepath.Join(paths.Codewiki(dir), "app.md"),
-				"# App\n\n## Section\n\n["+target+":1-2]()\n")
+				"# App\n\n## Section\n\n["+target+":1-3]()\n")
 
 			got := runValidator(t, Codewiki, dir)
 			if !contains(got, "codewiki.citation-invalid") {
@@ -471,8 +473,11 @@ func TestCodewikiCitationsCannotEscapeThroughASymlink(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err) // unprivileged Windows
 	}
 
+	// The cited range runs past the end of the two-line fixture on purpose. Citing 1-2
+	// would sit inside the file, so out-of-range would stay silent whether or not the
+	// read happened and the second assertion below would prove nothing.
 	write(t, filepath.Join(paths.Codewiki(root), "app.md"),
-		"# App\n\n## Section\n\n[link.txt:1-2]()\n")
+		"# App\n\n## Section\n\n[link.txt:1-3]()\n")
 
 	got := runValidator(t, Codewiki, root)
 	if !contains(got, "codewiki.citation-invalid") {
