@@ -11,12 +11,17 @@ workflow into a mechanically validated contract for humans and AI agents.
 
 ## Use it
 
+No install — run it straight from npm inside the repo you want to govern:
+
 ```bash
-scc init                        # scaffold .claude/rules/, the review agents, the layout
-scc spec new user-auth          # specs/user-auth/: requirements.md, design.md, tasks.md
-scc plan new checkout-revamp    # plans/checkout-revamp.md
-scc validate                    # every check; exit 2 means it found something
+npx @protonspy/scc init                     # scaffold .claude/rules/, the review agents, the layout
+npx @protonspy/scc spec new user-auth       # specs/user-auth/: requirements.md, design.md, tasks.md
+npx @protonspy/scc plan new checkout-revamp # plans/checkout-revamp.md
+npx @protonspy/scc validate                 # every check; exit 2 means it found something
 ```
+
+Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc init`,
+`scc spec new user-auth`, and so on.
 
 | Command | What it does |
 |---|---|
@@ -38,8 +43,13 @@ accountability, and a checker that was confidently incomplete would be worse tha
 
 ## Install
 
+Published on npm as [`@protonspy/scc`](https://www.npmjs.com/package/@protonspy/scc) —
+the launcher pulls the right prebuilt binary for your platform as an optional dependency,
+so there is no toolchain to set up.
+
 ```bash
-npx @protonspy/scc help          # no install
+npx @protonspy/scc help          # no install; pins nothing, always the latest
+npx @protonspy/scc@0.0.1 help    # pin a version (CI)
 npm i -g @protonspy/scc          # then: scc help
 ```
 
