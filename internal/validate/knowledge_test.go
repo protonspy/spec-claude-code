@@ -456,3 +456,48 @@ func TestBaseNameDropsEveryMajorVersionSuffix(t *testing.T) {
 		}
 	}
 }
+
+// Lexical containment is not enough. A symlink inside the workspace pointing out of it
+// spells no "..", so a Clean-based check passes it through — and isFile and os.ReadFile
+// both follow it. The escape is silent in exactly the way the traversal case was.
+func TestCodewikiCitationsCannotEscapeThroughASymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	secret := filepath.Join(outside, "secret.txt")
+	write(t, secret, "secret\nsecret\n")
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err) // unprivileged Windows
+	}
+
+	write(t, filepath.Join(paths.Codewiki(root), "app.md"),
+		"# App\n\n## Section\n\n[link.txt:1-2]()\n")
+
+	got := runValidator(t, Codewiki, root)
+	if !contains(got, "codewiki.citation-invalid") {
+		t.Errorf("rules = %v, want codewiki.citation-invalid: the link left the workspace", got)
+	}
+	if contains(got, "codewiki.citation-out-of-range") {
+		t.Errorf("rules = %v: the outside file was read through the symlink", got)
+	}
+}
+
+// The counterpart, and the reason the root is resolved rather than compared raw: a
+// workspace that itself sits under a symlink still validates its own files. macOS does
+// this to every t.TempDir() by putting /var behind /private/var.
+func TestCodewikiValidatesAWorkspaceBehindASymlink(t *testing.T) {
+	real := t.TempDir()
+	write(t, filepath.Join(real, "main.go"), "one\ntwo\n")
+	write(t, filepath.Join(paths.Codewiki(real), "app.md"),
+		"# App\n\n## Section\n\n[main.go:1-2]()\n")
+
+	link := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if got := runValidator(t, Codewiki, link); len(got) != 0 {
+		t.Errorf("rules = %v, want none: a citation inside a symlinked workspace is not an escape", got)
+	}
+}

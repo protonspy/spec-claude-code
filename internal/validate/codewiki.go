@@ -137,17 +137,50 @@ func checkCitation(set *finding.Set, root, file string, line int, m []string) {
 // resolveInRoot joins target onto root and reports whether the result stayed inside it.
 // An absolute target is rejected outright; a relative one is rejected once Clean has
 // walked it above root.
+//
+// Lexical containment is necessary and not sufficient. Both isFile and os.ReadFile
+// follow symlinks, so a link that sits inside the workspace and points out of it walks
+// past a Clean-based check untouched — the path never spells "..", the kernel does the
+// escaping. The second check therefore compares the paths with every link already
+// resolved.
 func resolveInRoot(root, target string) (string, bool) {
 	t := filepath.FromSlash(target)
 	if filepath.IsAbs(t) || strings.HasPrefix(target, "/") {
 		return "", false
 	}
 	resolved := filepath.Join(root, t)
-	rel, err := filepath.Rel(root, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !within(root, resolved) {
+		return "", false
+	}
+
+	// The root is resolved too, not just the target: a workspace legitimately sits under
+	// a symlink (macOS puts /var behind /private/var), and comparing a fully resolved
+	// target against an unresolved root would call every citation in such a workspace an
+	// escape.
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", false
+	}
+	realResolved, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		// The target does not exist, so nothing was followed and nothing escaped. The
+		// lexical result stands and the caller reports it as unresolved, which is the
+		// more useful finding than calling a typo an escape.
+		return resolved, true
+	}
+	if !within(realRoot, realResolved) {
 		return "", false
 	}
 	return resolved, true
+}
+
+// within reports whether path is root or sits beneath it, comparing lexically.
+func within(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // checkCodewikiHeadings holds slugs to being unique and derived from their headings. A
