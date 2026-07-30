@@ -10,8 +10,9 @@ import (
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
 
-// runInit scaffolds a workspace: the rules, the review agents, the directory
-// layout, and the manifest that makes the directory findable as a workspace.
+// runInit scaffolds a workspace: the rules, the review agents, the knowledge-base
+// skills and their commands, the directory layout, and the manifest that makes the
+// directory findable as a workspace.
 //
 // It is safe to re-run. Without --force it never overwrites anything, so "run init
 // again" is the honest upgrade story until `scc update` exists — additive by

@@ -259,6 +259,79 @@ func TestAgentsCarryTheirFrontmatter(t *testing.T) {
 	}
 }
 
+// Every skill in KnowledgeSkills ships both a SKILL.md and a slash command, and
+// nothing else lands in either directory. The two are derived from one list so they
+// cannot drift, and this is the assertion that keeps the derivation honest.
+func TestEverySkillShipsWithItsCommand(t *testing.T) {
+	skills, commands := map[string]bool{}, map[string]bool{}
+	for _, f := range Workspace() {
+		switch {
+		case strings.HasPrefix(f.Rel, ".claude/skills/"):
+			name := strings.TrimSuffix(strings.TrimPrefix(f.Rel, ".claude/skills/"), "/SKILL.md")
+			skills[name] = true
+		case strings.HasPrefix(f.Rel, ".claude/commands/"):
+			name := strings.TrimSuffix(strings.TrimPrefix(f.Rel, ".claude/commands/"), ".md")
+			commands[name] = true
+		}
+	}
+	if len(skills) != len(KnowledgeSkills) || len(commands) != len(KnowledgeSkills) {
+		t.Fatalf("%d skills and %d commands, want %d of each", len(skills), len(commands), len(KnowledgeSkills))
+	}
+	for _, name := range KnowledgeSkills {
+		if !skills[name] {
+			t.Errorf("%s is in KnowledgeSkills and ships no SKILL.md", name)
+		}
+		if !commands[commandPrefix+name] {
+			t.Errorf("%s is in KnowledgeSkills and ships no %s%s command", name, commandPrefix, name)
+		}
+	}
+}
+
+// The Agent Skills contract is what `scc skill validate` enforces on everyone else,
+// and the two fields it can break loading on are checked here at the source. The
+// full conformance run happens against a scaffolded workspace in internal/cli — a
+// tool that ships non-conforming skills has no standing to check anyone else's.
+func TestSkillsCarryTheirFrontmatter(t *testing.T) {
+	for _, f := range Workspace() {
+		if !strings.HasPrefix(f.Rel, ".claude/skills/") {
+			continue
+		}
+		raw, err := Content(f.Name)
+		if err != nil {
+			t.Fatalf("%s: %v", f.Name, err)
+		}
+		if !strings.HasPrefix(raw, "---\n") {
+			t.Errorf("%s does not open with frontmatter", f.Rel)
+			continue
+		}
+		// The name must equal the parent directory or the skill does not load at
+		// all, in any tool that reads this format.
+		dir := strings.TrimSuffix(strings.TrimPrefix(f.Rel, ".claude/skills/"), "/SKILL.md")
+		if !strings.Contains(raw, "\nname: "+dir+"\n") {
+			t.Errorf("%s: frontmatter name does not match the directory %q", f.Rel, dir)
+		}
+		if !strings.Contains(raw, "\ndescription: ") {
+			t.Errorf("%s: no description in frontmatter", f.Rel)
+		}
+	}
+}
+
+// A slash command with no description is one that cannot be found in the picker.
+func TestCommandsCarryTheirDescription(t *testing.T) {
+	for _, f := range Workspace() {
+		if !strings.HasPrefix(f.Rel, ".claude/commands/") {
+			continue
+		}
+		raw, err := Content(f.Name)
+		if err != nil {
+			t.Fatalf("%s: %v", f.Name, err)
+		}
+		if !strings.HasPrefix(raw, "---\n") || !strings.Contains(raw, "\ndescription: ") {
+			t.Errorf("%s: a command needs frontmatter carrying a description", f.Rel)
+		}
+	}
+}
+
 // Directories init creates on its own must be inside the workspace and
 // slash-separated, for the same reason destinations must be.
 func TestDirsAreRelativeAndSlashed(t *testing.T) {

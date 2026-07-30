@@ -381,6 +381,40 @@ Don't cite it for a length rule.)
 import from `CLAUDE.md` too — a second file and an indirection to buy portability to tools
 this product isn't for. Anyone who wants cross-tool context can write it themselves.
 
+### Which skills ship — the authors of `docs/`
+
+Six, and the rule that picks them is mechanical: **a skill ships for each `docs/`
+artifact a validator checks, and for nothing else.**
+
+| Skill | Authors | Checked by |
+|---|---|---|
+| `wiki` | `docs/wiki/` — ingest from `docs/raw/`, query, repair | `wiki` |
+| `codewiki` | `docs/codewiki/` — narrated code, cited by line range | `codewiki` |
+| `glossary` | `docs/glossary.md` — canonical terms and banned synonyms | `glossary` |
+| `stack` | `docs/stack.md` — adopted technology, one line of why | `stack` |
+| `adr` | `docs/adr/` — hard-to-reverse decisions, superseded not edited | `adr` |
+| `prd` | `plans/<name>.md` — an initiative decomposed into specs | `plan` |
+
+Five of the six pair with a validator of the same name. `prd` is the exception and
+earns its place for the opposite reason: it is the **entry point** for work too large
+for one spec, the one place §1's routing question gets asked out loud, and without it
+the only on-ramp scc offers is `scc plan new` handing the user an empty template.
+
+**The methodology is deliberately not a skill.** The cycles, verification, and
+delivery are rules under `.claude/rules/` (§3, §7, §9) — read when the concern is
+live. csdd shipped `tdd-cycle`, `unit-cycle`, and `verify-change` as skills; here
+that would be a second copy of a rule, and the copy is the one that goes stale.
+
+**One slash command per skill, namespaced `scc-`.** A skill is model-invoked through
+its description; a command is the human saying *now*. Both are cheap, they are derived
+from one list so they cannot drift, and the prefix is not decoration — slash commands
+share a flat namespace across every source Claude Code loads them from, and a bare
+`/adr` collides on contact.
+
+The skills carry the *procedure and the judgment*; the format they produce stays in
+`.claude/rules/knowledge-base.md`, stated once. A skill that restated the format would
+be the same duplication the methodology rules are being kept out of skills to avoid.
+
 ## 7 · Agents — review only
 
 Two subagents ship with the workspace, and both of them read rather than write:

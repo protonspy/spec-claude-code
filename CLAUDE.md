@@ -12,7 +12,7 @@ This file covers working *on* scc. The product's own rules and methodology are n
 
 Note: this repo is not itself an scc workspace (no `.claude/`, `specs/`, or `docs/` are committed) — those trees only exist in workspaces the binary scaffolds, and in test temp dirs.
 
-**Status: v0.3.0-shaped.** Everything through `design/plan.md` phase 10 is built and green: scaffolding (`init`), artifact creation (`spec`, `plan`), and all eight validators behind `scc validate`. `scc update` (phase 11) is not started, deliberately — a three-way merge is untestable until a second template version exists, so until then the upgrade story is "re-run `init`; it never overwrites what you edited".
+**Status: v0.3.0-shaped.** Everything through `design/plan.md` phase 10 is built and green: scaffolding (`init`), artifact creation (`spec`, `plan`), and all eight validators behind `scc validate`. `init` also scaffolds the six knowledge-base skills named in `design/orchestration.md` §6 — one per `docs/` artifact a validator checks, plus `prd` — each with a `scc-`-prefixed slash command derived from the same list (`assets.KnowledgeSkills`). `scc update` (phase 11) is not started, deliberately — a three-way merge is untestable until a second template version exists, so until then the upgrade story is "re-run `init`; it never overwrites what you edited".
 
 `scc` is a redesign of `csdd` (`github.com/protonspy/csdd`), narrowed to spec-driven development and deliberately leaner. When reaching for something from there, port the *decision*, not the file. Already decided against: a TUI, an embedded web dashboard, an MCP server, a devcontainer.
 
@@ -68,7 +68,7 @@ cmd/scc/main.go         os.Exit(cli.Run(os.Args[1:]))
 | `internal/textutil` | Line-ending and BOM normalization, in exactly one place. |
 | `internal/finding` | One finding type and one frozen JSON shape (`{findings, count}`) for every validator, plus the grouped human report. |
 | `internal/manifest` | `.claude/scc-manifest.json`: `{path, hash, version}` per managed file, deterministic serialization, `Status → pristine\|edited\|missing`. Unknown fields are preserved. |
-| `internal/assets` | The embedded template set. **Workspace templates are data-free** (that is what makes a future three-way merge possible); **artifact templates take data** (`spec new` renders them and the user owns the result). |
+| `internal/assets` | The embedded template set — rules, review agents, skills, slash commands, artifact templates. **Workspace templates are data-free** (that is what makes a future three-way merge possible); **artifact templates take data** (`spec new` renders them and the user owns the result). `Version` is the template-set version and must be bumped whenever a workspace template changes. |
 | `internal/scaffold` | Applies the template set to a root. Idempotent, never overwrites, manifest written last. |
 | `internal/mdscan` | The only Markdown parser: fence- and HTML-comment-aware headings, checkboxes, links, wikilinks, slugs, plus a small frontmatter reader. `Body` is the comment/fence-stripped text every validator applies its grammar to. |
 | `internal/ears` | EARS requirement parsing, all five patterns plus complex. |
