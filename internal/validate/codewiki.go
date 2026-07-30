@@ -106,7 +106,17 @@ func checkCitation(set *finding.Set, root, file string, line int, m []string) {
 		return
 	}
 
-	resolved := filepath.Join(root, filepath.FromSlash(target))
+	// A citation names a path inside the checkout, and nothing else. Without this the
+	// target goes straight into filepath.Join, where a leading ../.. is cleaned into a
+	// real path outside root and then opened — a Markdown file in the workspace would
+	// be choosing what scc reads off the machine. Same rule as workspace.SafeName, at
+	// the one place a path arrives from a document rather than from argv.
+	resolved, ok := resolveInRoot(root, target)
+	if !ok {
+		set.Addf(file, line, "codewiki.citation-invalid",
+			"%s escapes the workspace; a citation names a path inside the checkout", target)
+		return
+	}
 	if !isFile(resolved) {
 		set.Addf(file, line, "codewiki.citation-unresolved", "%s does not exist", target)
 		return
@@ -122,6 +132,22 @@ func checkCitation(set *finding.Set, root, file string, line int, m []string) {
 			"%s:%d-%d, but the file has %d lines — the code moved and the citation did not",
 			target, start, end, lines)
 	}
+}
+
+// resolveInRoot joins target onto root and reports whether the result stayed inside it.
+// An absolute target is rejected outright; a relative one is rejected once Clean has
+// walked it above root.
+func resolveInRoot(root, target string) (string, bool) {
+	t := filepath.FromSlash(target)
+	if filepath.IsAbs(t) || strings.HasPrefix(target, "/") {
+		return "", false
+	}
+	resolved := filepath.Join(root, t)
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return resolved, true
 }
 
 // checkCodewikiHeadings holds slugs to being unique and derived from their headings. A

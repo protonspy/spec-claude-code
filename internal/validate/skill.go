@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/mdscan"
@@ -24,6 +25,12 @@ const (
 	skillCompatibilityMax = 500  // "Must be 1-500 characters if provided"
 	skillBodyMaxLines     = 500  // "Keep your main SKILL.md under 500 lines"
 )
+
+// The spec counts characters, so scc counts runes. len() on a string is bytes, which
+// agrees with the spec only for ASCII and reports a shorter budget than the standard
+// grants for anything else — an accented description would be failed at 1024 bytes
+// while still inside its 1024 characters.
+func charLen(s string) int { return utf8.RuneCountInString(s) }
 
 // skillNameRe is the name charset: lowercase alphanumerics and hyphens, no leading
 // or trailing hyphen, no consecutive hyphens.
@@ -95,9 +102,9 @@ func skill(set *finding.Set, root, dir, dirName string) error {
 	checkSkillName(set, file, fm, dirName)
 	checkSkillDescription(set, file, fm)
 
-	if v, ok := fm.Get("compatibility"); ok && len(v) > skillCompatibilityMax {
+	if v, ok := fm.Get("compatibility"); ok && charLen(v) > skillCompatibilityMax {
 		set.Addf(file, 1, "skill.compatibility-too-long",
-			"`compatibility` is %d characters; the spec allows %d", len(v), skillCompatibilityMax)
+			"`compatibility` is %d characters; the spec allows %d", charLen(v), skillCompatibilityMax)
 	}
 
 	// The body budget is a SHOULD in the spec, and it is reported as one: the agent
@@ -119,9 +126,9 @@ func checkSkillName(set *finding.Set, file string, fm mdscan.Frontmatter, dirNam
 		set.Addf(file, 1, "skill.missing-name", "`name` is required and must be 1-%d characters", skillNameMax)
 		return
 	}
-	if len(name) > skillNameMax {
+	if charLen(name) > skillNameMax {
 		set.Addf(file, 1, "skill.name-too-long",
-			"`name` is %d characters; the spec allows 1-%d", len(name), skillNameMax)
+			"`name` is %d characters; the spec allows 1-%d", charLen(name), skillNameMax)
 	}
 	if !skillNameRe.MatchString(name) {
 		set.Addf(file, 1, "skill.name-invalid",
@@ -142,9 +149,9 @@ func checkSkillDescription(set *finding.Set, file string, fm mdscan.Frontmatter)
 			"`description` is required: say what the skill does and when to use it")
 		return
 	}
-	if len(desc) > skillDescriptionMax {
+	if charLen(desc) > skillDescriptionMax {
 		set.Addf(file, 1, "skill.description-too-long",
-			"`description` is %d characters; the spec allows 1-%d", len(desc), skillDescriptionMax)
+			"`description` is %d characters; the spec allows 1-%d", charLen(desc), skillDescriptionMax)
 	}
 }
 
