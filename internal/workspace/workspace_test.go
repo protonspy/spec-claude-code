@@ -146,6 +146,32 @@ func TestFindRejectsMarkerThatIsADirectory(t *testing.T) {
 	}
 }
 
+// A symlink is not a marker. The marker's whole claim is "scc wrote this here",
+// and a link pointing at somebody else's manifest — the user's global one, say —
+// satisfies Stat while making that claim false.
+func TestFindRejectsASymlinkedMarker(t *testing.T) {
+	elsewhere := filepath.Join(t.TempDir(), "real-manifest.json")
+	if err := AtomicWrite(elsewhere, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("AtomicWrite: %v", err)
+	}
+	root := t.TempDir()
+	marker := paths.Claude.Manifest(root)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(elsewhere, marker); err != nil {
+		// Unprivileged Windows without developer mode cannot make one; the
+		// behavior under test is unreachable there rather than wrong.
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if IsWorkspace(root) {
+		t.Error("IsWorkspace = true for a symlinked marker, want false")
+	}
+	if len(Harnesses(root)) != 0 {
+		t.Error("a symlinked marker was reported as an initialized harness")
+	}
+}
+
 // The nearest marker wins, so a workspace nested inside another resolves to
 // itself rather than to its parent.
 func TestFindStopsAtNearestMarker(t *testing.T) {

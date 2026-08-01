@@ -76,8 +76,10 @@ func AtomicWrite(path string, data []byte, perm os.FileMode) error {
 }
 
 // Find walks upward from start looking for a workspace marker and returns the
-// directory holding it, or start unchanged when there is none. Any harness's
-// marker answers: a workspace is a workspace whichever tool it was scaffolded
+// directory holding it. With no marker anywhere above it, the answer is start
+// made absolute — every caller joins paths onto this, so returning a relative
+// path would make the result depend on a working directory that may have moved
+// by then. Any harness's marker answers: a workspace is a workspace whichever tool it was scaffolded
 // for, and specs/, plans/, and docs/ sit at that root regardless.
 //
 // The marker is the file <harness>/scc-manifest.json, never the harness
@@ -107,10 +109,13 @@ func Find(start string) string {
 	}
 }
 
-// isFile reports whether path exists and is a regular file. A directory that
-// happens to carry the manifest's name is not a marker.
+// isFile reports whether path is itself a regular file. A directory that happens
+// to carry the manifest's name is not a marker — and neither is a symlink, which
+// is why this is Lstat and not Stat: the marker's whole claim is "scc wrote this
+// here", and a link pointing at somebody else's manifest (the user's global one,
+// say) satisfies Stat while making that claim false.
 func isFile(path string) bool {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	return err == nil && info.Mode().IsRegular()
 }
 

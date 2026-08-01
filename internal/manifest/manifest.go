@@ -138,8 +138,31 @@ func Load(root string, h paths.Harness) (m *Manifest, found bool, err error) {
 	if err := json.Unmarshal([]byte(textutil.NormalizeNewlines(string(b))), m); err != nil {
 		return nil, true, fmt.Errorf("%s is not valid scc manifest JSON: %w", h.Manifest(root), err)
 	}
+	// Every recorded path is joined onto the root by somebody — and `scc update`
+	// joins it and then calls os.Remove. A manifest is a committed file that
+	// arrives with a clone, so an entry reading "../../.ssh/authorized_keys" is
+	// exactly the hostile input this project's rule about SafeName exists for.
+	// Refuse the whole file rather than skipping the bad entry: a manifest scc did
+	// not write is not a manifest, and silently dropping part of it would leave a
+	// workspace whose state nobody can account for.
+	for _, e := range m.Files {
+		if !isLocalPath(e.Path) {
+			return nil, true, fmt.Errorf("%s records the path %q, which escapes the workspace — refusing to use it",
+				h.Manifest(root), e.Path)
+		}
+	}
 	m.sortFiles()
 	return m, true, nil
+}
+
+// isLocalPath reports whether a recorded path stays inside the workspace when
+// joined onto the root: relative, no "..", no root, and — on Windows — not a
+// reserved device name.
+func isLocalPath(rel string) bool {
+	if rel == "" || strings.ContainsRune(rel, '\\') {
+		return false
+	}
+	return filepath.IsLocal(filepath.FromSlash(rel))
 }
 
 // Save writes h's manifest under root atomically, so a concurrent reader — or a

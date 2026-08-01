@@ -110,6 +110,13 @@ func runUpdate(args []string) int {
 	}
 
 	if !*yes {
+		// --json has no way to ask: the prompt and the "nothing was written" line
+		// both go to stdout, which is the document the caller is piping into jq.
+		// Refuse the combination rather than emitting something that is not JSON.
+		if *jsonOut {
+			render.Err("--json cannot ask: pass --yes to apply, or --dry-run to see the plan")
+			return ExitError
+		}
 		if !interactive() {
 			render.Err("stdin is not a terminal: re-run with --yes to apply, or --dry-run to see the plan")
 			return ExitError

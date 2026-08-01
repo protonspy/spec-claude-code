@@ -164,6 +164,31 @@ func TestUpdateAsksBeforeWritingAndHonorsNo(t *testing.T) {
 	}
 }
 
+// --json has no way to ask: the prompt goes to stdout, which is the document the
+// caller is piping into jq. The combination is refused rather than answered with
+// something that is not JSON.
+func TestUpdateJSONWithoutYesIsRefused(t *testing.T) {
+	withPrompt(t, "y\n")
+	root := initWorkspace(t)
+	rel := ".claude/rules/specs.md"
+	if err := os.Remove(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	stdout, stderr, code := run(t, "update", "--root", root, "--json")
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d", code, ExitError)
+	}
+	if strings.TrimSpace(stdout) != "" {
+		t.Errorf("stdout is not empty: %q", stdout)
+	}
+	if !strings.Contains(stderr, "--yes") || !strings.Contains(stderr, "--dry-run") {
+		t.Errorf("stderr = %q, want it to name both ways out", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+		t.Error("the refused run still wrote the file")
+	}
+}
+
 func TestUpdateJSONDryRunEmitsThePlan(t *testing.T) {
 	root := initWorkspace(t)
 	stdout, stderr, code := run(t, "update", "--root", root, "--dry-run", "--json")

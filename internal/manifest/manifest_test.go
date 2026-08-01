@@ -251,6 +251,41 @@ func TestHarnessRoundTripsAndIsPerHarness(t *testing.T) {
 	}
 }
 
+// A manifest arrives with a clone, and `scc update` joins its recorded paths onto
+// the root and then calls os.Remove. An entry that escapes the workspace is the
+// hostile input this project's SafeName rule exists for, so Load refuses the file
+// rather than acting on it.
+func TestLoadRefusesAPathThatEscapesTheWorkspace(t *testing.T) {
+	for _, bad := range []string{
+		"../outside.md",
+		".claude/../../outside.md",
+		"/etc/passwd",
+		`..\outside.md`,
+		"",
+	} {
+		root := t.TempDir()
+		doc := `{"scc":"v1","harness":"claude","files":[{"path":"` + bad + `","hash":"x","version":"5"}]}`
+		if err := workspace.AtomicWrite(paths.Claude.Manifest(root), []byte(doc), 0o644); err != nil {
+			t.Fatalf("AtomicWrite: %v", err)
+		}
+		if _, _, err := Load(root, paths.Claude); err == nil {
+			t.Errorf("Load accepted the entry %q", bad)
+		}
+	}
+}
+
+func TestLoadAcceptsOrdinaryPaths(t *testing.T) {
+	root := t.TempDir()
+	doc := `{"scc":"v1","harness":"claude","files":[{"path":".claude/rules/routing.md","hash":"x","version":"5"}]}`
+	if err := workspace.AtomicWrite(paths.Claude.Manifest(root), []byte(doc), 0o644); err != nil {
+		t.Fatalf("AtomicWrite: %v", err)
+	}
+	m, found, err := Load(root, paths.Claude)
+	if err != nil || !found || len(m.Files) != 1 {
+		t.Fatalf("Load = (%+v, %v, %v)", m, found, err)
+	}
+}
+
 // Save writes what Bytes reports, so a caller can compare against the file on
 // disk and skip an identical write — which is what makes a second `scc init` a
 // no-op rather than a rewrite.
