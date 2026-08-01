@@ -1,23 +1,25 @@
 # scc
 
-Spec-driven development for Claude Code — a single Go binary that turns the SDD
-workflow into a mechanically validated contract for humans and AI agents.
+Spec-driven development for Claude Code, Codex, and opencode — a single Go binary
+that turns the SDD workflow into a mechanically validated contract for humans and
+AI agents.
 
-> **Status: pre-1.0.** Scaffolding, artifact creation, and validation all work.
-> `scc update` — bringing an existing workspace onto improved templates through a
-> three-way merge — is not built yet; until it is, re-running `scc init` is the
-> upgrade path. It is additive and never overwrites a file you edited, so it is safe,
-> but it also will not deliver improved templates to files that already exist.
+> **Status: pre-1.0.** Scaffolding, artifact creation, validation, and updating all
+> work. `scc update` currently replaces what is safe to replace and *keeps* anything
+> you edited, naming it; the three-way merge that would resolve those in place is
+> still ahead.
 
 ## Use it
 
 No install — run it straight from npm inside the repo you want to govern:
 
 ```bash
-npx @protonspy/scc init                     # scaffold .claude/rules/, the review agents, the layout
+npx @protonspy/scc init                     # asks which harness, then scaffolds the rules, agents, and layout
+npx @protonspy/scc init --codex             # or name it: --claude (default), --codex, --opencode
 npx @protonspy/scc spec new user-auth       # specs/user-auth/: requirements.md, design.md, tasks.md
 npx @protonspy/scc plan new checkout-revamp # plans/checkout-revamp.md
 npx @protonspy/scc validate                 # every check; exit 2 means it found something
+npx @protonspy/scc update                   # show what a newer scc would change, then confirm
 ```
 
 Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc init`,
@@ -26,10 +28,30 @@ Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc i
 | Command | What it does |
 |---|---|
 | `init` | Scaffolds the workspace and records what it wrote. Idempotent; never overwrites your edits. |
+| `update` | Compares every managed file against this build, shows the plan, and applies it once you agree. |
 | `spec new\|list\|show\|delete\|validate` | The three-artifact vehicle for work whose *what* and *how* need settling first. |
 | `plan new\|list\|delete\|validate` | One file, for everything else: a checklist, a decomposition into specs, or both. |
 | `skill validate` | Conformance to the published [Agent Skills](https://agentskills.io/specification) spec. |
 | `validate` | Every applicable validator, one exit code, one JSON document. |
+
+### Three harnesses, one methodology
+
+The same rules, review agents, and knowledge-base skills are scaffolded into
+whichever tool you work in — only the paths and the frontmatter dialect change.
+
+| | Claude Code | Codex | opencode |
+|---|---|---|---|
+| entry file | `CLAUDE.md` | `AGENTS.md` | `AGENTS.md` |
+| rules | `.claude/rules/` | `.codex/rules/` | `.opencode/rules/` |
+| review agents | `.claude/agents/*.md` | `.codex/agents/*.toml` | `.opencode/agent/*.md` |
+| skills | `.claude/skills/` | `.codex/skills/` | `.opencode/skills/` |
+| slash commands | `.claude/commands/` | — (skills are the surface) | `.opencode/command/` |
+
+`specs/`, `plans/`, and `docs/` are identical everywhere: they are the product, not
+the tool. Running `init` twice with different flags gives one repo two managed trees,
+and `update` keeps both current.
+
+## What it checks
 
 What gets checked: EARS grammar across all five patterns, requirement numbering,
 one methodology annotation per task, traceability in both directions, plan
@@ -74,10 +96,11 @@ exactly as well as a human does.
 | `1` | usage or runtime error |
 | `2` | the command ran and reported validation findings |
 
-The artifacts it governs are plain Markdown and JSON in your repo — `.claude/`,
-`specs/`, `docs/`. No server, no database, no conversion layer: the files *are* the
-API, and they are the ones Claude Code already reads. `scc` adds no directory of its
-own and no config file — it owns a single manifest inside `.claude/`.
+The artifacts it governs are plain Markdown and JSON in your repo — the harness's own
+directory, `specs/`, `docs/`. No server, no database, no conversion layer: the files
+*are* the API, and they are the ones your harness already reads. `scc` adds no
+directory of its own and no config file — it owns a single manifest inside the
+harness's directory, which doubles as the workspace marker.
 
 ## Development
 
