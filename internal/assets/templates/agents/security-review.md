@@ -87,7 +87,7 @@ every class below is not evidence of safety.
 
 End with this, and nothing after it:
 
-```
+```text
 ## Verdict
 <blocked | changes-requested | clean> — one sentence saying why.
 

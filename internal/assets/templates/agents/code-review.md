@@ -83,7 +83,7 @@ line, but do not try to be that reviewer.
 
 End with this, and nothing after it:
 
-```
+```text
 ## Verdict
 <blocked | changes-requested | clean> — one sentence saying why.
 

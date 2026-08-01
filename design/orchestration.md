@@ -12,7 +12,7 @@ several of them are evidence-backed rather than preferences.
 
 Same philosophy as csdd: **scc is a template plus a CLI.** The binary scaffolds a
 workspace — rules, skills, agents, spec templates — into the harness's own
-configuration directory plus `specs/` and `docs/`, all of it plain Markdown compiled
+configuration directory plus `specs/`, `plans/`, and `docs/`, all of it plain Markdown compiled
 into the binary via `//go:embed`, and then validates what lives there. There is no
 conversion layer and no runtime: the files the harness already reads *are* the API,
 and the CLI is how they are created, checked, and upgraded.
@@ -411,11 +411,18 @@ and now deprecated in favor of skills, so there is nothing project-scoped to wri
 and scc does not write into anyone's home directory. The six skills are the whole
 surface there, which is what Codex itself recommends.
 
-**No entry file is shared across harness *layouts*.** Codex and opencode both read
-`AGENTS.md`, so a repo initialized for both has one entry file, written by whichever
-ran first and never overwritten — it points at that harness's rules, which are the
-same bytes as the other's. That is a rough edge, not a bug: the alternative is
-inventing a neutral rules directory neither tool knows, to save one duplicated tree.
+**Codex and opencode share `AGENTS.md`, and the first one initialized wins it.** A
+repo scaffolded for both has one entry file, written by whichever ran first and never
+overwritten afterwards, pointing at that harness's rules directory. The second
+harness's session follows those links and gets the right methodology: eight of the
+nine rules are byte-identical between the two, and the ninth differs only in a
+glossary *example* naming a manifest path. So the second tree is a duplicate nothing
+links to — a wart, not a broken workspace, and the design is choosing it over the
+alternatives: inventing a neutral rules directory neither tool knows about, or
+rewriting a file the user owns.
+
+`scc update` keeps both trees current regardless, because it works from each
+harness's own manifest rather than from the entry file.
 
 ### Which skills ship — the authors of `docs/`
 

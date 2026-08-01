@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `scc` is a single Go binary (`github.com/protonspy/spec-claude-code`) that enforces Spec-Driven Development inside an agent-driven repo — Claude Code, Codex, or opencode. One surface: a headless CLI, so an AI agent or a CI job drives it exactly as well as a human does.
 
-The artifacts it governs (the harness's own directory, `specs/`, `docs/`) are plain Markdown/JSON. There is no server and no database — the files *are* the API. scc has no directory of its own: its state lives in one file under the harness's directory, alongside what that tool already keeps there.
+The artifacts it governs (the harness's own directory, `specs/`, `plans/`, `docs/`) are plain Markdown/JSON. There is no server and no database — the files *are* the API. scc has no directory of its own: its state lives in one file under the harness's directory, alongside what that tool already keeps there.
 
 This file covers working *on* scc. The product's own rules and methodology are not documented here: they live in `design/` while being designed, and ship as templates the binary scaffolds into `<harness>/rules/`.
 
-Note: this repo is not itself an scc workspace (no harness directory, `specs/`, or `docs/` are committed) — those trees only exist in workspaces the binary scaffolds, and in test temp dirs.
+Note: this repo is not itself an scc workspace (no harness directory, `specs/`, `plans/`, or `docs/` are committed) — those trees only exist in workspaces the binary scaffolds, and in test temp dirs.
 
 **Status: v0.4.0-shaped.** Everything through `design/plan.md` phase 10 is built and green: scaffolding (`init`), artifact creation (`spec`, `plan`), and all eight validators behind `scc validate`. `init` also scaffolds the six knowledge-base skills named in `design/orchestration.md` §6 — one per `docs/` artifact a validator checks, plus `prd` — each with a `scc-`-prefixed slash command derived from the same list (`assets.KnowledgeSkills`), wherever the harness has a command surface.
 
