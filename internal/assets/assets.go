@@ -42,7 +42,8 @@ import (
 // of touching every managed file to record a number nobody read.
 //
 // 2: the knowledge-base skills and their commands.
-const Version = "2"
+// 3: CLAUDE.md documents the npx fallback for running scc uninstalled.
+const Version = "3"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
