@@ -58,6 +58,8 @@ func Run(args []string) int {
 		return runVersion(args[1:])
 	case "init":
 		return runInit(args[1:])
+	case "update":
+		return runUpdate(args[1:])
 	case "spec":
 		return runSpec(args[1:])
 	case "plan":
@@ -94,13 +96,14 @@ func runVersion(args []string) int {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `%s — spec-driven development for Claude Code
+	fmt.Fprintf(os.Stderr, `%s — spec-driven development for Claude Code, Codex, and opencode
 
 Usage:
   %s <command> [flags]
 
 Commands:
   init      Scaffold a workspace: rules, agents, skills, commands, layout, manifest
+  update    Bring the managed files onto this build's templates, after showing the plan
   spec      Create and inspect specs — new | list | show | delete | validate
   plan      Create and inspect plans — new | list | delete | validate
   skill     Agent Skills conformance — validate
