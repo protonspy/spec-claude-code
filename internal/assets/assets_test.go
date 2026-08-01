@@ -3,6 +3,8 @@ package assets
 import (
 	"strings"
 	"testing"
+
+	"github.com/protonspy/spec-claude-code/internal/paths"
 )
 
 // Every embedded template is checked for the properties a manifest hash depends
@@ -39,12 +41,12 @@ func TestEveryTemplateIsLFCleanAndNonEmpty(t *testing.T) {
 // still delivered as LF. Assert on the raw bytes to prove the guarantee is in the
 // code and not in the checkout.
 func TestContentIsNormalized(t *testing.T) {
-	raw, err := Content("CLAUDE.md")
+	raw, err := Content("entry.md")
 	if err != nil {
 		t.Fatalf("Content: %v", err)
 	}
 	if strings.Contains(raw, "\r") {
-		t.Error("CLAUDE.md carries CR after Content()")
+		t.Error("entry.md carries CR after Content()")
 	}
 }
 
@@ -55,8 +57,8 @@ func TestContentRejectsUnknownTemplate(t *testing.T) {
 }
 
 // The workspace set and the embedded tree must agree in both directions: a File
-// pointing at nothing breaks init, and an embedded file no File points at ships in
-// the binary and reaches no workspace.
+// pointing at nothing breaks init, and an embedded file no harness's File points
+// at ships in the binary and reaches no workspace.
 func TestWorkspaceSetAndTreeAgree(t *testing.T) {
 	embedded, err := walk()
 	if err != nil {
@@ -68,18 +70,20 @@ func TestWorkspaceSetAndTreeAgree(t *testing.T) {
 	}
 
 	referenced := map[string]bool{}
-	for _, f := range Workspace() {
-		if _, err := Content(f.Name); err != nil {
-			t.Errorf("Workspace() references %q which is not embedded", f.Name)
+	for _, h := range paths.Harnesses() {
+		for _, f := range Workspace(h) {
+			if _, err := Content(f.Name); err != nil {
+				t.Errorf("Workspace(%s) references %q which is not embedded", h.ID, f.Name)
+			}
+			referenced[f.Name] = true
 		}
-		referenced[f.Name] = true
 	}
 	for _, name := range []string{"requirements.md", "design.md", "tasks.md", "plan.md"} {
 		referenced["artifacts/"+name] = true
 	}
 	for name := range inTree {
 		if !referenced[name] {
-			t.Errorf("embedded template %q is not in Workspace() and is not an artifact template", name)
+			t.Errorf("embedded template %q is in no harness's Workspace() and is not an artifact template", name)
 		}
 	}
 }
@@ -87,17 +91,36 @@ func TestWorkspaceSetAndTreeAgree(t *testing.T) {
 // Destinations must be unique and slash-separated: they are written verbatim into
 // the manifest, and two Files claiming one path means one silently wins.
 func TestWorkspaceDestinationsAreUniqueAndSlashed(t *testing.T) {
-	seen := map[string]bool{}
-	for _, f := range Workspace() {
-		if seen[f.Rel] {
-			t.Errorf("duplicate destination %q", f.Rel)
+	for _, h := range paths.Harnesses() {
+		seen := map[string]bool{}
+		for _, f := range Workspace(h) {
+			if seen[f.Rel] {
+				t.Errorf("%s: duplicate destination %q", h.ID, f.Rel)
+			}
+			seen[f.Rel] = true
+			if strings.Contains(f.Rel, `\`) {
+				t.Errorf("%s: destination %q is not slash-separated", h.ID, f.Rel)
+			}
+			if strings.HasPrefix(f.Rel, "/") || strings.Contains(f.Rel, "..") {
+				t.Errorf("%s: destination %q escapes the workspace root", h.ID, f.Rel)
+			}
 		}
-		seen[f.Rel] = true
-		if strings.Contains(f.Rel, `\`) {
-			t.Errorf("destination %q is not slash-separated", f.Rel)
-		}
-		if strings.HasPrefix(f.Rel, "/") || strings.Contains(f.Rel, "..") {
-			t.Errorf("destination %q escapes the workspace root", f.Rel)
+	}
+}
+
+// Every managed file lands inside the harness it was scaffolded for, except the
+// entry file the harness itself loads from the project root. A file written into
+// another harness's directory would be invisible to its own tools and would be
+// clobbered by that harness's own init.
+func TestWorkspaceStaysInsideItsHarness(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		for _, f := range Workspace(h) {
+			if f.Rel == h.EntryFile {
+				continue
+			}
+			if !strings.HasPrefix(f.Rel, h.Dir+"/") {
+				t.Errorf("%s: %q is outside %s/", h.ID, f.Rel, h.Dir)
+			}
 		}
 	}
 }
@@ -105,76 +128,397 @@ func TestWorkspaceDestinationsAreUniqueAndSlashed(t *testing.T) {
 // The set is sorted by destination so init's report and the manifest are in the
 // same order on every run and on every platform.
 func TestWorkspaceIsSortedByDestination(t *testing.T) {
-	set := Workspace()
-	for i := 1; i < len(set); i++ {
-		if set[i-1].Rel >= set[i].Rel {
-			t.Fatalf("not sorted: %q before %q", set[i-1].Rel, set[i].Rel)
+	for _, h := range paths.Harnesses() {
+		set := Workspace(h)
+		for i := 1; i < len(set); i++ {
+			if set[i-1].Rel >= set[i].Rel {
+				t.Fatalf("%s: not sorted: %q before %q", h.ID, set[i-1].Rel, set[i].Rel)
+			}
 		}
 	}
 }
 
-// The upgrade path depends on this: a data-free template renders identically in
-// every workspace, so its hash identifies its content globally. A template with a
-// placeholder in it could not be reconstructed from the manifest alone.
-func TestWorkspaceTemplatesAreDataFree(t *testing.T) {
-	for _, f := range Workspace() {
-		raw, err := Content(f.Name)
-		if err != nil {
-			t.Fatalf("%s: %v", f.Name, err)
-		}
-		if i := strings.Index(raw, "{{"); i >= 0 {
-			t.Errorf("%s contains a template action at byte %d — workspace templates must be data-free", f.Name, i)
+// The upgrade path depends on this: a template's only variable is the harness
+// profile, which the manifest records, so re-rendering the recorded version
+// reconstructs the merge base exactly. A leftover action or a "<no value>" means
+// something reached for data that is not the layout, and that data would not be
+// reconstructible from anything scc stores.
+func TestRenderLeavesNoActionsAndNoMissingKeys(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		for _, f := range Workspace(h) {
+			out, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, f.Name, err)
+			}
+			if strings.Contains(out, "{{") || strings.Contains(out, "<no value>") {
+				t.Errorf("%s %s: unrendered action or missing key", h.ID, f.Rel)
+			}
+			if strings.Contains(out, "\r") {
+				t.Errorf("%s %s: rendered with CR", h.ID, f.Rel)
+			}
+			// "<harness>" is shorthand this project's own docs use for "whichever
+			// of the three". It is prose for a human reading about scc, and it
+			// means nothing to an agent reading a scaffolded rule — a template
+			// carrying it wanted {{.Dir}} and would ship a path that resolves to
+			// nowhere.
+			if strings.Contains(out, "<harness>") {
+				t.Errorf("%s %s: carries the literal <harness>; use the layout fields", h.ID, f.Rel)
+			}
 		}
 	}
 }
 
-// Exactly the two files whose purpose is to be edited are Owned. If a third
-// appears, it is either a mistake or a decision that belongs in the design.
+// Same inputs, same bytes — the property the manifest hash is built on.
+func TestRenderIsDeterministic(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		for _, f := range Workspace(h) {
+			first, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, f.Name, err)
+			}
+			second, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, f.Name, err)
+			}
+			if first != second {
+				t.Errorf("%s %s: two renders differ", h.ID, f.Rel)
+			}
+		}
+	}
+}
+
+// No rendered file may name a harness directory other than its own. This is the
+// guard against the failure this refactor exists to prevent: a rule that still
+// says ".claude/rules/project.md" reads correctly to a Claude Code session and
+// sends a Codex session to a path that is not there.
+func TestNoRenderedFileNamesAnotherHarnessDirectory(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		for _, f := range Workspace(h) {
+			out, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, f.Name, err)
+			}
+			for _, other := range paths.Harnesses() {
+				if other.Dir == h.Dir {
+					continue
+				}
+				if strings.Contains(out, other.Dir+"/") {
+					t.Errorf("%s %s mentions %s/", h.ID, f.Rel, other.Dir)
+				}
+			}
+		}
+	}
+}
+
+// Exactly the two files whose purpose is to be edited are Owned, in every
+// harness. If a third appears, it is either a mistake or a decision that belongs
+// in the design.
 func TestOnlyTheUserOwnedFilesAreOwned(t *testing.T) {
-	var owned []string
-	for _, f := range Workspace() {
-		if f.Owned {
-			owned = append(owned, f.Rel)
+	for _, h := range paths.Harnesses() {
+		var owned []string
+		for _, f := range Workspace(h) {
+			if f.Owned {
+				owned = append(owned, f.Rel)
+			}
 		}
-	}
-	want := []string{".claude/rules/project.md", "CLAUDE.md"}
-	if strings.Join(owned, ",") != strings.Join(want, ",") {
-		t.Errorf("owned files = %v, want %v", owned, want)
+		want := []string{h.Dir + "/" + h.RulesSeg + "/project.md", h.EntryFile}
+		if h.EntryFile < want[0] {
+			want = []string{h.EntryFile, h.Dir + "/" + h.RulesSeg + "/project.md"}
+		}
+		if strings.Join(owned, ",") != strings.Join(want, ",") {
+			t.Errorf("%s: owned files = %v, want %v", h.ID, owned, want)
+		}
 	}
 }
 
-// CLAUDE.md is paid for in context by every session, and accuracy degrades as
+// The entry file is paid for in context by every session, and accuracy degrades as
 // context grows. The rules exist so it can stay short; this is the guard that keeps
 // someone from "helpfully" inlining them back into it.
 func TestScaffoldedEntryFileStaysShort(t *testing.T) {
-	raw, err := Content("CLAUDE.md")
-	if err != nil {
-		t.Fatalf("Content: %v", err)
-	}
-	if n := strings.Count(raw, "\n"); n > 60 {
-		t.Errorf("scaffolded CLAUDE.md is %d lines; keep it under 60 and link to .claude/rules/ instead", n)
+	for _, h := range paths.Harnesses() {
+		raw, err := Render(h, entryFile(t, h))
+		if err != nil {
+			t.Fatalf("%s: %v", h.ID, err)
+		}
+		if n := strings.Count(raw, "\n"); n > 60 {
+			t.Errorf("%s: scaffolded %s is %d lines; keep it under 60 and link to the rules instead",
+				h.ID, h.EntryFile, n)
+		}
 	}
 }
 
-// Every rule the scaffolded CLAUDE.md points at has to exist, or the entry file
-// sends the agent to a file that isn't there.
+// Every rule the scaffolded entry file points at has to exist under this
+// harness's own rules directory, or the entry file sends the agent to a file that
+// isn't there.
 func TestEntryFileLinksResolve(t *testing.T) {
-	raw, err := Content("CLAUDE.md")
-	if err != nil {
-		t.Fatalf("Content: %v", err)
+	for _, h := range paths.Harnesses() {
+		raw, err := Render(h, entryFile(t, h))
+		if err != nil {
+			t.Fatalf("%s: %v", h.ID, err)
+		}
+		for _, f := range Workspace(h) {
+			if !strings.HasPrefix(f.Rel, h.Dir+"/"+h.RulesSeg+"/") {
+				continue
+			}
+			if !strings.Contains(raw, "("+f.Rel+")") {
+				t.Errorf("%s: %s does not link to %s", h.ID, h.EntryFile, f.Rel)
+			}
+		}
 	}
-	dests := map[string]bool{}
-	for _, f := range Workspace() {
-		dests[f.Rel] = true
+}
+
+func entryFile(t *testing.T, h paths.Harness) File {
+	t.Helper()
+	for _, f := range Workspace(h) {
+		if f.Rel == h.EntryFile {
+			return f
+		}
 	}
-	for _, f := range Workspace() {
-		if !strings.HasPrefix(f.Rel, ".claude/rules/") {
+	t.Fatalf("%s: no entry file in the workspace set", h.ID)
+	return File{}
+}
+
+// The review agents are read by each harness's own loader, and every one of them
+// refuses a definition whose header it cannot parse. Assert the dialect per
+// harness, at the source.
+func TestReviewAgentsCarryTheHeaderTheirHarnessParses(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		for _, name := range ReviewAgents {
+			f := findFile(t, h, h.Dir+"/"+h.AgentsSeg+"/"+name+h.AgentExt())
+			out, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, name, err)
+			}
+			switch h.AgentFormat {
+			case paths.FormatTOML:
+				for _, want := range []string{
+					"name = \"" + name + "\"\n",
+					"description = \"",
+					"model_reasoning_effort = \"high\"\n",
+					"developer_instructions = '''\n",
+				} {
+					if !strings.Contains(out, want) {
+						t.Errorf("%s %s: missing %q", h.ID, name, want)
+					}
+				}
+				if !strings.HasSuffix(out, "'''\n") {
+					t.Errorf("%s %s: developer_instructions is not closed", h.ID, name)
+				}
+			default:
+				if !strings.HasPrefix(out, "---\n") {
+					t.Errorf("%s %s: does not open with frontmatter", h.ID, name)
+				}
+				if !strings.Contains(out, "\ndescription: ") {
+					t.Errorf("%s %s: no description", h.ID, name)
+				}
+			}
+		}
+	}
+}
+
+// The reasoning budget is pinned wherever the harness expresses one, because
+// review is chains-of-inference work and that is what effort buys. The model tier
+// is pinned only where the harness has a stable alias for one: a hardcoded
+// provider-prefixed model would name something the user may not have configured.
+func TestReviewAgentsPinTheirEffort(t *testing.T) {
+	want := map[string][]string{
+		paths.Claude.ID:   {"\nmodel: sonnet\n", "\neffort: high\n"},
+		paths.Codex.ID:    {"model_reasoning_effort = \"high\"\n"},
+		paths.OpenCode.ID: {"\nmode: subagent\n", "\n  edit: deny\n"},
+	}
+	for _, h := range paths.Harnesses() {
+		for _, name := range ReviewAgents {
+			f := findFile(t, h, h.Dir+"/"+h.AgentsSeg+"/"+name+h.AgentExt())
+			out, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, name, err)
+			}
+			for _, w := range want[h.ID] {
+				if !strings.Contains(out, w) {
+					t.Errorf("%s %s: missing %q", h.ID, name, strings.TrimSpace(w))
+				}
+			}
+		}
+	}
+}
+
+// The Codex header is TOML, so the reviewer's prose has to survive being embedded
+// in it. A literal string ends at the first ”' and escapes nothing, so the two
+// things that could corrupt the file are a ”' in the body and a quote or
+// backslash in the description.
+func TestAgentProseIsSafeToEmbedInTOML(t *testing.T) {
+	for _, name := range ReviewAgents {
+		raw, err := Content("agents/" + name + ".md")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		m, err := splitMeta(name, raw)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if strings.Contains(m.body, "'''") {
+			t.Errorf("%s: the body contains ''' and would end the TOML literal string early", name)
+		}
+		if strings.ContainsAny(m.description, "\"\\") {
+			t.Errorf("%s: the description contains a quote or backslash", name)
+		}
+		// A YAML scalar carrying ": " is a mapping, not a string, in the two
+		// harnesses that read this description as frontmatter.
+		if strings.Contains(m.description, ": ") {
+			t.Errorf("%s: the description contains \": \" and would parse as a YAML mapping", name)
+		}
+	}
+}
+
+// Every skill in KnowledgeSkills ships a SKILL.md in every harness, and its slash
+// command wherever the harness has a command surface. The two are derived from one
+// list so they cannot drift, and this is the assertion that keeps the derivation
+// honest — including for Codex, where the answer is deliberately no commands at
+// all.
+func TestEverySkillShipsWithItsCommand(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		skills, commands := map[string]bool{}, map[string]bool{}
+		for _, f := range Workspace(h) {
+			switch {
+			case strings.HasPrefix(f.Rel, h.Dir+"/"+h.SkillsSeg+"/"):
+				name := strings.TrimSuffix(strings.TrimPrefix(f.Rel, h.Dir+"/"+h.SkillsSeg+"/"), "/SKILL.md")
+				skills[name] = true
+			case h.CommandsSeg != "" && strings.HasPrefix(f.Rel, h.Dir+"/"+h.CommandsSeg+"/"):
+				name := strings.TrimSuffix(strings.TrimPrefix(f.Rel, h.Dir+"/"+h.CommandsSeg+"/"), ".md")
+				commands[name] = true
+			}
+		}
+		if len(skills) != len(KnowledgeSkills) {
+			t.Fatalf("%s: %d skills, want %d", h.ID, len(skills), len(KnowledgeSkills))
+		}
+		wantCommands := len(KnowledgeSkills)
+		if h.CommandsSeg == "" {
+			wantCommands = 0
+		}
+		if len(commands) != wantCommands {
+			t.Fatalf("%s: %d commands, want %d", h.ID, len(commands), wantCommands)
+		}
+		for _, name := range KnowledgeSkills {
+			if !skills[name] {
+				t.Errorf("%s: %s is in KnowledgeSkills and ships no SKILL.md", h.ID, name)
+			}
+			if wantCommands > 0 && !commands[commandPrefix+name] {
+				t.Errorf("%s: %s ships no %s%s command", h.ID, name, commandPrefix, name)
+			}
+		}
+	}
+}
+
+// The Agent Skills contract is what `scc skill validate` enforces on everyone else,
+// and the two fields it can break loading on are checked here at the source. The
+// full conformance run happens against a scaffolded workspace in internal/cli — a
+// tool that ships non-conforming skills has no standing to check anyone else's.
+func TestSkillsCarryTheirFrontmatter(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		for _, f := range Workspace(h) {
+			if !strings.HasSuffix(f.Rel, "/SKILL.md") {
+				continue
+			}
+			raw, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, f.Rel, err)
+			}
+			if !strings.HasPrefix(raw, "---\n") {
+				t.Errorf("%s: %s does not open with frontmatter", h.ID, f.Rel)
+				continue
+			}
+			// The name must equal the parent directory or the skill does not load at
+			// all, in any tool that reads this format.
+			dir := path2(f.Rel)
+			if !strings.Contains(raw, "\nname: "+dir+"\n") {
+				t.Errorf("%s: %s frontmatter name does not match the directory %q", h.ID, f.Rel, dir)
+			}
+			if !strings.Contains(raw, "\ndescription: ") {
+				t.Errorf("%s: %s has no description", h.ID, f.Rel)
+			}
+		}
+	}
+}
+
+// path2 returns the directory name a SKILL.md sits in.
+func path2(rel string) string {
+	parts := strings.Split(strings.TrimSuffix(rel, "/SKILL.md"), "/")
+	return parts[len(parts)-1]
+}
+
+// A slash command with no description is one that cannot be found in the picker.
+// Claude Code additionally documents argument-hint; opencode's schema does not
+// define it, so it must not be written there.
+func TestCommandsCarryTheirDescription(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		if h.CommandsSeg == "" {
 			continue
 		}
-		if !strings.Contains(raw, "("+f.Rel+")") {
-			t.Errorf("CLAUDE.md does not link to %s", f.Rel)
+		for _, f := range Workspace(h) {
+			if f.Kind != Command {
+				continue
+			}
+			raw, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, f.Rel, err)
+			}
+			if !strings.HasPrefix(raw, "---\n") || !strings.Contains(raw, "\ndescription: ") {
+				t.Errorf("%s: %s needs frontmatter carrying a description", h.ID, f.Rel)
+			}
+			if h.ID != paths.Claude.ID && strings.Contains(raw, "argument-hint:") {
+				t.Errorf("%s: %s carries argument-hint, which this harness does not define", h.ID, f.Rel)
+			}
 		}
 	}
+}
+
+// Directories init creates on its own must be inside the workspace and
+// slash-separated, for the same reason destinations must be.
+func TestDirsAreRelativeAndSlashed(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		for _, d := range Dirs(h) {
+			if strings.HasPrefix(d, "/") || strings.Contains(d, "..") || strings.Contains(d, `\`) {
+				t.Errorf("%s: directory %q is not a slash-separated path inside the workspace", h.ID, d)
+			}
+		}
+	}
+}
+
+// Every file the set writes has a directory init created, or the write is left
+// depending on AtomicWrite's MkdirAll to cover for a layout the package was
+// supposed to declare.
+func TestDirsCoverEveryDestination(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		dirs := map[string]bool{}
+		for _, d := range Dirs(h) {
+			dirs[d] = true
+		}
+		for _, f := range Workspace(h) {
+			parent := f.Rel[:strings.LastIndex(f.Rel, "/")+1]
+			if parent == "" { // the entry file, at the root
+				continue
+			}
+			parent = strings.TrimSuffix(parent, "/")
+			// A skill lives one level deeper than the directory init creates.
+			if strings.HasSuffix(f.Rel, "/SKILL.md") {
+				parent = parent[:strings.LastIndex(parent, "/")]
+			}
+			if !dirs[parent] {
+				t.Errorf("%s: %s lands in %q, which Dirs() does not create", h.ID, f.Rel, parent)
+			}
+		}
+	}
+}
+
+func findFile(t *testing.T, h paths.Harness, rel string) File {
+	t.Helper()
+	for _, f := range Workspace(h) {
+		if f.Rel == rel {
+			return f
+		}
+	}
+	t.Fatalf("%s: no file at %s", h.ID, rel)
+	return File{}
 }
 
 func TestArtifactRendersItsData(t *testing.T) {
@@ -234,110 +578,16 @@ func TestTitle(t *testing.T) {
 	}
 }
 
-// The review agents are read by Claude Code's subagent loader, which needs the
-// frontmatter contract: a name matching the file and a description saying when to
-// use it.
-func TestAgentsCarryTheirFrontmatter(t *testing.T) {
-	for _, f := range Workspace() {
-		if !strings.HasPrefix(f.Rel, ".claude/agents/") {
-			continue
-		}
-		raw, err := Content(f.Name)
-		if err != nil {
-			t.Fatalf("%s: %v", f.Name, err)
-		}
-		if !strings.HasPrefix(raw, "---\n") {
-			t.Errorf("%s does not open with frontmatter", f.Rel)
-		}
-		base := strings.TrimSuffix(strings.TrimPrefix(f.Rel, ".claude/agents/"), ".md")
-		if !strings.Contains(raw, "\nname: "+base+"\n") {
-			t.Errorf("%s: frontmatter name does not match the filename", f.Rel)
-		}
-		if !strings.Contains(raw, "\ndescription: ") {
-			t.Errorf("%s: no description in frontmatter", f.Rel)
-		}
+func TestSplitMetaRejectsAMalformedHeader(t *testing.T) {
+	cases := map[string]string{
+		"no header":      "# just prose\n",
+		"unterminated":   "---\nname: x\ndescription: y\n",
+		"not key-value":  "---\nname: x\ndescription: y\nnonsense\n---\n\nbody\n",
+		"no description": "---\nname: x\n---\n\nbody\n",
 	}
-}
-
-// Every skill in KnowledgeSkills ships both a SKILL.md and a slash command, and
-// nothing else lands in either directory. The two are derived from one list so they
-// cannot drift, and this is the assertion that keeps the derivation honest.
-func TestEverySkillShipsWithItsCommand(t *testing.T) {
-	skills, commands := map[string]bool{}, map[string]bool{}
-	for _, f := range Workspace() {
-		switch {
-		case strings.HasPrefix(f.Rel, ".claude/skills/"):
-			name := strings.TrimSuffix(strings.TrimPrefix(f.Rel, ".claude/skills/"), "/SKILL.md")
-			skills[name] = true
-		case strings.HasPrefix(f.Rel, ".claude/commands/"):
-			name := strings.TrimSuffix(strings.TrimPrefix(f.Rel, ".claude/commands/"), ".md")
-			commands[name] = true
-		}
-	}
-	if len(skills) != len(KnowledgeSkills) || len(commands) != len(KnowledgeSkills) {
-		t.Fatalf("%d skills and %d commands, want %d of each", len(skills), len(commands), len(KnowledgeSkills))
-	}
-	for _, name := range KnowledgeSkills {
-		if !skills[name] {
-			t.Errorf("%s is in KnowledgeSkills and ships no SKILL.md", name)
-		}
-		if !commands[commandPrefix+name] {
-			t.Errorf("%s is in KnowledgeSkills and ships no %s%s command", name, commandPrefix, name)
-		}
-	}
-}
-
-// The Agent Skills contract is what `scc skill validate` enforces on everyone else,
-// and the two fields it can break loading on are checked here at the source. The
-// full conformance run happens against a scaffolded workspace in internal/cli — a
-// tool that ships non-conforming skills has no standing to check anyone else's.
-func TestSkillsCarryTheirFrontmatter(t *testing.T) {
-	for _, f := range Workspace() {
-		if !strings.HasPrefix(f.Rel, ".claude/skills/") {
-			continue
-		}
-		raw, err := Content(f.Name)
-		if err != nil {
-			t.Fatalf("%s: %v", f.Name, err)
-		}
-		if !strings.HasPrefix(raw, "---\n") {
-			t.Errorf("%s does not open with frontmatter", f.Rel)
-			continue
-		}
-		// The name must equal the parent directory or the skill does not load at
-		// all, in any tool that reads this format.
-		dir := strings.TrimSuffix(strings.TrimPrefix(f.Rel, ".claude/skills/"), "/SKILL.md")
-		if !strings.Contains(raw, "\nname: "+dir+"\n") {
-			t.Errorf("%s: frontmatter name does not match the directory %q", f.Rel, dir)
-		}
-		if !strings.Contains(raw, "\ndescription: ") {
-			t.Errorf("%s: no description in frontmatter", f.Rel)
-		}
-	}
-}
-
-// A slash command with no description is one that cannot be found in the picker.
-func TestCommandsCarryTheirDescription(t *testing.T) {
-	for _, f := range Workspace() {
-		if !strings.HasPrefix(f.Rel, ".claude/commands/") {
-			continue
-		}
-		raw, err := Content(f.Name)
-		if err != nil {
-			t.Fatalf("%s: %v", f.Name, err)
-		}
-		if !strings.HasPrefix(raw, "---\n") || !strings.Contains(raw, "\ndescription: ") {
-			t.Errorf("%s: a command needs frontmatter carrying a description", f.Rel)
-		}
-	}
-}
-
-// Directories init creates on its own must be inside the workspace and
-// slash-separated, for the same reason destinations must be.
-func TestDirsAreRelativeAndSlashed(t *testing.T) {
-	for _, d := range Dirs() {
-		if strings.HasPrefix(d, "/") || strings.Contains(d, "..") || strings.Contains(d, `\`) {
-			t.Errorf("directory %q is not a slash-separated path inside the workspace", d)
+	for label, raw := range cases {
+		if _, err := splitMeta(label, raw); err == nil {
+			t.Errorf("%s: splitMeta accepted it", label)
 		}
 	}
 }

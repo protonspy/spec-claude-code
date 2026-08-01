@@ -5,19 +5,29 @@
 // There are two kinds of template here and the difference matters:
 //
 //   - **Workspace files** — what `scc init` writes and the manifest tracks. These
-//     are DATA-FREE: no project name, no date, no path is interpolated into any of
-//     them. That is what makes an upgrade possible without storing rendered text
-//     anywhere. A given template version renders byte-identically in every
-//     workspace on earth, so its content hash identifies it globally and the
-//     three-way merge can reconstruct the old side from the version alone. The two
-//     files that genuinely want per-project content — CLAUDE.md and the project
-//     rule — are exactly the files an upgrade excludes because the user owns them,
-//     so the two rules agree instead of fighting.
+//     are DATA-FREE except for the harness: no project name, no date, no path
+//     from the machine is interpolated into any of them, and the only value a
+//     template can reach is the profile in internal/paths that says where this
+//     harness keeps its files. That is what makes an upgrade possible without
+//     storing rendered text anywhere. A given (template version, harness) pair
+//     renders byte-identically in every workspace on earth, so its content hash
+//     identifies it globally and the three-way merge can reconstruct the old side
+//     from the version and the harness alone — both of which the manifest
+//     records. The two files that genuinely want per-project content — the entry
+//     file and the project rule — are exactly the files an upgrade excludes
+//     because the user owns them, so the two rules agree instead of fighting.
 //
 //   - **Artifact templates** — what `spec new` and `plan new` render. These take
 //     data, because they are authored from birth: the user owns the result
 //     immediately, nothing tracks them in the manifest, and no upgrade ever touches
 //     them.
+//
+// One prose source, three harnesses. The methodology does not change with the
+// tool reading it, so the rules, the skills, and the review agents are written
+// once and re-addressed per harness: paths come from the profile, and the
+// frontmatter each loader parses is synthesized at render time. Shipping a copy
+// of the template set per harness would guarantee they drift, and the drift would
+// be silent.
 package assets
 
 import (
@@ -43,7 +53,10 @@ import (
 //
 // 2: the knowledge-base skills and their commands.
 // 3: CLAUDE.md documents the npx fallback for running scc uninstalled.
-const Version = "3"
+// 4: the review agents pin a model and effort, run gates instead of reading, and
+// report in a fixed shape the orchestrator can act on.
+// 5: one template set for three harnesses — Claude Code, Codex, opencode.
+const Version = "5"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -56,9 +69,25 @@ const (
 	artifactsDir = "artifacts"
 )
 
+// Kind says how a template becomes a file in a workspace.
+type Kind string
+
+const (
+	// Plain is copied through after path expansion: rules, skills, the entry file.
+	Plain Kind = "plain"
+	// Agent is a subagent definition. Its template carries harness-neutral
+	// frontmatter (a name and a description) and the reviewer's prose; the
+	// header the harness's loader actually parses is synthesized per harness,
+	// because the three disagree on both the dialect and the keys.
+	Agent Kind = "agent"
+	// Command is a slash command, on the same terms as Agent: shared body,
+	// per-harness frontmatter.
+	Command Kind = "command"
+)
+
 // File is one workspace file scc scaffolds and then tracks.
 type File struct {
-	// Name is the path inside the embedded tree, e.g. "claude/rules/routing.md".
+	// Name is the path inside the embedded tree, e.g. "rules/routing.md".
 	Name string
 
 	// Rel is where it goes: slash-separated and relative to the workspace root.
@@ -66,23 +95,27 @@ type File struct {
 	// machines as slashes and never as the host's separator.
 	Rel string
 
+	// Kind selects the rendering.
+	Kind Kind
+
 	// Owned marks a file the user owns from their first edit. scc writes it once
 	// and records it, then leaves it alone: an upgrade reports that a new version
-	// exists rather than merging into it. CLAUDE.md and the project rule are the
-	// two files whose whole purpose is to be edited, and merging a new template
-	// into someone's own prose produces a mess no one asked for.
+	// exists rather than merging into it. The entry file and the project rule are
+	// the two files whose whole purpose is to be edited, and merging a new
+	// template into someone's own prose produces a mess no one asked for.
 	Owned bool
 }
 
-// Workspace returns every file `scc init` writes, sorted by destination so init's
-// output and the manifest are in the same order on every run.
-func Workspace() []File {
-	claude := func(seg ...string) string {
-		return path.Join(append([]string{paths.ClaudeDir}, seg...)...)
+// Workspace returns every file `scc init` writes for a harness, sorted by
+// destination so init's output and the manifest are in the same order on every
+// run.
+func Workspace(h paths.Harness) []File {
+	under := func(seg ...string) string {
+		return path.Join(append([]string{h.Dir}, seg...)...)
 	}
 	set := []File{
-		{Name: "CLAUDE.md", Rel: paths.EntryFile, Owned: true},
-		{Name: "claude/rules/project.md", Rel: claude(paths.RulesSeg, "project.md"), Owned: true},
+		{Name: "entry.md", Rel: h.EntryFile, Kind: Plain, Owned: true},
+		{Name: "rules/project.md", Rel: under(h.RulesSeg, "project.md"), Kind: Plain, Owned: true},
 	}
 	// The methodology. Every one of these is scc's own content: an upgrade should
 	// deliver improvements to them, so none is Owned.
@@ -97,14 +130,16 @@ func Workspace() []File {
 		"knowledge-base.md",
 	} {
 		set = append(set, File{
-			Name: "claude/rules/" + rule,
-			Rel:  claude(paths.RulesSeg, rule),
+			Name: "rules/" + rule,
+			Rel:  under(h.RulesSeg, rule),
+			Kind: Plain,
 		})
 	}
-	for _, agent := range []string{"code-review.md", "security-review.md"} {
+	for _, agent := range ReviewAgents {
 		set = append(set, File{
-			Name: "claude/agents/" + agent,
-			Rel:  claude(paths.AgentsSeg, agent),
+			Name: "agents/" + agent + ".md",
+			Rel:  under(h.AgentsSeg, agent+h.AgentExt()),
+			Kind: Agent,
 		})
 	}
 	// The knowledge base's authors. Every one of these produces an artifact
@@ -113,30 +148,45 @@ func Workspace() []File {
 	// nobody was told how to write.
 	for _, skill := range KnowledgeSkills {
 		set = append(set, File{
-			Name: "claude/skills/" + skill + "/SKILL.md",
-			Rel:  claude(paths.SkillsSeg, skill, "SKILL.md"),
+			Name: "skills/" + skill + "/SKILL.md",
+			Rel:  under(h.SkillsSeg, skill, "SKILL.md"),
+			Kind: Plain,
 		})
 		// One command per skill, so the human has an explicit entry point where the
 		// model has a description. Namespaced, because slash commands share a flat
-		// namespace with every other source Claude Code loads them from and `/adr`
+		// namespace with every other source the harness loads them from and `/adr`
 		// would collide on contact.
+		//
+		// Codex is the exception and gets none: its custom prompts live in the
+		// user's home directory and are deprecated in favor of skills, so there is
+		// nothing project-scoped to write. The skills above are the whole surface
+		// there, which is what Codex itself now recommends.
+		if h.CommandsSeg == "" {
+			continue
+		}
 		cmd := commandPrefix + skill + ".md"
 		set = append(set, File{
-			Name: "claude/commands/" + cmd,
-			Rel:  claude(paths.CommandsSeg, cmd),
+			Name: "commands/" + cmd,
+			Rel:  under(h.CommandsSeg, cmd),
+			Kind: Command,
 		})
 	}
 	sort.Slice(set, func(i, j int) bool { return set[i].Rel < set[j].Rel })
 	return set
 }
 
+// ReviewAgents names the two subagents scc ships. Both read and neither writes:
+// review is where a cold context is worth paying for, and authorship is not.
+var ReviewAgents = []string{"code-review", "security-review"}
+
 // KnowledgeSkills names the skills scc ships, each one the author of a `docs/`
 // artifact a validator checks. Both the skill directory and its slash command are
 // derived from this list, so the two cannot drift apart.
 //
 // The methodology is deliberately absent from it: the cycles, verification, and
-// delivery are rules under `.claude/rules/`, read when the concern is live. A skill
-// restating a rule is a second copy of one fact, and the copy goes stale.
+// delivery are rules under the harness's rules directory, read when the concern
+// is live. A skill restating a rule is a second copy of one fact, and the copy
+// goes stale.
 var KnowledgeSkills = []string{"adr", "codewiki", "glossary", "prd", "stack", "wiki"}
 
 // commandPrefix namespaces the scaffolded slash commands.
@@ -145,19 +195,23 @@ const commandPrefix = "scc-"
 // Dirs returns the directories `scc init` creates even when it has no file to put
 // in them. An agent that can see specs/, plans/, and docs/wiki/ knows where its
 // output goes; one that has to infer the layout from a rule file guesses.
-func Dirs() []string {
-	return []string{
-		path.Join(paths.ClaudeDir, paths.RulesSeg),
-		path.Join(paths.ClaudeDir, paths.AgentsSeg),
-		path.Join(paths.ClaudeDir, paths.SkillsSeg),
-		path.Join(paths.ClaudeDir, paths.CommandsSeg),
+func Dirs(h paths.Harness) []string {
+	dirs := []string{
+		path.Join(h.Dir, h.RulesSeg),
+		path.Join(h.Dir, h.AgentsSeg),
+		path.Join(h.Dir, h.SkillsSeg),
+	}
+	if h.CommandsSeg != "" {
+		dirs = append(dirs, path.Join(h.Dir, h.CommandsSeg))
+	}
+	return append(dirs,
 		paths.SpecsSeg,
 		paths.PlansSeg,
 		path.Join(paths.DocsSeg, paths.WikiSeg),
 		path.Join(paths.DocsSeg, paths.RawSeg),
 		path.Join(paths.DocsSeg, paths.ADRSeg),
 		path.Join(paths.DocsSeg, paths.CodewikiSeg),
-	}
+	)
 }
 
 // Content returns an embedded template verbatim, normalized to LF.
@@ -171,6 +225,193 @@ func Content(name string) (string, error) {
 		return "", fmt.Errorf("no embedded template %q: %w", name, err)
 	}
 	return textutil.NormalizeNewlines(string(b)), nil
+}
+
+// layout is what a workspace template can address: where this harness keeps
+// things, and nothing else. Every field is derived from the profile, so a
+// template cannot come to depend on the machine, the project, or the clock.
+type layout struct {
+	Harness     string
+	Dir         string
+	Entry       string
+	Rules       string
+	Skills      string
+	Agents      string
+	Commands    string
+	HasCommands bool
+	Manifest    string
+}
+
+func layoutOf(h paths.Harness) layout {
+	l := layout{
+		Harness:  h.ID,
+		Dir:      h.Dir,
+		Entry:    h.EntryFile,
+		Rules:    path.Join(h.Dir, h.RulesSeg),
+		Skills:   path.Join(h.Dir, h.SkillsSeg),
+		Agents:   path.Join(h.Dir, h.AgentsSeg),
+		Manifest: path.Join(h.Dir, paths.ManifestSeg),
+	}
+	if h.CommandsSeg != "" {
+		l.Commands = path.Join(h.Dir, h.CommandsSeg)
+		l.HasCommands = true
+	}
+	return l
+}
+
+// Render produces the exact bytes f takes in a workspace scaffolded for h: paths
+// expanded, and for an agent or a command, the frontmatter that harness's loader
+// parses.
+func Render(h paths.Harness, f File) (string, error) {
+	raw, err := Content(f.Name)
+	if err != nil {
+		return "", err
+	}
+	expanded, err := expand(f.Name, raw, layoutOf(h))
+	if err != nil {
+		return "", err
+	}
+	switch f.Kind {
+	case Agent:
+		return renderAgent(h, f, expanded)
+	case Command:
+		return renderCommand(h, expanded)
+	default:
+		return expanded, nil
+	}
+}
+
+// expand runs a workspace template through text/template with the layout as its
+// only data. missingkey=error turns a typo'd field into a test failure rather
+// than the string "<no value>" landing in somebody's rules.
+func expand(name, raw string, l layout) (string, error) {
+	tpl, err := template.New(name).Option("missingkey=error").Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("template %q: %w", name, err)
+	}
+	var buf bytes.Buffer
+	if err := tpl.Execute(&buf, l); err != nil {
+		return "", fmt.Errorf("template %q: %w", name, err)
+	}
+	return textutil.NormalizeNewlines(buf.String()), nil
+}
+
+// meta is the harness-neutral header a shared template carries: what this thing
+// is called and when to use it. Everything else in a real header is dialect.
+type meta struct {
+	name        string
+	description string
+	extra       map[string]string // keys only some harnesses understand
+	body        string
+}
+
+// splitMeta reads the leading `---` block as flat `key: value` pairs. This is not
+// a YAML parser and does not need to be: scc writes these templates, the tests
+// assert the shape, and a template that grows a nested value here would be
+// telling us it wants to be per-harness data instead.
+func splitMeta(name, raw string) (meta, error) {
+	const fence = "---\n"
+	if !strings.HasPrefix(raw, fence) {
+		return meta{}, fmt.Errorf("template %q: expected a leading --- block", name)
+	}
+	rest := raw[len(fence):]
+	end := strings.Index(rest, "\n"+fence)
+	if end < 0 {
+		return meta{}, fmt.Errorf("template %q: unterminated --- block", name)
+	}
+	m := meta{extra: map[string]string{}, body: strings.TrimLeft(rest[end+len("\n"+fence):], "\n")}
+	for _, line := range strings.Split(rest[:end], "\n") {
+		key, value, ok := strings.Cut(line, ": ")
+		if !ok {
+			return meta{}, fmt.Errorf("template %q: %q is not a `key: value` line", name, line)
+		}
+		switch key {
+		case "name":
+			m.name = value
+		case "description":
+			m.description = value
+		default:
+			m.extra[key] = value
+		}
+	}
+	if m.description == "" {
+		return meta{}, fmt.Errorf("template %q: no description", name)
+	}
+	return m, nil
+}
+
+// The reasoning budget both reviewers run on. Review is chains-of-inference work
+// — tracing a value from an argument to a shell, or a ticked box to the code
+// behind it — and that is what effort buys. Every harness that expresses it gets
+// it; the model tier is pinned only where the harness has a stable alias for one
+// (Claude Code's "sonnet"), because a pinned `gpt-5.6` or `anthropic/claude-x`
+// would be a guess about a name that churns and a provider the user may not have
+// configured.
+const reviewEffort = "high"
+
+func renderAgent(h paths.Harness, f File, raw string) (string, error) {
+	m, err := splitMeta(f.Name, raw)
+	if err != nil {
+		return "", err
+	}
+	if m.name == "" {
+		return "", fmt.Errorf("template %q: an agent needs a name", f.Name)
+	}
+	switch h.ID {
+	case paths.Codex.ID:
+		// A Codex agent role file: flat TOML, the prose in developer_instructions.
+		// A literal string ('''), so no character in the reviewer's prose needs
+		// escaping and none is silently mangled — the tests hold the body to that.
+		var b strings.Builder
+		fmt.Fprintf(&b, "name = %q\n", m.name)
+		fmt.Fprintf(&b, "description = %q\n", m.description)
+		fmt.Fprintf(&b, "model_reasoning_effort = %q\n", reviewEffort)
+		fmt.Fprintf(&b, "developer_instructions = '''\n%s'''\n", m.body)
+		return b.String(), nil
+	case paths.OpenCode.ID:
+		// opencode takes the agent's name from the filename, so the header carries
+		// only what it cannot infer. `edit: deny` is the "you do not write code,
+		// you report it" rule made mechanical; bash stays allowed because the
+		// reviewer has to run this project's tests and lint itself.
+		var b strings.Builder
+		b.WriteString("---\n")
+		fmt.Fprintf(&b, "description: %s\n", m.description)
+		b.WriteString("mode: subagent\n")
+		b.WriteString("temperature: 0.1\n")
+		b.WriteString("permission:\n  edit: deny\n")
+		b.WriteString("---\n\n")
+		b.WriteString(m.body)
+		return b.String(), nil
+	default:
+		var b strings.Builder
+		b.WriteString("---\n")
+		fmt.Fprintf(&b, "name: %s\n", m.name)
+		fmt.Fprintf(&b, "description: %s\n", m.description)
+		b.WriteString("tools: Read, Grep, Glob, Bash\n")
+		b.WriteString("model: sonnet\n")
+		fmt.Fprintf(&b, "effort: %s\n", reviewEffort)
+		b.WriteString("---\n\n")
+		b.WriteString(m.body)
+		return b.String(), nil
+	}
+}
+
+func renderCommand(h paths.Harness, raw string) (string, error) {
+	m, err := splitMeta("command", raw)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "description: %s\n", m.description)
+	// argument-hint is Claude Code's; opencode's command schema does not define it
+	// and there is no value in feeding a loader a key it will only ignore.
+	if hint, ok := m.extra["argument-hint"]; ok && h.ID == paths.Claude.ID {
+		fmt.Fprintf(&b, "argument-hint: %s\n", hint)
+	}
+	b.WriteString("---\n\n")
+	b.WriteString(m.body)
+	return b.String(), nil
 }
 
 // ArtifactData is what an artifact template can interpolate. Deliberately tiny:

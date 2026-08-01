@@ -2,23 +2,153 @@
 // directory and file name the CLI reads or writes is defined here so the layout
 // lives in exactly one place — never hardcode ".claude" or "specs" elsewhere.
 //
-// The layout is Claude Code-native: no conversion layer, no parallel config
-// format, and no directory of its own. Everything scc keeps lives under
-// .claude/ — Claude Code's own configuration directory — alongside the agents,
-// skills, and commands Claude Code already reads from there.
+// The layout is harness-native: no conversion layer, no parallel config format,
+// and no directory of scc's own. Everything scc keeps for a harness lives under
+// that harness's own configuration directory — .claude/, .codex/, .opencode/ —
+// alongside the agents, skills, and commands the harness already reads from
+// there. See Harness.
 //
-// Every segment the product governs is defined here now: Claude Code's own
-// directories, scc's manifest, the rules directory the scaffolded CLAUDE.md
-// points at, the two work trees (specs/, plans/), and the knowledge base under
-// docs/.
+// The work trees are the opposite: specs/, plans/, and docs/ are the same in
+// every workspace, because they are the product, not the tool. Nothing about a
+// requirement or a wiki page changes with the agent reading it, and a repo that
+// swapped harnesses would otherwise have to move its own knowledge base.
 package paths
 
-import "path/filepath"
+import (
+	"fmt"
+	"path/filepath"
+	"sort"
+	"strings"
+)
 
 // ClaudeDir is Claude Code's own configuration directory at the project root.
 // scc writes into it — agents, skills, commands, hooks, and its own two files —
 // but it does not own it.
 const ClaudeDir = ".claude"
+
+// The other harnesses' configuration directories, on the same terms.
+const (
+	CodexDir    = ".codex"
+	OpenCodeDir = ".opencode"
+)
+
+// Harness is one agent harness's on-disk conventions — the whole of what scc has
+// to know to scaffold into it.
+//
+// It exists because the methodology is not Claude Code's. The rules, the review
+// agents, and the knowledge-base skills are Markdown that says how to work; what
+// differs between harnesses is only where each file goes, what the entry file is
+// called, and what dialect of frontmatter the loader parses. Encoding that as
+// data — rather than as a second copy of the template set per harness — is what
+// keeps one prose source honest across all three.
+type Harness struct {
+	// ID is the name on the command line and in the manifest: "claude",
+	// "codex", "opencode".
+	ID string
+
+	// Label is the tool's own name, for anything a person reads. The IDs are
+	// flags and JSON; "Claude Code" is what the user actually installed.
+	Label string
+
+	// Dir is the harness's configuration directory at the project root.
+	Dir string
+
+	// EntryFile is the instruction file the harness loads on its own, at the
+	// project root. Claude Code reads CLAUDE.md; Codex and opencode both read
+	// AGENTS.md, which is the same idea under the name the wider ecosystem
+	// standardized on.
+	EntryFile string
+
+	// AgentsSeg is where subagent definitions go under Dir. opencode's loader
+	// accepts agent/ and agents/ both; Claude Code and Codex each accept one.
+	AgentsSeg string
+
+	// AgentFormat is the dialect a subagent definition is written in:
+	// FormatMarkdown for the YAML-frontmatter files Claude Code and opencode
+	// read, FormatTOML for Codex's agent role files.
+	AgentFormat Format
+
+	// SkillsSeg is where SKILL.md directories go under Dir. All three harnesses
+	// implement the same Agent Skills format, which is why `scc validate` can
+	// check skills without knowing which harness wrote them.
+	SkillsSeg string
+
+	// CommandsSeg is where slash commands go under Dir, or "" when the harness
+	// has no project-level command surface. Codex is the "" case: its custom
+	// prompts are user-global and deprecated in favor of skills, so scc ships
+	// the skills alone there rather than writing into the user's home directory.
+	CommandsSeg string
+
+	// RulesSeg is where the methodology goes under Dir. No harness loads it on
+	// its own — the entry file's table is what sends the agent to a rule when
+	// the concern is live — so this is scc's choice in all three, kept parallel
+	// so one layout is learned once.
+	RulesSeg string
+}
+
+// Format is the dialect a harness's subagent definitions are written in.
+type Format string
+
+const (
+	FormatMarkdown Format = "md"
+	FormatTOML     Format = "toml"
+)
+
+// AgentExt is the file extension an agent definition takes in this harness.
+func (h Harness) AgentExt() string {
+	if h.AgentFormat == FormatTOML {
+		return ".toml"
+	}
+	return ".md"
+}
+
+// The harnesses scc can scaffold into.
+//
+// Claude Code is the default and the reference implementation: it is where the
+// methodology was designed, and the one whose subagent, skill, and slash-command
+// surfaces all exist at project scope.
+var (
+	Claude = Harness{
+		ID: "claude", Label: "Claude Code", Dir: ClaudeDir, EntryFile: "CLAUDE.md",
+		AgentsSeg: "agents", AgentFormat: FormatMarkdown,
+		SkillsSeg: "skills", CommandsSeg: "commands", RulesSeg: "rules",
+	}
+	Codex = Harness{
+		ID: "codex", Label: "Codex", Dir: CodexDir, EntryFile: "AGENTS.md",
+		AgentsSeg: "agents", AgentFormat: FormatTOML,
+		SkillsSeg: "skills", CommandsSeg: "", RulesSeg: "rules",
+	}
+	OpenCode = Harness{
+		ID: "opencode", Label: "opencode", Dir: OpenCodeDir, EntryFile: "AGENTS.md",
+		AgentsSeg: "agent", AgentFormat: FormatMarkdown,
+		SkillsSeg: "skills", CommandsSeg: "command", RulesSeg: "rules",
+	}
+)
+
+// Harnesses returns every supported harness, in a fixed order. The order is the
+// probe order for the workspace marker, so it is deliberate rather than
+// alphabetical: Claude Code first because it is the default.
+func Harnesses() []Harness { return []Harness{Claude, Codex, OpenCode} }
+
+// ParseHarness resolves an ID from the command line.
+func ParseHarness(id string) (Harness, error) {
+	for _, h := range Harnesses() {
+		if h.ID == id {
+			return h, nil
+		}
+	}
+	return Harness{}, fmt.Errorf("unknown harness %q: expected one of %s", id, HarnessIDs())
+}
+
+// HarnessIDs lists the IDs for help text and errors.
+func HarnessIDs() string {
+	ids := make([]string, 0, len(Harnesses()))
+	for _, h := range Harnesses() {
+		ids = append(ids, h.ID)
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ", ")
+}
 
 // ManifestSeg is scc's only file, and it does two jobs.
 //
@@ -31,43 +161,24 @@ const ClaudeDir = ".claude"
 // Its presence is also the workspace marker: only scc writes it, so it exists
 // exactly when scc has scaffolded this directory — the question a marker answers.
 //
-// The marker is deliberately this FILE and not .claude/ itself. ~/.claude is
-// Claude Code's global configuration directory and exists on every machine that
-// runs Claude Code, so an upward walk for the directory resolves the root to
-// $HOME for any command run outside a workspace — and every command would then
-// read and write the user's global configuration. .claude/ also exists in every
-// repo that merely *uses* Claude Code, where scc was never initialized. See
-// workspace.Find.
+// The marker is deliberately this FILE and not the harness directory. Every one
+// of the three has a global twin in the user's home — ~/.claude, ~/.codex,
+// ~/.config/opencode — and exists on every machine that runs that tool, so an
+// upward walk accepting the directory would resolve the root to $HOME for any
+// command run outside a workspace, and every command would then read and write
+// the user's global configuration. The directories also exist in every repo that
+// merely *uses* the harness, where scc was never initialized. Only scc writes
+// this file. See workspace.Find.
+//
+// One manifest per harness, in that harness's own directory. A workspace
+// scaffolded for two harnesses is two managed trees that happen to share a repo,
+// and each has to be upgradable on its own.
 //
 // There is no scc config file. scc runs no tests and no linters (see the design
 // doc's §5 and §7 — that is the orchestrator's job), so it has nothing to
-// configure; a project's test and lint commands belong in a rule under
-// .claude/rules/, which is Markdown the orchestrator already reads.
+// configure; a project's test and lint commands belong in a rule under the
+// harness's rules directory, which is Markdown the orchestrator already reads.
 const ManifestSeg = "scc-manifest.json"
-
-// Entry-point files at the project root.
-const (
-	// EntryFile is the agent entry point. Keeping it small is a product
-	// requirement, not a preference: every Claude Code session pays for it in
-	// context, so it links out to steering/knowledge rather than inlining them.
-	EntryFile = "CLAUDE.md"
-)
-
-// Directory segments under .claude/. All but RulesSeg are Claude Code
-// conventions.
-const (
-	AgentsSeg   = "agents"        // subagent definitions (review, security)
-	SkillsSeg   = "skills"        // model-invoked skills
-	CommandsSeg = "commands"      // slash commands
-	HooksSeg    = "hooks"         // deterministic automation scripts
-	SettingsSeg = "settings.json" // hooks + permissions
-
-	// RulesSeg holds the methodology, one file per concern. It is where scc's
-	// product actually lives: CLAUDE.md stays small and links here, because every
-	// session pays for CLAUDE.md in context and a rule only needs reading when it
-	// is relevant. Length has a measured cost in accuracy, not just in tokens.
-	RulesSeg = "rules"
-)
 
 // Project-root directory segments that scc governs. The split is strict and each
 // name means exactly one thing: specs/ holds features, plans/ holds initiatives,
@@ -102,27 +213,54 @@ const (
 	WikiLog     = "changelog.md" // what changed in the wiki, and when
 )
 
-// Claude returns the .claude/ directory under root.
-func Claude(root string) string { return filepath.Join(root, ClaudeDir) }
+// Config returns the harness's configuration directory under root.
+func (h Harness) Config(root string) string { return filepath.Join(root, h.Dir) }
 
-// Agents returns .claude/agents/.
-func Agents(root string) string { return filepath.Join(root, ClaudeDir, AgentsSeg) }
+// Agents returns the harness's subagent directory.
+func (h Harness) Agents(root string) string { return filepath.Join(root, h.Dir, h.AgentsSeg) }
 
-// Skills returns .claude/skills/.
-func Skills(root string) string { return filepath.Join(root, ClaudeDir, SkillsSeg) }
+// Skills returns the harness's skills directory.
+func (h Harness) Skills(root string) string { return filepath.Join(root, h.Dir, h.SkillsSeg) }
 
-// Commands returns .claude/commands/.
-func Commands(root string) string { return filepath.Join(root, ClaudeDir, CommandsSeg) }
+// Commands returns the harness's slash-command directory, or "" when it has no
+// project-level command surface. A caller that joins onto "" would write into
+// the configuration directory itself, so check before using it.
+func (h Harness) Commands(root string) string {
+	if h.CommandsSeg == "" {
+		return ""
+	}
+	return filepath.Join(root, h.Dir, h.CommandsSeg)
+}
 
-// Hooks returns .claude/hooks/.
-func Hooks(root string) string { return filepath.Join(root, ClaudeDir, HooksSeg) }
+// Rules returns the harness's rules directory.
+func (h Harness) Rules(root string) string { return filepath.Join(root, h.Dir, h.RulesSeg) }
 
-// Settings returns .claude/settings.json.
-func Settings(root string) string { return filepath.Join(root, ClaudeDir, SettingsSeg) }
+// Rule returns <rules>/<name>.md. Callers must pass name through
+// workspace.SafeName first when it arrives from CLI args.
+func (h Harness) Rule(root, name string) string {
+	return filepath.Join(root, h.Dir, h.RulesSeg, name+".md")
+}
 
-// Manifest returns .claude/scc-manifest.json, scc's only file and the workspace
-// marker.
-func Manifest(root string) string { return filepath.Join(root, ClaudeDir, ManifestSeg) }
+// Entry returns the harness's project-root instruction file.
+func (h Harness) Entry(root string) string { return filepath.Join(root, h.EntryFile) }
+
+// Manifest returns <config>/scc-manifest.json, scc's only file and the
+// workspace marker for this harness.
+func (h Harness) Manifest(root string) string {
+	return filepath.Join(root, h.Dir, ManifestSeg)
+}
+
+// SkillDirs returns every harness's skills directory under root, in Harnesses
+// order. `scc validate` checks skills wherever they are, because the Agent
+// Skills format is one standard and a workspace scaffolded for two harnesses
+// has two copies of it to keep conforming.
+func SkillDirs(root string) []string {
+	dirs := make([]string, 0, len(Harnesses()))
+	for _, h := range Harnesses() {
+		dirs = append(dirs, h.Skills(root))
+	}
+	return dirs
+}
 
 // Specs returns the project-root specs/ directory.
 func Specs(root string) string { return filepath.Join(root, SpecsSeg) }
@@ -157,15 +295,6 @@ func Plan(root, name string) string {
 	return filepath.Join(root, PlansSeg, name+".md")
 }
 
-// Rules returns .claude/rules/.
-func Rules(root string) string { return filepath.Join(root, ClaudeDir, RulesSeg) }
-
-// Rule returns .claude/rules/<name>.md. Callers must pass name through
-// workspace.SafeName first when it arrives from CLI args.
-func Rule(root, name string) string {
-	return filepath.Join(root, ClaudeDir, RulesSeg, name+".md")
-}
-
 // Docs returns the project-root docs/ knowledge base.
 func Docs(root string) string { return filepath.Join(root, DocsSeg) }
 
@@ -189,6 +318,3 @@ func Glossary(root string) string { return filepath.Join(root, DocsSeg, Glossary
 // never something adopted silently — and because dependency manifests are
 // structured data, that rule is checkable without reading any source.
 func Stack(root string) string { return filepath.Join(root, DocsSeg, StackSeg) }
-
-// Entry returns the project-root CLAUDE.md.
-func Entry(root string) string { return filepath.Join(root, EntryFile) }

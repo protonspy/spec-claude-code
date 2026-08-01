@@ -17,7 +17,7 @@ One entry per line, in `docs/glossary.md`:
 
 ```markdown
 - **order total** — the amount charged, in minor units. Avoid: grand total, sum
-- **workspace** — a directory holding .claude/scc-manifest.json. Avoid: project root
+- **workspace** — a directory holding {{.Manifest}}. Avoid: project root
 ```
 
 - The term is bold. The definition follows an em dash.

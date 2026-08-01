@@ -1,5 +1,5 @@
-// Package manifest reads and writes .claude/scc-manifest.json — scc's only file
-// and, by existing at all, the workspace marker.
+// Package manifest reads and writes <harness>/scc-manifest.json — scc's only
+// file and, by existing at all, the workspace marker.
 //
 // It records one entry per scc-managed file: a content hash and the template
 // version that produced it. The two answer different questions and an upgrade
@@ -70,6 +70,13 @@ type Manifest struct {
 	// workspace behaves like a different version than the user expects.
 	SCC string
 
+	// Harness is the harness this tree was scaffolded for: "claude", "codex",
+	// "opencode". Unlike SCC it is load-bearing, because a template renders
+	// differently per harness — an upgrade that re-renders the recorded version
+	// to reconstruct the merge base has to render it for the same harness or the
+	// base is wrong and the merge silently clobbers.
+	Harness string
+
 	// Files are the managed entries, kept sorted by Path by every operation that
 	// mutates them.
 	Files []Entry
@@ -82,6 +89,7 @@ type Manifest struct {
 // entry as absent, which is the failure this constant exists to make visible.
 const (
 	keySCC     = "scc"
+	keyHarness = "harness"
 	keyFiles   = "files"
 	keyPath    = "path"
 	keyHash    = "hash"
@@ -109,16 +117,17 @@ func HashFile(path string) (string, error) {
 	return Hash(string(b)), nil
 }
 
-// New returns an empty manifest stamped with the given scc version.
-func New(sccVersion string) *Manifest {
-	return &Manifest{SCC: sccVersion}
+// New returns an empty manifest stamped with the given scc version and harness.
+func New(sccVersion string, h paths.Harness) *Manifest {
+	return &Manifest{SCC: sccVersion, Harness: h.ID}
 }
 
-// Load reads the manifest at root. A missing file is not an error: it means the
-// directory is not a workspace yet, and the caller gets an empty manifest plus
-// found=false so it can tell "no workspace" from "empty workspace".
-func Load(root string) (m *Manifest, found bool, err error) {
-	b, err := os.ReadFile(paths.Manifest(root))
+// Load reads the manifest for h at root. A missing file is not an error: it means
+// the directory is not a workspace for that harness yet, and the caller gets an
+// empty manifest plus found=false so it can tell "no workspace" from "empty
+// workspace".
+func Load(root string, h paths.Harness) (m *Manifest, found bool, err error) {
+	b, err := os.ReadFile(h.Manifest(root))
 	if errors.Is(err, fs.ErrNotExist) {
 		return &Manifest{}, false, nil
 	}
@@ -127,20 +136,20 @@ func Load(root string) (m *Manifest, found bool, err error) {
 	}
 	m = &Manifest{}
 	if err := json.Unmarshal([]byte(textutil.NormalizeNewlines(string(b))), m); err != nil {
-		return nil, true, fmt.Errorf("%s is not valid scc manifest JSON: %w", paths.Manifest(root), err)
+		return nil, true, fmt.Errorf("%s is not valid scc manifest JSON: %w", h.Manifest(root), err)
 	}
 	m.sortFiles()
 	return m, true, nil
 }
 
-// Save writes the manifest under root atomically, so a concurrent reader — or a
+// Save writes h's manifest under root atomically, so a concurrent reader — or a
 // crash — never observes a half-written marker.
-func Save(root string, m *Manifest) error {
+func Save(root string, h paths.Harness, m *Manifest) error {
 	b, err := m.Bytes()
 	if err != nil {
 		return err
 	}
-	return workspace.AtomicWrite(paths.Manifest(root), b, 0o644)
+	return workspace.AtomicWrite(h.Manifest(root), b, 0o644)
 }
 
 // Bytes serializes the manifest exactly as Save would write it: sorted, indented
@@ -227,6 +236,9 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	if err := putJSON(out, keySCC, m.SCC); err != nil {
 		return nil, err
 	}
+	if err := putJSON(out, keyHarness, m.Harness); err != nil {
+		return nil, err
+	}
 	files := m.Files
 	if files == nil {
 		files = []Entry{} // an empty manifest serializes as [], never null
@@ -250,6 +262,12 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("field %q: %w", keySCC, err)
 		}
 		delete(raw, keySCC)
+	}
+	if v, ok := raw[keyHarness]; ok {
+		if err := json.Unmarshal(v, &m.Harness); err != nil {
+			return fmt.Errorf("field %q: %w", keyHarness, err)
+		}
+		delete(raw, keyHarness)
 	}
 	if v, ok := raw[keyFiles]; ok {
 		if err := json.Unmarshal(v, &m.Files); err != nil {

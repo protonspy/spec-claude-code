@@ -39,7 +39,12 @@ var skillNameRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 // skillFile is the file the spec requires in every skill directory.
 const skillFile = "SKILL.md"
 
-// Skills validates every skill under .claude/skills/.
+// Skills validates every skill in every harness's skills directory.
+//
+// It checks all of them rather than the one harness this workspace was
+// scaffolded for, because the Agent Skills format is one published standard and a
+// repo worked on from two tools carries two copies of it — a skill that stopped
+// conforming in the copy scc did not write is still a broken skill.
 //
 // Implemented in Go rather than by delegating to the reference `skills-ref`
 // validator: scc is a single binary on six platforms, and shelling out to Node for a
@@ -49,24 +54,25 @@ const skillFile = "SKILL.md"
 // workspace with no skills.
 func Skills(root string) (*finding.Set, error) {
 	set := &finding.Set{}
-	dir := paths.Skills(root)
-	if !isDir(dir) {
-		return set, nil
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
+	for _, dir := range paths.SkillDirs(root) {
+		if !isDir(dir) {
+			continue
 		}
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if err := skill(set, root, filepath.Join(dir, name), name); err != nil {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
 			return nil, err
+		}
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			if e.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if err := skill(set, root, filepath.Join(dir, name), name); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return set, nil

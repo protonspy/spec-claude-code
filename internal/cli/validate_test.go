@@ -57,7 +57,7 @@ func TestFreshArtifactsPassTheirOwnValidators(t *testing.T) {
 func TestScaffoldedSkillsPassTheSkillValidator(t *testing.T) {
 	root := initWorkspace(t)
 
-	entries, err := os.ReadDir(paths.Skills(root))
+	entries, err := os.ReadDir(paths.Claude.Skills(root))
 	if err != nil {
 		t.Fatalf("init scaffolded no skills directory: %v", err)
 	}
@@ -75,6 +75,38 @@ func TestScaffoldedSkillsPassTheSkillValidator(t *testing.T) {
 	if code != ExitOK {
 		t.Errorf("skill validate on the skills scc itself ships exited %d\nstdout: %s\nstderr: %s",
 			code, stdout, stderr)
+	}
+}
+
+// Every harness's tree is validated on its own terms: a workspace scaffolded for
+// Codex or opencode has to pass the same gate, and the skills validator has to
+// find the skills where that harness keeps them rather than only under .claude/.
+func TestAFreshWorkspacePassesValidateInEveryHarness(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		root := t.TempDir()
+		if _, stderr, code := run(t, "init", "--"+h.ID, "--root", root); code != ExitOK {
+			t.Fatalf("%s: init: %d (%s)", h.ID, code, stderr)
+		}
+		if _, stderr, code := run(t, "spec", "new", "user-auth", "--root", root); code != ExitOK {
+			t.Fatalf("%s: spec new: %d (%s)", h.ID, code, stderr)
+		}
+		stdout, stderr, code := run(t, "validate", "--root", root, "--json")
+		if code != ExitOK {
+			t.Errorf("%s: validate on a fresh workspace exited %d\nstdout: %s\nstderr: %s",
+				h.ID, code, stdout, stderr)
+		}
+		// And the skills really were looked at: a broken one in this harness's
+		// directory has to be found, or the pass above means nothing.
+		bad := filepath.Join(h.Skills(root), "Bad_Name")
+		if err := os.MkdirAll(bad, 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(bad, "SKILL.md"), []byte("---\nname: Bad_Name\n---\nbody\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		if _, _, code := run(t, "skill", "validate", "--root", root); code != ExitFindings {
+			t.Errorf("%s: a broken skill under %s went unreported (exit %d)", h.ID, h.Skills(root), code)
+		}
 	}
 }
 
@@ -152,7 +184,7 @@ func TestSkillValidate(t *testing.T) {
 		t.Errorf("skill validate on a workspace with no skills exited %d, want %d", code, ExitOK)
 	}
 
-	dir := filepath.Join(paths.Skills(root), "pdf-processing")
+	dir := filepath.Join(paths.Claude.Skills(root), "pdf-processing")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}

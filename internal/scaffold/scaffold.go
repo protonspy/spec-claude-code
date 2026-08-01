@@ -55,6 +55,7 @@ type Change struct {
 // Result is what a run did, in a shape both the human report and --json read from.
 type Result struct {
 	Root            string   `json:"root"`
+	Harness         string   `json:"harness"`
 	Changes         []Change `json:"changes"`
 	Created         int      `json:"created"`
 	Skipped         int      `json:"skipped"`
@@ -70,6 +71,10 @@ type Options struct {
 	// worth knowing when a workspace behaves like a different version than the user
 	// expects. No logic branches on it; only assets.Version decides behavior.
 	SCCVersion string
+	// Harness is which agent harness to scaffold for. The zero value is not a
+	// harness, so a caller that forgets it gets a refusal rather than a tree
+	// written into the wrong directory.
+	Harness paths.Harness
 	// Force overwrites existing files instead of leaving them alone.
 	Force bool
 }
@@ -83,21 +88,25 @@ type Options struct {
 // so a second run is a true no-op — the marker's mtime is not noise a reviewer
 // should have to explain.
 func Apply(root string, opts Options) (*Result, error) {
-	prior, found, err := manifest.Load(root)
+	h := opts.Harness
+	if h.ID == "" {
+		return nil, fmt.Errorf("no harness given: expected one of %s", paths.HarnessIDs())
+	}
+	prior, found, err := manifest.Load(root, h)
 	if err != nil {
 		return nil, err
 	}
-	res := &Result{Root: root, AlreadyPresent: found}
+	res := &Result{Root: root, Harness: h.ID, AlreadyPresent: found}
 
-	for _, dir := range assets.Dirs() {
+	for _, dir := range assets.Dirs(h) {
 		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0o755); err != nil {
 			return nil, err
 		}
 	}
 
-	next := manifest.New(opts.SCCVersion)
-	for _, f := range assets.Workspace() {
-		pristine, err := assets.Content(f.Name)
+	next := manifest.New(opts.SCCVersion, h)
+	for _, f := range assets.Workspace(h) {
+		pristine, err := assets.Render(h, f)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +133,7 @@ func Apply(root string, opts Options) (*Result, error) {
 	// is exactly the set of files scc manages, and a stale entry would send a later
 	// upgrade looking for a template that does not exist.
 	managed := map[string]bool{}
-	for _, f := range assets.Workspace() {
+	for _, f := range assets.Workspace(h) {
 		managed[f.Rel] = true
 	}
 	for _, e := range prior.Files {
@@ -133,12 +142,12 @@ func Apply(root string, opts Options) (*Result, error) {
 		}
 	}
 
-	same, err := manifestUnchanged(root, next)
+	same, err := manifestUnchanged(root, h, next)
 	if err != nil {
 		return nil, err
 	}
 	if !same {
-		if err := manifest.Save(root, next); err != nil {
+		if err := manifest.Save(root, h, next); err != nil {
 			return nil, err
 		}
 		res.ManifestWritten = true
@@ -175,12 +184,12 @@ func write(root string, f assets.File, pristine string, prior *manifest.Manifest
 	return action, workspace.AtomicWrite(dest, []byte(pristine), 0o644)
 }
 
-func manifestUnchanged(root string, m *manifest.Manifest) (bool, error) {
+func manifestUnchanged(root string, h paths.Harness, m *manifest.Manifest) (bool, error) {
 	next, err := m.Bytes()
 	if err != nil {
 		return false, err
 	}
-	current, err := os.ReadFile(paths.Manifest(root))
+	current, err := os.ReadFile(h.Manifest(root))
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}

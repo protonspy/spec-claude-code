@@ -19,7 +19,7 @@ import (
 func initWorkspace(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	if _, stderr, code := run(t, "init", "--root", root); code != ExitOK {
+	if _, stderr, code := run(t, "init", "--claude", "--root", root); code != ExitOK {
 		t.Fatalf("init: exit = %d (stderr: %s)", code, stderr)
 	}
 	return root
@@ -30,7 +30,7 @@ func TestInitCreatesAWorkspace(t *testing.T) {
 	if !workspace.IsWorkspace(root) {
 		t.Fatal("init did not leave the workspace marker")
 	}
-	for _, f := range assets.Workspace() {
+	for _, f := range assets.Workspace(paths.Claude) {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(f.Rel))); err != nil {
 			t.Errorf("%s missing after init: %v", f.Rel, err)
 		}
@@ -60,8 +60,8 @@ func TestInitJSONReportsEveryAction(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("stdout is not valid JSON (%v): %q", err, stdout)
 	}
-	if got.Created != len(assets.Workspace()) || len(got.Changes) != len(assets.Workspace()) {
-		t.Errorf("created = %d, changes = %d, want %d of each", got.Created, len(got.Changes), len(assets.Workspace()))
+	if got.Created != len(assets.Workspace(paths.Claude)) || len(got.Changes) != len(assets.Workspace(paths.Claude)) {
+		t.Errorf("created = %d, changes = %d, want %d of each", got.Created, len(got.Changes), len(assets.Workspace(paths.Claude)))
 	}
 	if stderr != "" {
 		t.Errorf("stderr = %q, want empty so stdout can be piped", stderr)
@@ -72,7 +72,7 @@ func TestInitJSONReportsEveryAction(t *testing.T) {
 // to be free: nothing written, nothing reported as changed, exit 0.
 func TestInitIsIdempotent(t *testing.T) {
 	root := initWorkspace(t)
-	before, err := os.ReadFile(paths.Manifest(root))
+	before, err := os.ReadFile(paths.Claude.Manifest(root))
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestInitIsIdempotent(t *testing.T) {
 	if got.Created != 0 || got.ManifestWritten {
 		t.Errorf("second init wrote something: %+v", got)
 	}
-	after, err := os.ReadFile(paths.Manifest(root))
+	after, err := os.ReadFile(paths.Claude.Manifest(root))
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestInitLeavesEditedFilesAlone(t *testing.T) {
 	if err := workspace.AtomicWrite(rule, []byte(mine), 0o644); err != nil {
 		t.Fatalf("AtomicWrite: %v", err)
 	}
-	if _, stderr, code := run(t, "init", "--root", root); code != ExitOK {
+	if _, stderr, code := run(t, "init", "--claude", "--root", root); code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
 	got, err := os.ReadFile(rule)
@@ -128,7 +128,7 @@ func TestInitForceNamesWhatItClobbered(t *testing.T) {
 	if err := workspace.AtomicWrite(rule, []byte("# mine\n"), 0o644); err != nil {
 		t.Fatalf("AtomicWrite: %v", err)
 	}
-	_, stderr, code := run(t, "init", "--root", root, "--force")
+	_, stderr, code := run(t, "init", "--claude", "--root", root, "--force")
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
@@ -146,7 +146,7 @@ func TestInitForceNamesWhatItClobbered(t *testing.T) {
 
 func TestInitRejectsAMissingRoot(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope")
-	_, stderr, code := run(t, "init", "--root", missing)
+	_, stderr, code := run(t, "init", "--claude", "--root", missing)
 	if code != ExitError {
 		t.Errorf("exit = %d, want %d", code, ExitError)
 	}
@@ -159,7 +159,7 @@ func TestInitRejectsAMissingRoot(t *testing.T) {
 // Ignoring it would report success for something scc did not do.
 func TestInitRejectsPositionals(t *testing.T) {
 	root := t.TempDir()
-	if _, _, code := run(t, "init", "--root", root, "user-auth"); code != ExitError {
+	if _, _, code := run(t, "init", "--claude", "--root", root, "user-auth"); code != ExitError {
 		t.Errorf("exit = %d, want %d", code, ExitError)
 	}
 }
@@ -168,11 +168,11 @@ func TestInitRejectsPositionals(t *testing.T) {
 // regular file (the marker contract), and every managed path is inside the root.
 func TestScaffoldedWorkspaceIsSelfConsistent(t *testing.T) {
 	root := initWorkspace(t)
-	info, err := os.Stat(paths.Manifest(root))
+	info, err := os.Stat(paths.Claude.Manifest(root))
 	if err != nil || !info.Mode().IsRegular() {
 		t.Fatalf("the marker is not a regular file: %v", err)
 	}
-	for _, f := range assets.Workspace() {
+	for _, f := range assets.Workspace(paths.Claude) {
 		if strings.HasPrefix(f.Rel, "/") || strings.Contains(f.Rel, "..") {
 			t.Errorf("%s escapes the workspace root", f.Rel)
 		}

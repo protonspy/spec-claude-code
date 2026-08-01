@@ -85,7 +85,7 @@ One canonical term per concept, and the synonyms to avoid. One entry per line:
 
 ```markdown
 - **order total** — the amount charged, in minor units. Avoid: grand total, sum
-- **workspace** — a directory holding .claude/scc-manifest.json. Avoid: project root
+- **workspace** — a directory holding {{.Manifest}}. Avoid: project root
 ```
 
 Domain vocabulary drifts by default — three names for one thing appear within a week

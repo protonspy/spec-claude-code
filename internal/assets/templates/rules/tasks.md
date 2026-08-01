@@ -45,7 +45,7 @@ a whole plan.
 
 ## Two checklists, one truth
 
-Claude Code's own todo list is where you track the task you are on right now. The
+Your harness's own todo list is where you track the task you are on right now. The
 file — `specs/<feature>/tasks.md`, or the checklist in `plans/<name>.md` — is the
 durable record: it survives the session, it gets reviewed, it gets committed, and it
 is what `scc` validates.
