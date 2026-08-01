@@ -39,6 +39,14 @@ docs/              the knowledge base — wiki, adr, codewiki, glossary, stack
 scc validate        # every applicable validator; exit 2 means findings
 ```
 
+If `scc` is not installed on this machine, run it with no install — same binary,
+same exit codes:
+
+```
+npx @protonspy/scc validate       # always the latest
+npx @protonspy/scc@<version> ...  # pin a version (CI)
+```
+
 Exit codes are the contract: `0` ok, `1` the command could not run, `2` it ran and
 found something. A finding is an answer, not a crash.
 
