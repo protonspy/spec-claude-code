@@ -61,7 +61,8 @@ import (
 // 4: the review agents pin a model and effort, run gates instead of reading, and
 // report in a fixed shape the orchestrator can act on.
 // 5: one template set for three harnesses — Claude Code, Codex, opencode.
-const Version = "5"
+// 6: the knowledge base states the stack check without naming an ecosystem.
+const Version = "6"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
