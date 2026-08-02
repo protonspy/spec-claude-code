@@ -1,34 +1,33 @@
 package validate
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/paths"
-	"github.com/protonspy/spec-claude-code/internal/textutil"
 )
 
 // Stack turns a rule into a gate.
 //
 // "Technology not listed in docs/stack.md is an open decision, never adopted silently"
-// reads like an unenforceable principle — but a dependency manifest is structured data,
-// not source, so diffing the manifest against stack.md catches the silent dependency
-// without reading a line of code. That is the whole trick, and it works in any ecosystem
-// that has a manifest.
+// reads like an unenforceable principle — but a project's dependency file is structured
+// data, not source, so diffing it against stack.md catches the silent dependency without
+// reading a line of code. That is the whole trick, and it works in any ecosystem that
+// declares its dependencies as data. The readers live in stack_manifests.go.
 //
-// Two deliberate limits:
+// Three deliberate limits:
 //
 //   - **Direct dependencies only.** An indirect dependency is not a decision anybody
 //     made; reporting the transitive closure would bury the one line that matters.
-//   - **An unparsed manifest produces no findings.** Ecosystems whose manifests cannot
-//     be read confidently without a dependency (TOML, for one) wait for a safe parse
-//     rather than getting a naive one. Silence is the correct behavior when a check
-//     cannot be sure.
+//   - **An unparsed manifest produces no findings.** A file scc cannot read
+//     confidently, or a shape it does not recognize, yields no dependency rather than a
+//     guessed one. Silence is the correct behavior when a check cannot be sure.
+//   - **An ecosystem with no reader is not checked at all.** No declared dependencies
+//     means no expectation of a stack.md and no finding of any kind, so a project scc
+//     cannot read the manifest of passes rather than failing on a file it never
+//     understood.
 func Stack(root string) (*finding.Set, error) {
 	set := &finding.Set{}
 	deps, err := dependencies(root)
@@ -63,10 +62,7 @@ func Stack(root string) (*finding.Set, error) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		// The full path, or the last segment — someone writing "chi" for
-		// github.com/go-chi/chi has documented the decision, and insisting on the
-		// module path would be the validator enforcing a spelling nobody agreed to.
-		if strings.Contains(listed, strings.ToLower(name)) || strings.Contains(listed, strings.ToLower(baseName(name))) {
+		if documented(listed, name) {
 			continue
 		}
 		set.Addf(file, 0, "stack.undocumented-dependency",
@@ -76,86 +72,32 @@ func Stack(root string) (*finding.Set, error) {
 	return set, nil
 }
 
-// dependencies collects direct dependencies, mapping each to the manifest that declared
-// it. Ecosystems are added here one at a time, each with a parse that cannot be wrong.
-func dependencies(root string) (map[string]string, error) {
-	deps := map[string]string{}
-	if err := goModDependencies(root, deps); err != nil {
-		return nil, err
-	}
-	if err := packageJSONDependencies(root, deps); err != nil {
-		return nil, err
-	}
-	return deps, nil
-}
-
-// goModDependencies reads the require blocks of go.mod by hand.
+// documented reports whether stack.md names this dependency in any spelling somebody
+// would plausibly have written it down as.
 //
-// By hand rather than with golang.org/x/mod: scc is stdlib-only, the grammar in play
-// here is two forms of one directive, and a dependency added to read a dependency file
-// would be its own punchline.
-func goModDependencies(root string, deps map[string]string) error {
-	path := filepath.Join(root, "go.mod")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	inBlock := false
-	for _, raw := range strings.Split(textutil.NormalizeNewlines(string(b)), "\n") {
-		line := strings.TrimSpace(raw)
-		// An indirect dependency is not a decision anybody made.
-		if line == "" || strings.HasPrefix(line, "//") || strings.Contains(line, "// indirect") {
-			continue
-		}
-		switch {
-		case line == "require (":
-			inBlock = true
-			continue
-		case inBlock && line == ")":
-			inBlock = false
-			continue
-		}
-		fields := strings.Fields(line)
-		switch {
-		case inBlock && len(fields) >= 2:
-			deps[fields[0]] = "go.mod"
-		case !inBlock && len(fields) >= 3 && fields[0] == "require":
-			deps[fields[1]] = "go.mod"
+// The full path or its last segment: writing "chi" for github.com/go-chi/chi documents
+// the decision, and insisting on the module path would be the validator enforcing a
+// spelling nobody agreed to. The same goes for the separator — PyPI treats
+// "Flask-SQLAlchemy" and "flask_sqlalchemy" as one project, and Maven artifacts are
+// written both ways — so each candidate is also tried with the separators swapped.
+//
+// Every extra spelling can only remove a finding, never add one. That asymmetry is the
+// reason this is allowed to be generous: the cost of a miss here is a dependency
+// nobody was reminded to document, and the cost of a false positive is the user
+// learning to disbelieve the validator.
+func documented(listed, name string) bool {
+	for _, candidate := range []string{name, baseName(name)} {
+		for _, spelling := range []string{
+			candidate,
+			strings.ReplaceAll(candidate, "_", "-"),
+			strings.ReplaceAll(candidate, "-", "_"),
+		} {
+			if spelling != "" && strings.Contains(listed, strings.ToLower(spelling)) {
+				return true
+			}
 		}
 	}
-	return nil
-}
-
-// packageJSONDependencies reads dependencies and devDependencies with encoding/json.
-// Both count: a test framework is as much an adopted decision as a web server, and it is
-// as much of a supply-chain surface.
-func packageJSONDependencies(root string, deps map[string]string) error {
-	path := filepath.Join(root, "package.json")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	var manifest struct {
-		Dependencies    map[string]string `json:"dependencies"`
-		DevDependencies map[string]string `json:"devDependencies"`
-	}
-	if err := json.Unmarshal(b, &manifest); err != nil {
-		// A manifest scc cannot parse produces no findings. It is not scc's place to
-		// report on the syntax of somebody else's build file.
-		return nil
-	}
-	for _, group := range []map[string]string{manifest.Dependencies, manifest.DevDependencies} {
-		for name := range group {
-			deps[name] = "package.json"
-		}
-	}
-	return nil
+	return false
 }
 
 // baseName is the name a human would write a dependency down as: the last path segment,
