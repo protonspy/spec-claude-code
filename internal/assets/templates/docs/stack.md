@@ -2,8 +2,8 @@
 
 Every adopted technology, with one line on why it earned its place. **Technology
 that is not listed here is an open decision, never something adopted silently** —
-and because dependency manifests are structured data, that rule is checkable: a
-direct dependency in `go.mod` or `package.json` that is absent from this file is
+and because this project's dependency file is structured data rather than source,
+that rule is checkable: a direct dependency declared there and absent from here is
 reported.
 
 So adding a dependency is a two-step act: add it, and say here why.
