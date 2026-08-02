@@ -74,8 +74,17 @@ func TestApplyWritesTheWholeSet(t *testing.T) {
 			t.Errorf("%s: content does not match the template", f.Rel)
 		}
 	}
-	if res.Created != len(assets.Workspace(paths.Claude)) {
-		t.Errorf("created = %d, want %d", res.Created, len(assets.Workspace(paths.Claude)))
+	for _, s := range assets.Seeds() {
+		want, err := assets.Content(s.Name)
+		if err != nil {
+			t.Fatalf("Content: %v", err)
+		}
+		if got := read(t, root, s.Rel); got != want {
+			t.Errorf("%s: content does not match the seed", s.Rel)
+		}
+	}
+	if want := len(assets.Workspace(paths.Claude)) + len(assets.Seeds()); res.Created != want {
+		t.Errorf("created = %d, want %d", res.Created, want)
 	}
 	for _, dir := range assets.Dirs(paths.Claude) {
 		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(dir)))
@@ -177,8 +186,8 @@ func TestApplyIsIdempotent(t *testing.T) {
 	if res.Created != 0 || res.Replaced != 0 {
 		t.Errorf("second run wrote files: created=%d replaced=%d", res.Created, res.Replaced)
 	}
-	if res.Skipped != len(assets.Workspace(paths.Claude)) {
-		t.Errorf("skipped = %d, want %d", res.Skipped, len(assets.Workspace(paths.Claude)))
+	if want := len(assets.Workspace(paths.Claude)) + len(assets.Seeds()); res.Skipped != want {
+		t.Errorf("skipped = %d, want %d", res.Skipped, want)
 	}
 	if res.ManifestWritten {
 		t.Error("second run rewrote the manifest")
