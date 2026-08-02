@@ -458,6 +458,28 @@ The skills carry the *procedure and the judgment*; the format they produce stays
 `.claude/rules/knowledge-base.md`, stated once. A skill that restated the format would
 be the same duplication the methodology rules are being kept out of skills to avoid.
 
+### The four seeded anchors — `docs/` is not an empty tree
+
+`init` writes `docs/glossary.md`, `docs/stack.md`, `docs/wiki/index.md`, and
+`docs/wiki/changelog.md`, each one a heading and the format its validator checks.
+These are the knowledge base's only documents with a *fixed name*; a wiki page, an
+ADR, and a codewiki page are named after what they are about, so those directories
+are correctly scaffolded empty.
+
+The reason is the same one that makes the skills ship: a workspace that arrives with
+eight validators and an empty `docs/` demands conformance to documents nobody was
+handed. Seeding also improves the first finding a real project sees — a repo with
+dependencies used to get one `stack.missing`, and now gets one line per undocumented
+dependency, pointing at a file that already explains what an entry looks like.
+
+**A seed is written once and tracked nowhere** — not in the manifest, not by
+`scc update`. It is a third category alongside managed files and artifact templates,
+and it is closer to the artifacts: the moment the file exists it holds project
+knowledge, which scc has no improved version of to deliver. Untracked also settles
+the two-harness case without a rule of its own, because `docs/` is one tree per repo
+rather than one per harness — the second `init` finds the files already there and
+leaves them alone, exactly as it does for any existing file.
+
 ## 7 · Agents — review only
 
 Two subagents ship with the workspace, and both of them read rather than write:

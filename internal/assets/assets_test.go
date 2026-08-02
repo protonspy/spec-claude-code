@@ -81,9 +81,15 @@ func TestWorkspaceSetAndTreeAgree(t *testing.T) {
 	for _, name := range []string{"requirements.md", "design.md", "tasks.md", "plan.md"} {
 		referenced["artifacts/"+name] = true
 	}
+	for _, s := range Seeds() {
+		if _, err := Content(s.Name); err != nil {
+			t.Errorf("Seeds() references %q which is not embedded", s.Name)
+		}
+		referenced[s.Name] = true
+	}
 	for name := range inTree {
 		if !referenced[name] {
-			t.Errorf("embedded template %q is in no harness's Workspace() and is not an artifact template", name)
+			t.Errorf("embedded template %q is in no harness's Workspace(), Seeds(), and is not an artifact template", name)
 		}
 	}
 }
@@ -472,6 +478,68 @@ func TestCommandsCarryTheirDescription(t *testing.T) {
 	}
 }
 
+// The seeds are the knowledge base's four fixed documents, at the paths every
+// validator already looks for them. A seed written anywhere else would be a file
+// nothing reads, next to the finding saying the real one is missing.
+func TestSeedsLandWhereTheValidatorsLook(t *testing.T) {
+	want := []string{
+		"docs/" + paths.GlossarySeg,
+		"docs/" + paths.StackSeg,
+		"docs/" + paths.WikiSeg + "/" + paths.WikiLog,
+		"docs/" + paths.WikiSeg + "/" + paths.WikiIndex,
+	}
+	var got []string
+	for _, s := range Seeds() {
+		got = append(got, s.Rel)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("Seeds() destinations = %v, want %v", got, want)
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i-1] >= got[i] {
+			t.Errorf("Seeds() is not sorted by destination: %q before %q", got[i-1], got[i])
+		}
+	}
+}
+
+// A seed is untracked by construction, so nothing else may claim it: a destination
+// that is also a managed file would be recorded in one harness's manifest and
+// rewritten by that harness's update, which is exactly what seeding is not.
+func TestSeedsAreNotManagedFiles(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		managed := map[string]bool{}
+		for _, f := range Workspace(h) {
+			managed[f.Rel] = true
+		}
+		for _, s := range Seeds() {
+			if managed[s.Rel] {
+				t.Errorf("%s: %s is both a seed and a managed file", h.ID, s.Rel)
+			}
+		}
+	}
+}
+
+// docs/ is one tree per repo, not one per harness, and a seed is written verbatim
+// rather than rendered. Both facts have the same consequence: a seed may not name a
+// harness or carry a template action, or the knowledge base would read as belonging
+// to whichever tool happened to run init first.
+func TestSeedsAreHarnessNeutralAndDataFree(t *testing.T) {
+	for _, s := range Seeds() {
+		raw, err := Content(s.Name)
+		if err != nil {
+			t.Fatalf("%s: %v", s.Name, err)
+		}
+		if strings.Contains(raw, "{{") {
+			t.Errorf("%s: carries a template action, and seeds are written verbatim", s.Name)
+		}
+		for _, h := range paths.Harnesses() {
+			if strings.Contains(raw, h.Dir+"/") {
+				t.Errorf("%s: names %s/, and docs/ belongs to no harness", s.Name, h.Dir)
+			}
+		}
+	}
+}
+
 // Directories init creates on its own must be inside the workspace and
 // slash-separated, for the same reason destinations must be.
 func TestDirsAreRelativeAndSlashed(t *testing.T) {
@@ -505,6 +573,12 @@ func TestDirsCoverEveryDestination(t *testing.T) {
 			}
 			if !dirs[parent] {
 				t.Errorf("%s: %s lands in %q, which Dirs() does not create", h.ID, f.Rel, parent)
+			}
+		}
+		for _, s := range Seeds() {
+			parent := strings.TrimSuffix(s.Rel[:strings.LastIndex(s.Rel, "/")+1], "/")
+			if !dirs[parent] {
+				t.Errorf("%s: seed %s lands in %q, which Dirs() does not create", h.ID, s.Rel, parent)
 			}
 		}
 	}

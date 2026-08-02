@@ -79,8 +79,9 @@ type Options struct {
 	Force bool
 }
 
-// Apply writes the template set into root. With opts.Force, existing files are
-// overwritten; without it, they are left exactly as they are.
+// Apply writes the template set into root, plus the docs/ seeds, which are written
+// on the same never-overwrite terms and tracked in nothing. With opts.Force,
+// existing files are overwritten; without it, they are left exactly as they are.
 //
 // The manifest is written last, and only when its serialization differs from what
 // is already on disk. Last, so a crash midway leaves no workspace marker and the
@@ -110,7 +111,7 @@ func Apply(root string, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		action, err := write(root, f, pristine, prior, opts.Force)
+		action, err := write(root, f.Rel, pristine, prior, opts.Force)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", f.Rel, err)
 		}
@@ -127,6 +128,24 @@ func Apply(root string, opts Options) (*Result, error) {
 			continue
 		}
 		next.Set(f.Rel, manifest.Hash(pristine), assets.Version)
+	}
+
+	// The docs/ anchors, written when missing and recorded nowhere. They are the
+	// knowledge base's fixed documents, and the knowledge base is the user's: scc
+	// has nothing to deliver to glossary.md after the first write, and a manifest
+	// entry would only invite a later update to offer one. Untracked also settles
+	// what a second harness's init should do with a docs/ tree the first one
+	// already wrote — nothing, which is the same answer as for any existing file.
+	for _, s := range assets.Seeds() {
+		body, err := assets.Content(s.Name)
+		if err != nil {
+			return nil, err
+		}
+		action, err := write(root, s.Rel, body, prior, opts.Force)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", s.Rel, err)
+		}
+		res.record(s.Rel, action)
 	}
 
 	// Entries for templates this version no longer ships are dropped: the manifest
@@ -155,9 +174,10 @@ func Apply(root string, opts Options) (*Result, error) {
 	return res, nil
 }
 
-// write puts one file in place and reports what it did to whatever was there.
-func write(root string, f assets.File, pristine string, prior *manifest.Manifest, force bool) (Action, error) {
-	dest := filepath.Join(root, filepath.FromSlash(f.Rel))
+// write puts one file in place and reports what it did to whatever was there. rel
+// is slash-separated and relative to root, exactly as the manifest spells it.
+func write(root, rel, pristine string, prior *manifest.Manifest, force bool) (Action, error) {
+	dest := filepath.Join(root, filepath.FromSlash(rel))
 	onDisk, err := os.ReadFile(dest)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -178,7 +198,7 @@ func write(root string, f assets.File, pristine string, prior *manifest.Manifest
 	// manifest recorded, or scc has no record of it at all. Both mean somebody
 	// else's content is about to be destroyed, so both are reported as Clobbered.
 	action := Clobbered
-	if e, ok := prior.Get(f.Rel); ok && manifest.Hash(string(onDisk)) == e.Hash {
+	if e, ok := prior.Get(rel); ok && manifest.Hash(string(onDisk)) == e.Hash {
 		action = Replaced
 	}
 	return action, workspace.AtomicWrite(dest, []byte(pristine), 0o644)

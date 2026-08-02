@@ -41,6 +41,65 @@ func TestInitCreatesAWorkspace(t *testing.T) {
 			t.Errorf("%s was not created: %v", dir, err)
 		}
 	}
+	// The knowledge base's four fixed documents exist from the first run, each one
+	// holding the format its validator checks. A workspace that ships eight
+	// validators and an empty docs/ asks the user to conform to documents nobody
+	// gave them.
+	for _, path := range []string{paths.Glossary(root), paths.Stack(root),
+		filepath.Join(paths.Wiki(root), paths.WikiIndex), filepath.Join(paths.Wiki(root), paths.WikiLog)} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s missing after init: %v", path, err)
+		}
+	}
+}
+
+// The seeds are the user's knowledge base, not scc's files: init lays them down and
+// then has no further claim on them. Recording one would put a document scc cannot
+// improve into the set an update reasons about — and the two harnesses that share a
+// docs/ tree would each record the other's copy.
+func TestInitSeedsTheKnowledgeBaseWithoutManagingIt(t *testing.T) {
+	root := initWorkspace(t)
+	b, err := os.ReadFile(paths.Claude.Manifest(root))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	for _, s := range assets.Seeds() {
+		if strings.Contains(string(b), `"`+s.Rel+`"`) {
+			t.Errorf("the manifest tracks %s, which is the user's knowledge base", s.Rel)
+		}
+	}
+
+	// And an edited one survives, on the same terms as every other existing file.
+	mine := "# Glossary\n\n- **workspace** — a directory holding a manifest.\n"
+	if err := os.WriteFile(paths.Glossary(root), []byte(mine), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, stderr, code := run(t, "init", "--claude", "--root", root); code != ExitOK {
+		t.Fatalf("second init: %d (%s)", code, stderr)
+	}
+	got, err := os.ReadFile(paths.Glossary(root))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != mine {
+		t.Errorf("init overwrote an edited glossary:\n%s", got)
+	}
+}
+
+// A fresh knowledge base is one `scc update` has nothing to say about: the seeds are
+// outside the managed set, so an update that reported them would be offering to
+// rewrite documents the user authored.
+func TestUpdateIgnoresTheSeededKnowledgeBase(t *testing.T) {
+	root := initWorkspace(t)
+	stdout, stderr, code := run(t, "update", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("update: %d (%s)", code, stderr)
+	}
+	for _, s := range assets.Seeds() {
+		if strings.Contains(stdout, s.Rel) {
+			t.Errorf("update's plan names %s, which it does not manage:\n%s", s.Rel, stdout)
+		}
+	}
 }
 
 func TestInitJSONReportsEveryAction(t *testing.T) {
@@ -60,8 +119,9 @@ func TestInitJSONReportsEveryAction(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("stdout is not valid JSON (%v): %q", err, stdout)
 	}
-	if got.Created != len(assets.Workspace(paths.Claude)) || len(got.Changes) != len(assets.Workspace(paths.Claude)) {
-		t.Errorf("created = %d, changes = %d, want %d of each", got.Created, len(got.Changes), len(assets.Workspace(paths.Claude)))
+	want := len(assets.Workspace(paths.Claude)) + len(assets.Seeds())
+	if got.Created != want || len(got.Changes) != want {
+		t.Errorf("created = %d, changes = %d, want %d of each", got.Created, len(got.Changes), want)
 	}
 	if stderr != "" {
 		t.Errorf("stderr = %q, want empty so stdout can be piped", stderr)

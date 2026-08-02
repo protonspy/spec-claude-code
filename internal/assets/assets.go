@@ -22,6 +22,11 @@
 //     immediately, nothing tracks them in the manifest, and no upgrade ever touches
 //     them.
 //
+//   - **Seeds** — the `docs/` anchors init lays down. Untracked like an artifact and
+//     data-free like a workspace file: they are the knowledge base's fixed
+//     documents, so scc writes each one once, holding the format its validator
+//     checks, and never writes it again. See Seed.
+//
 // One prose source, three harnesses. The methodology does not change with the
 // tool reading it, so the rules, the skills, and the review agents are written
 // once and re-addressed per harness: paths come from the profile, and the
@@ -175,6 +180,45 @@ func Workspace(h paths.Harness) []File {
 	return set
 }
 
+// Seed is one of the `docs/` anchor files `scc init` lays down: the knowledge base's
+// four fixed documents, each holding the format its validator checks and nothing
+// else.
+//
+// A seed is deliberately NOT a managed file, and that is a third category rather
+// than an oversight. init writes one only when it is missing, the manifest never
+// records it, and no upgrade ever touches it — the same terms artifact templates
+// ship on, for the same reason: the moment the file exists it holds project
+// knowledge, which scc has nothing to deliver improvements to.
+//
+// They are also harness-neutral, because `docs/` is. A repo scaffolded for two
+// harnesses has one knowledge base, written by whichever init ran first, and a seed
+// that varied by harness would make the second init's copy the odd one out.
+type Seed struct {
+	// Name is the path inside the embedded tree, e.g. "docs/glossary.md".
+	Name string
+	// Rel is where it goes: slash-separated and relative to the workspace root.
+	Rel string
+}
+
+// Seeds returns the anchors in destination order.
+//
+// Four, and the rule that picks them is the same one that picks the skills: a seed
+// for each fixed `docs/` document a validator checks. The per-concept pages, the
+// ADRs, and the codewiki pages have no fixed name, so they have no anchor — an
+// empty directory is the honest scaffold for those.
+//
+// Seeding is what makes the knowledge base's own rules discoverable at the moment
+// somebody first opens the file, rather than only after a validator has already
+// fired on the missing document.
+func Seeds() []Seed {
+	return []Seed{
+		{Name: "docs/glossary.md", Rel: path.Join(paths.DocsSeg, paths.GlossarySeg)},
+		{Name: "docs/stack.md", Rel: path.Join(paths.DocsSeg, paths.StackSeg)},
+		{Name: "docs/wiki/changelog.md", Rel: path.Join(paths.DocsSeg, paths.WikiSeg, paths.WikiLog)},
+		{Name: "docs/wiki/index.md", Rel: path.Join(paths.DocsSeg, paths.WikiSeg, paths.WikiIndex)},
+	}
+}
+
 // ReviewAgents names the two subagents scc ships. Both read and neither writes:
 // review is where a cold context is worth paying for, and authorship is not.
 var ReviewAgents = []string{"code-review", "security-review"}
@@ -192,9 +236,9 @@ var KnowledgeSkills = []string{"adr", "codewiki", "glossary", "prd", "stack", "w
 // commandPrefix namespaces the scaffolded slash commands.
 const commandPrefix = "scc-"
 
-// Dirs returns the directories `scc init` creates even when it has no file to put
-// in them. An agent that can see specs/, plans/, and docs/wiki/ knows where its
-// output goes; one that has to infer the layout from a rule file guesses.
+// Dirs returns every directory `scc init` creates, including the ones it has no
+// file to put in. An agent that can see specs/, plans/, and docs/adr/ knows where
+// its output goes; one that has to infer the layout from a rule file guesses.
 func Dirs(h paths.Harness) []string {
 	dirs := []string{
 		path.Join(h.Dir, h.RulesSeg),
@@ -207,6 +251,7 @@ func Dirs(h paths.Harness) []string {
 	return append(dirs,
 		paths.SpecsSeg,
 		paths.PlansSeg,
+		paths.DocsSeg,
 		path.Join(paths.DocsSeg, paths.WikiSeg),
 		path.Join(paths.DocsSeg, paths.RawSeg),
 		path.Join(paths.DocsSeg, paths.ADRSeg),
