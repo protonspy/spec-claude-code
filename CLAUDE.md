@@ -78,7 +78,7 @@ cmd/scc/main.go         os.Exit(cli.Run(os.Args[1:]))
 | `internal/scaffold` | Applies the template set to a root (`Apply`) and brings an existing one current (`PlanUpdate`/`ApplyUpdate`). Idempotent, never overwrites without being told to, manifest written last. |
 | `internal/mdscan` | The only Markdown parser: fence- and HTML-comment-aware headings, checkboxes, links, wikilinks, slugs, plus a small frontmatter reader. `Body` is the comment/fence-stripped text every validator applies its grammar to. |
 | `internal/ears` | EARS requirement parsing, all five patterns plus complex. |
-| `internal/validate` | The eight validators, one file each, sharing `mdscan` and `finding`. |
+| `internal/validate` | The eight validators, one file each, sharing `mdscan` and `finding`. The exception is `stack_manifests.go`: the seven dependency-file readers age on their own schedule, so they sit beside the rule rather than inside it. |
 | `internal/cli` | The dispatcher and every command handler. |
 
 `go.mod` is stdlib-only. Keep it that way unless a dependency earns its place — the binary is distributed to six platforms and every dep is a supply-chain surface.

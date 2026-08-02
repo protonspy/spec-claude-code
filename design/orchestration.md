@@ -297,7 +297,7 @@ a shape is checkable. Findings exit `2`.
 | **codewiki** | at `docs/codewiki/`, one page per area: every `[path:start-end]()` citation resolves against the checkout · slugs unique and derived from their headings · no section citing nothing |
 | **adr** | numbering contiguous · superseded records marked rather than edited · `adr:<slug>` citations resolve |
 | **glossary** | each concept has one canonical term · an avoided synonym used as a whole token is a finding |
-| **stack** | every dependency in the project's manifest (`go.mod`, `package.json`, …) appears in `docs/stack.md` — a manifest is structured data, not source, so this is checkable without reading code |
+| **stack** | every direct dependency the project declares appears in `docs/stack.md` — a dependency file is structured data, not source, so this is checkable without reading code. Seven readers today: `go.mod`, `package.json`, `requirements.txt`, `pyproject.toml`, `Cargo.toml`, `composer.json`, `pom.xml` |
 
 Two of these are worth calling out because they are stronger than they look.
 
@@ -314,9 +314,16 @@ guess is exactly the false positive that would cost the user's trust in the othe
 The three above are unambiguous.
 
 **`stack` turns a rule into a gate.** "Technology not listed in `docs/stack.md` is an open
-decision, never adopted silently" reads like an unenforceable principle, but dependency
-manifests are structured files. Diffing the manifest against `stack.md` catches the silent
-dependency, and does it in any ecosystem that has a manifest.
+decision, never adopted silently" reads like an unenforceable principle, but a project's
+dependency file is a structured file. Diffing it against `stack.md` catches the silent
+dependency, and does it in any ecosystem that declares its dependencies as data.
+
+**An ecosystem with no reader is not checked, never failed.** No declared dependencies
+means Stack returns before it asks whether `stack.md` exists, so a Ruby, Elixir or
+Gradle project passes `scc validate` untouched rather than failing on a file scc never
+understood. That is the same rule as "a manifest scc cannot parse produces no findings",
+and it is why those three are absent: their manifests are executable code, and reading
+one honestly would mean evaluating it.
 
 ### The discipline eight validators require
 
