@@ -96,9 +96,9 @@ synonym used as a whole word in `docs/` is a finding.
 ## stack.md
 
 Every adopted technology, with one line on why. **Technology not listed here is an
-open decision, never something adopted silently** — and because dependency manifests
-are structured data, this is checkable: a dependency in `go.mod` or `package.json`
-that is absent from `stack.md` is a finding.
+open decision, never something adopted silently** — and because a project's
+dependency file is structured data rather than source, this is checkable: a direct
+dependency declared there and absent from `stack.md` is a finding.
 
 So adding a dependency is a two-step act: add it, and say here why it earned its
 place.
