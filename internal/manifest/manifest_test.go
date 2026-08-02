@@ -43,11 +43,11 @@ func TestHashIsStableAndDistinguishing(t *testing.T) {
 // Byte-identical output on every machine is what keeps an upgrade's diff limited
 // to what actually changed. Insertion order must not survive into the file.
 func TestBytesAreDeterministicAndSorted(t *testing.T) {
-	a := New("v1.0.0")
+	a := New("v1.0.0", paths.Claude)
 	a.Set("specs/z.md", Hash("z"), "v1")
 	a.Set(".claude/rules/routing.md", Hash("r"), "v1")
 
-	b := New("v1.0.0")
+	b := New("v1.0.0", paths.Claude)
 	b.Set(".claude/rules/routing.md", Hash("r"), "v1")
 	b.Set("specs/z.md", Hash("z"), "v1")
 
@@ -76,7 +76,7 @@ func TestBytesAreDeterministicAndSorted(t *testing.T) {
 // A manifest written on Windows is read on Linux — a committed workspace is a
 // shared workspace — so the recorded separator cannot be the host's.
 func TestPathsAreStoredSlashSeparated(t *testing.T) {
-	m := New("v1.0.0")
+	m := New("v1.0.0", paths.Claude)
 	m.Set(filepath.Join(".claude", "rules", "routing.md"), Hash("r"), "v1")
 	b, err := m.Bytes()
 	if err != nil {
@@ -91,7 +91,7 @@ func TestPathsAreStoredSlashSeparated(t *testing.T) {
 }
 
 func TestEmptyManifestSerializesFilesAsArray(t *testing.T) {
-	b, err := New("v1.0.0").Bytes()
+	b, err := New("v1.0.0", paths.Claude).Bytes()
 	if err != nil {
 		t.Fatalf("Bytes: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestUnknownFieldsSurviveARoundTrip(t *testing.T) {
 }
 
 func TestGetSetRemove(t *testing.T) {
-	m := New("v1.0.0")
+	m := New("v1.0.0", paths.Claude)
 	if _, ok := m.Get("a.md"); ok {
 		t.Error("Get on an empty manifest reported a hit")
 	}
@@ -153,7 +153,7 @@ func TestStatusDistinguishesPristineEditedMissing(t *testing.T) {
 	root := t.TempDir()
 	pristine := "the shipped template\n"
 	rel := ".claude/rules/routing.md"
-	m := New("v1.0.0")
+	m := New("v1.0.0", paths.Claude)
 	m.Set(rel, Hash(pristine), "v1.0.0")
 	e, _ := m.Get(rel)
 
@@ -188,7 +188,7 @@ func TestStatusDistinguishesPristineEditedMissing(t *testing.T) {
 // A missing manifest is "not a workspace", which is a different answer from "an
 // empty workspace" — and Find/IsWorkspace depend on the distinction.
 func TestLoadOnADirectoryWithoutAManifest(t *testing.T) {
-	m, found, err := Load(t.TempDir())
+	m, found, err := Load(t.TempDir(), paths.Claude)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -202,16 +202,16 @@ func TestLoadOnADirectoryWithoutAManifest(t *testing.T) {
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	m := New("v1.2.3")
+	m := New("v1.2.3", paths.Claude)
 	m.Set(".claude/rules/routing.md", Hash("r"), "v1.2.3")
 	m.Set(".claude/CLAUDE.md", Hash("c"), "v1.0.0")
-	if err := Save(root, m); err != nil {
+	if err := Save(root, paths.Claude, m); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	if !workspace.IsWorkspace(root) {
 		t.Error("Save did not create the workspace marker")
 	}
-	got, found, err := Load(root)
+	got, found, err := Load(root, paths.Claude)
 	if err != nil || !found {
 		t.Fatalf("Load = (%v, %v), want found", found, err)
 	}
@@ -224,21 +224,83 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+// The harness is load-bearing state rather than a diagnostic like the scc
+// version: an upgrade re-renders the recorded template version to reconstruct the
+// merge base, and a template rendered for the wrong harness produces a base the
+// file never had — which is how a merge silently clobbers.
+func TestHarnessRoundTripsAndIsPerHarness(t *testing.T) {
+	root := t.TempDir()
+	for _, h := range paths.Harnesses() {
+		m := New("v1.2.3", h)
+		m.Set(h.Dir+"/rules/routing.md", Hash("r"), "5")
+		if err := Save(root, h, m); err != nil {
+			t.Fatalf("%s: Save: %v", h.ID, err)
+		}
+	}
+	for _, h := range paths.Harnesses() {
+		got, found, err := Load(root, h)
+		if err != nil || !found {
+			t.Fatalf("%s: Load = (%v, %v), want found", h.ID, found, err)
+		}
+		if got.Harness != h.ID {
+			t.Errorf("%s: harness = %q, want %q", h.ID, got.Harness, h.ID)
+		}
+		if _, ok := got.Get(h.Dir + "/rules/routing.md"); !ok {
+			t.Errorf("%s: manifest does not carry its own harness's entry", h.ID)
+		}
+	}
+}
+
+// A manifest arrives with a clone, and `scc update` joins its recorded paths onto
+// the root and then calls os.Remove. An entry that escapes the workspace is the
+// hostile input this project's SafeName rule exists for, so Load refuses the file
+// rather than acting on it.
+func TestLoadRefusesAPathThatEscapesTheWorkspace(t *testing.T) {
+	for _, bad := range []string{
+		"../outside.md",
+		".claude/../../outside.md",
+		"/etc/passwd",
+		`..\outside.md`,
+		"",
+	} {
+		root := t.TempDir()
+		doc := `{"scc":"v1","harness":"claude","files":[{"path":"` + bad + `","hash":"x","version":"5"}]}`
+		if err := workspace.AtomicWrite(paths.Claude.Manifest(root), []byte(doc), 0o644); err != nil {
+			t.Fatalf("AtomicWrite: %v", err)
+		}
+		if _, _, err := Load(root, paths.Claude); err == nil {
+			t.Errorf("Load accepted the entry %q", bad)
+		}
+	}
+}
+
+func TestLoadAcceptsOrdinaryPaths(t *testing.T) {
+	root := t.TempDir()
+	doc := `{"scc":"v1","harness":"claude","files":[{"path":".claude/rules/routing.md","hash":"x","version":"5"}]}`
+	if err := workspace.AtomicWrite(paths.Claude.Manifest(root), []byte(doc), 0o644); err != nil {
+		t.Fatalf("AtomicWrite: %v", err)
+	}
+	m, found, err := Load(root, paths.Claude)
+	if err != nil || !found || len(m.Files) != 1 {
+		t.Fatalf("Load = (%+v, %v, %v)", m, found, err)
+	}
+}
+
 // Save writes what Bytes reports, so a caller can compare against the file on
 // disk and skip an identical write — which is what makes a second `scc init` a
 // no-op rather than a rewrite.
 func TestSaveWritesExactlyBytes(t *testing.T) {
 	root := t.TempDir()
-	m := New("v1.0.0")
+	m := New("v1.0.0", paths.Claude)
 	m.Set("a.md", Hash("a"), "v1.0.0")
 	want, err := m.Bytes()
 	if err != nil {
 		t.Fatalf("Bytes: %v", err)
 	}
-	if err := Save(root, m); err != nil {
+	if err := Save(root, paths.Claude, m); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	got, err := os.ReadFile(paths.Manifest(root))
+	got, err := os.ReadFile(paths.Claude.Manifest(root))
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -249,10 +311,10 @@ func TestSaveWritesExactlyBytes(t *testing.T) {
 
 func TestLoadRejectsInvalidJSON(t *testing.T) {
 	root := t.TempDir()
-	if err := workspace.AtomicWrite(paths.Manifest(root), []byte("{not json"), 0o644); err != nil {
+	if err := workspace.AtomicWrite(paths.Claude.Manifest(root), []byte("{not json"), 0o644); err != nil {
 		t.Fatalf("AtomicWrite: %v", err)
 	}
-	if _, found, err := Load(root); err == nil {
+	if _, found, err := Load(root, paths.Claude); err == nil {
 		t.Errorf("Load = (found %v, nil error), want an error naming the file", found)
 	}
 }

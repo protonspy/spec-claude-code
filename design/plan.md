@@ -11,8 +11,9 @@ scc can scaffold itself, this file migrates.
 
 Section references (§n) are to `orchestration.md` throughout.
 
-**Status: phases 1–10 are built and green; phase 11 (`scc update`) is not started.**
-The command surface is `init`, `spec new|list|show|delete|validate`,
+**Status: phases 1–10 are built and green; phase 11 (`scc update`) shipped as
+replace-or-keep rather than as the three-way merge described below.**
+The command surface is `init`, `update`, `spec new|list|show|delete|validate`,
 `plan new|list|delete|validate`, `skill validate`, `validate`, `version`, `help`. §9
 records what the build settled that the plan left open, and where it deviated. Every
 decision listed in §5 has been folded back into `orchestration.md`.
@@ -563,11 +564,35 @@ a validator needs a written convention to check against: ADR frontmatter (`statu
 format (`- **term** — definition. Avoid: synonym`), the wiki's `index.md`/`changelog.md`
 pair, and the codewiki citation form.
 
-**Phase 11 is deliberately not started.** §3's reason now literally applies: only one
-template version exists, so `scc update` could only be tested against synthetic history.
-It becomes real work the moment a second template version ships. Until then the honest
-upgrade story is the one §6 already states — re-run `init`, which never overwrites what
-you edited.
+**Phase 11 shipped in two halves, and only the first half is built.** 11.2's command
+exists; 11.1's `internal/merge` does not. What `scc update` does is hash every managed
+file against what this build renders and against what the manifest recorded, print the
+resulting plan grouped by outcome — create, update, delete, conflict, owned — ask for
+confirmation, and then replace what is safe to replace. An edited file is *kept and
+named*, not merged and not silently overwritten; `--force` is the separate decision,
+and `--yes` is the confirmation given up front for unattended callers.
+
+That is less than the plan promised and it is on purpose. The three-way merge needs a
+store of historical renderings keyed by template version, and every argument for it
+assumes the user wants a conflict resolved in place rather than reported. Reporting is
+strictly safer, it is testable today, and it is the part users would need first. The
+manifest keeps a conflicted file's *recorded* hash and version rather than today's,
+so the merge base the future merge needs is being preserved from now on rather than
+retrofitted later.
+
+**Three harnesses, one template set** — not in any phase, and the largest change since.
+`scc init --claude|--codex|--opencode` scaffolds the same methodology into Claude Code,
+Codex, or opencode, and the picker asks when a person is at the terminal and named no
+flag. The template tree lost its per-harness directory in the process: rules, skills,
+and reviewers are written once, the paths in them come from a harness profile, and the
+frontmatter each loader parses is synthesized at render time — TOML for a Codex agent
+role file, YAML for the other two. §6 records the layout and the two things that fall
+out of it: Codex ships no slash commands (its prompts are user-global and deprecated in
+favor of skills), and the manifest now records the harness, because a template rendered
+for the wrong one would be a wrong merge base.
+
+The data-free rule from Phase 1.2 survives this, restated: the harness profile is the
+only value a workspace template may interpolate, and it is data scc records.
 
 One thing the build found that no phase predicted, worth recording because it is the
 class of bug this whole design is about: the first end-to-end run of

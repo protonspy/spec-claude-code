@@ -13,7 +13,7 @@ import (
 // writeSkill lays out .claude/skills/<name>/SKILL.md with the given content.
 func writeSkill(t *testing.T, root, name, content string) string {
 	t.Helper()
-	dir := filepath.Join(paths.Skills(root), name)
+	dir := filepath.Join(paths.Claude.Skills(root), name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestBodyBudget(t *testing.T) {
 
 func TestMissingSkillMD(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(paths.Skills(root), "empty-dir"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(paths.Claude.Skills(root), "empty-dir"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	set := skills(t, root)

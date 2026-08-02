@@ -11,22 +11,24 @@ several of them are evidence-backed rather than preferences.
 ## 0 · What scc ships
 
 Same philosophy as csdd: **scc is a template plus a CLI.** The binary scaffolds a
-workspace — rules, skills, agents, spec templates — into `.claude/`, `specs/`, and
-`docs/`, all of it plain Markdown compiled into the binary via `//go:embed`, and then
-validates what lives there. There is no conversion layer and no runtime: the files
-Claude Code already reads *are* the API, and the CLI is how they are created,
-checked, and upgraded.
+workspace — rules, skills, agents, spec templates — into the harness's own
+configuration directory plus `specs/`, `plans/`, and `docs/`, all of it plain Markdown compiled
+into the binary via `//go:embed`, and then validates what lives there. There is no
+conversion layer and no runtime: the files the harness already reads *are* the API,
+and the CLI is how they are created, checked, and upgraded.
 
 scc adds **no directory of its own** and **no config file**. It owns exactly one file,
-`.claude/scc-manifest.json`: content hashes, so an upgrade can tell a pristine file
-from an edited one — and, by existing at all, the workspace marker. It has nothing to
-configure because it runs nothing; the project's test and lint commands (§7) are a rule
-under `.claude/rules/`, Markdown the orchestrator already reads.
+`<harness>/scc-manifest.json`: content hashes and the template version per managed
+file, so an upgrade can tell a pristine file from an edited one — and, by existing at
+all, the workspace marker. It has nothing to configure because it runs nothing; the
+project's test and lint commands (§7) are a rule under the harness's rules directory,
+Markdown the orchestrator already reads.
 
-The marker is that file rather than `.claude/` itself because `~/.claude` is Claude
-Code's global config on every machine — a walk accepting the directory would resolve
-any out-of-workspace command's root to `$HOME` — and because `.claude/` also exists in
-repos that merely use Claude Code, where scc was never initialized.
+The marker is that file rather than the directory itself because every harness has a
+global twin in the user's home — `~/.claude`, `~/.codex`, `~/.config/opencode` — so a
+walk accepting the directory would resolve any out-of-workspace command's root to
+`$HOME`, and because those directories also exist in repos that merely use the tool,
+where scc was never initialized.
 
 That is why everything below describes both a rule and its artifact. A rule the
 binary cannot scaffold is documentation; a rule it cannot check is a suggestion.
@@ -362,12 +364,12 @@ claimed TDD and check them.
 
 ## 6 · Where the rules live
 
-`.claude/rules/` is the home of the rules, as in csdd. The scaffolded `CLAUDE.md`
+`<harness>/rules/` is the home of the rules, as in csdd. The scaffolded entry file
 stays small and points at them.
 
-This is a token-budget decision, not organization: every Claude Code session pays
-for `CLAUDE.md` in context, so the routing table and the two cycles do not belong
-inline there. `.claude/rules/` files are read when the rule is relevant.
+This is a token-budget decision, not organization: every session pays for the entry
+file in context, so the routing table and the two cycles do not belong inline there.
+The rules are read when the rule is relevant.
 
 The evidence for keeping `CLAUDE.md` short is **context rot**, not the frequently-cited
 `AGENTS.md` efficiency study. Chroma's measurement across 18 frontier models found accuracy
@@ -377,9 +379,50 @@ sooner on more complex tasks. Length has a cost in correctness, not just in toke
 of scope; the "three sections, under 150 lines" prescription attributed to it is not in it.
 Don't cite it for a length rule.)
 
-**No `AGENTS.md`.** Claude Code doesn't read it natively, so shipping one means shipping an
-import from `CLAUDE.md` too — a second file and an indirection to buy portability to tools
-this product isn't for. Anyone who wants cross-tool context can write it themselves.
+### Three harnesses, one template set
+
+`scc init` scaffolds for Claude Code (the default), Codex, or opencode — one per run,
+`--claude` / `--codex` / `--opencode`, and it asks when a person is at the terminal
+and passed no flag. What differs between them is entirely *where files go and what
+dialect the loader parses*, never what the methodology says:
+
+| | Claude Code | Codex | opencode |
+|---|---|---|---|
+| entry file | `CLAUDE.md` | `AGENTS.md` | `AGENTS.md` |
+| rules | `.claude/rules/` | `.codex/rules/` | `.opencode/rules/` |
+| review agents | `.claude/agents/*.md` | `.codex/agents/*.toml` | `.opencode/agent/*.md` |
+| skills | `.claude/skills/<n>/SKILL.md` | `.codex/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` |
+| slash commands | `.claude/commands/scc-*.md` | — | `.opencode/command/scc-*.md` |
+| manifest | `.claude/scc-manifest.json` | `.codex/scc-manifest.json` | `.opencode/scc-manifest.json` |
+
+**One prose source, addressed three ways.** The rules, the skills, and the reviewers
+are written once; the paths in them come from a harness profile and the header each
+loader parses is synthesized at render time. A copy of the template set per harness
+would drift, and the drift would be silent — the same argument that keeps the
+methodology out of skills two paragraphs up.
+
+This is the one thing templates may interpolate, and it does not cost the upgrade
+path: a `(template version, harness)` pair still renders byte-identically everywhere,
+and the manifest records both, so re-rendering the recorded version to reconstruct a
+merge base stays exact.
+
+**Codex ships no slash commands, deliberately.** Its custom prompts are user-global
+and now deprecated in favor of skills, so there is nothing project-scoped to write
+and scc does not write into anyone's home directory. The six skills are the whole
+surface there, which is what Codex itself recommends.
+
+**Codex and opencode share `AGENTS.md`, and the first one initialized wins it.** A
+repo scaffolded for both has one entry file, written by whichever ran first and never
+overwritten afterwards, pointing at that harness's rules directory. The second
+harness's session follows those links and gets the right methodology: eight of the
+nine rules are byte-identical between the two, and the ninth differs only in a
+glossary *example* naming a manifest path. So the second tree is a duplicate nothing
+links to — a wart, not a broken workspace, and the design is choosing it over the
+alternatives: inventing a neutral rules directory neither tool knows about, or
+rewriting a file the user owns.
+
+`scc update` keeps both trees current regardless, because it works from each
+harness's own manifest rather than from the entry file.
 
 ### Which skills ship — the authors of `docs/`
 
@@ -421,8 +464,8 @@ Two subagents ship with the workspace, and both of them read rather than write:
 
 | Agent | Role |
 |---|---|
-| **code-review** | Reviews the diff for correctness and quality. |
-| **security-review** | Reviews the diff for security defects specifically. |
+| **code-review** | Runs five gates over the diff: the ticked boxes are true, the code matches the tasks, the feature's tests, the lint, and the best practices no linter has an opinion about. |
+| **security-review** | Looks for what the change makes possible, attack-class agnostic: surface, trust boundaries, reachability, deliberate attack. |
 
 Splitting review by lens is deliberate: a single reviewer asked for "everything"
 reliably under-weights security, because the correctness findings are easier to
@@ -433,6 +476,30 @@ implementation doesn't (§8): **a cold context is the feature.** The author of a
 change is its worst reader — they see what they meant. And a reviewer reads instead
 of writes, so running one on a cheaper model costs far less than delegating
 authorship would.
+
+**Both pin `model: sonnet` and `effort: high`.** The mid tier is the right trade for
+work that reads and judges rather than authors, and the reasoning budget is where the
+quality actually comes from here: tracing a value from an argument to a shell, or a
+ticked box to the code behind it, is chains-of-inference work, not knowledge work. A
+cheap model at low effort produces the review's *shape* without its content, which is
+worse than no review because it reads like one.
+
+**A checklist for correctness, a method for security.** They differ because the
+questions differ. Correctness has a finite, knowable set of things the orchestrator
+already claimed to have done — so the reviewer re-does them as named gates and
+re-runs the commands itself, since "the author said it was green" is exactly the
+evidence a cold reader exists to distrust. Security has no such set: a checklist of
+attack names bounds the review at the names, and the interesting weakness is the one
+nobody named. So that agent gets passes over the code — surface, boundaries,
+reachability, attack — with the known classes demoted to prompts that jog the passes
+and explicitly not the definition of done.
+
+**Both report in a fixed shape, and the shape is the handoff.** A verdict, a table of
+what was actually checked (including what could not be run, as `not-run` and never as
+a pass), findings with severities that map to actions, and a place for the
+unconfirmed suspicion so it is not smuggled in as a finding. The orchestrator branches
+on that report in §9 without re-reading the diff — which is the whole point of paying
+for a second context.
 
 ### The orchestrator closes the loop on every task
 
@@ -577,10 +644,13 @@ Once the last task is done:
 
 1. **Full suite + lint** on the integrated branch — the per-task scoped runs (§7)
    cannot see breakage between tasks.
-2. **`code-review` and `security-review`** on the diff (§7), and fix what they find.
-   The PR should arrive already reviewed; a PR is for the human, and spending their
-   attention on findings a subagent would have caught is the waste this ordering
-   avoids.
+2. **`code-review` and `security-review`** on the diff (§7), dispatched together, and
+   fix from their reports by severity: `blocker`/`critical` stops the PR,
+   `major`/`high` is fixed before merge, `minor`/`low` is a judgment call stated in
+   the PR body. The PR should arrive already reviewed; a PR is for the human, and
+   spending their attention on findings a subagent would have caught is the waste
+   this ordering avoids. One fix-and-re-review round; a second means the finding
+   wants a person.
 3. **Commit and push** — Conventional Commits, generated from the diff and the spec.
 4. **Open the PR.**
 
@@ -770,13 +840,38 @@ conflict idiom in the whole product instead of two.
 
 **This constrains the manifest.** A three-way merge needs the old rendered *text*, not just
 its hash. scc embeds its templates, so it can re-render any past version — but only if it
-knows which version produced each file. So `.claude/scc-manifest.json` records **a version
-per entry alongside the content hash**: the hash answers "did the user edit this?", the
-version answers "what did it look like before?" Both are required, and a manifest carrying
-only hashes cannot support this.
+knows which version produced each file, and for which harness. So `<harness>/scc-manifest.json`
+records **a version per entry alongside the content hash**, and the harness once for the
+file: the hash answers "did the user edit this?", the version and harness answer "what did
+it look like before?" All three are required, and a manifest carrying only hashes cannot
+support this.
 
 Files that exist to be edited once and then owned by the user are **excluded from the merge**
 rather than merged badly.
+
+### What shipped first: replace-or-keep, with the plan shown
+
+The merge above is the destination. What `scc update` does today is the honest subset
+of it, and it is deliberately not a merge:
+
+- Every managed file is hashed against what this build renders and against what the
+  manifest says scc last wrote. That splits it four ways — **current**, **create**
+  (new in this version, or deleted), **update** (still exactly what scc wrote, and
+  the template moved), **conflict** (the user changed it) — plus **delete** for a
+  file this version no longer ships and **owned** for the two files that exist to be
+  edited.
+- **The plan is printed and confirmed before anything is written.** Not a nicety: an
+  update is the one command that can destroy work, and a summary the user agrees to
+  is what makes the difference between a tool and a surprise. `--yes` is that
+  agreement given up front and is required when stdin is not a terminal, `--dry-run`
+  reports and stops.
+- **A conflict is kept, not merged and not clobbered**, and is reported by name with
+  what to do about it. `--force` is a separate, explicit decision. The entry it keeps
+  in the manifest stays at the version scc last wrote — which is precisely the base
+  revision the three-way merge will need when it lands.
+
+The merge is what upgrades this into: same plan, same confirmation, but a conflict
+gets resolved instead of deferred.
 
 ## Open questions
 

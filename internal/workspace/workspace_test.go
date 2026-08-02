@@ -94,7 +94,7 @@ func TestAtomicWriteOverwrites(t *testing.T) {
 // markWorkspace creates the .claude/scc-manifest.json marker under root.
 func markWorkspace(t *testing.T, root string) {
 	t.Helper()
-	if err := AtomicWrite(paths.Manifest(root), []byte("{}\n"), 0o644); err != nil {
+	if err := AtomicWrite(paths.Claude.Manifest(root), []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("writing marker: %v", err)
 	}
 }
@@ -120,7 +120,7 @@ func TestFindWalksUpToMarker(t *testing.T) {
 // repo that merely uses Claude Code, where scc was never initialized.
 func TestFindIgnoresClaudeDirWithoutMarker(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(paths.Claude(root), 0o755); err != nil {
+	if err := os.MkdirAll(paths.Claude.Config(root), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	deep := filepath.Join(root, "a")
@@ -137,12 +137,38 @@ func TestFindIgnoresClaudeDirWithoutMarker(t *testing.T) {
 // not a workspace, and must not be silently accepted as one.
 func TestFindRejectsMarkerThatIsADirectory(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(paths.Manifest(root), 0o755); err != nil {
+	if err := os.MkdirAll(paths.Claude.Manifest(root), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	assertSameDir(t, Find(root), root) // falls back to start, not "found"
 	if IsWorkspace(root) {
 		t.Error("IsWorkspace = true for a directory named like the manifest, want false")
+	}
+}
+
+// A symlink is not a marker. The marker's whole claim is "scc wrote this here",
+// and a link pointing at somebody else's manifest — the user's global one, say —
+// satisfies Stat while making that claim false.
+func TestFindRejectsASymlinkedMarker(t *testing.T) {
+	elsewhere := filepath.Join(t.TempDir(), "real-manifest.json")
+	if err := AtomicWrite(elsewhere, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("AtomicWrite: %v", err)
+	}
+	root := t.TempDir()
+	marker := paths.Claude.Manifest(root)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(elsewhere, marker); err != nil {
+		// Unprivileged Windows without developer mode cannot make one; the
+		// behavior under test is unreachable there rather than wrong.
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if IsWorkspace(root) {
+		t.Error("IsWorkspace = true for a symlinked marker, want false")
+	}
+	if len(Harnesses(root)) != 0 {
+		t.Error("a symlinked marker was reported as an initialized harness")
 	}
 }
 
@@ -162,6 +188,41 @@ func TestFindStopsAtNearestMarker(t *testing.T) {
 func TestFindWithoutMarkerReturnsStart(t *testing.T) {
 	dir := t.TempDir()
 	assertSameDir(t, Find(dir), dir)
+}
+
+// A workspace is a workspace whichever harness scaffolded it: specs/, plans/, and
+// docs/ sit at that root either way, so every command has to resolve it.
+func TestFindAcceptsAnyHarnessMarker(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		root := t.TempDir()
+		if err := AtomicWrite(h.Manifest(root), []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("%s: writing marker: %v", h.ID, err)
+		}
+		deep := filepath.Join(root, "a", "b")
+		if err := os.MkdirAll(deep, 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		assertSameDir(t, Find(deep), root)
+		got := Harnesses(root)
+		if len(got) != 1 || got[0].ID != h.ID {
+			t.Errorf("Harnesses = %v, want just %s", got, h.ID)
+		}
+	}
+}
+
+// Running init twice for two harnesses leaves two managed trees in one repo, and
+// both have to be visible: each is upgraded on its own manifest.
+func TestHarnessesReportsEveryInitializedTree(t *testing.T) {
+	root := t.TempDir()
+	for _, h := range []paths.Harness{paths.Claude, paths.OpenCode} {
+		if err := AtomicWrite(h.Manifest(root), []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("%s: writing marker: %v", h.ID, err)
+		}
+	}
+	got := Harnesses(root)
+	if len(got) != 2 || got[0].ID != paths.Claude.ID || got[1].ID != paths.OpenCode.ID {
+		t.Errorf("Harnesses = %v, want [claude opencode] in that order", got)
+	}
 }
 
 func TestResolveRejectsMissingRoot(t *testing.T) {

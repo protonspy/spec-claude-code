@@ -4,15 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`scc` is a single Go binary (`github.com/protonspy/spec-claude-code`) that enforces Spec-Driven Development inside a Claude Code repo. One surface: a headless CLI, so an AI agent or a CI job drives it exactly as well as a human does.
+`scc` is a single Go binary (`github.com/protonspy/spec-claude-code`) that enforces Spec-Driven Development inside an agent-driven repo — Claude Code, Codex, or opencode. One surface: a headless CLI, so an AI agent or a CI job drives it exactly as well as a human does.
 
-The artifacts it governs (`.claude/`, `specs/`, `docs/`) are plain Markdown/JSON. There is no server and no database — the files *are* the API. scc has no directory of its own: its state lives in one file under `.claude/`, alongside what Claude Code already keeps there.
+The artifacts it governs (the harness's own directory, `specs/`, `plans/`, `docs/`) are plain Markdown/JSON. There is no server and no database — the files *are* the API. scc has no directory of its own: its state lives in one file under the harness's directory, alongside what that tool already keeps there.
 
-This file covers working *on* scc. The product's own rules and methodology are not documented here: they live in `design/` while being designed, and ship as templates the binary scaffolds into `.claude/rules/`.
+This file covers working *on* scc. The product's own rules and methodology are not documented here: they live in `design/` while being designed, and ship as templates the binary scaffolds into `<harness>/rules/`.
 
-Note: this repo is not itself an scc workspace (no `.claude/`, `specs/`, or `docs/` are committed) — those trees only exist in workspaces the binary scaffolds, and in test temp dirs.
+Note: this repo is not itself an scc workspace (no harness directory, `specs/`, `plans/`, or `docs/` are committed) — those trees only exist in workspaces the binary scaffolds, and in test temp dirs.
 
-**Status: v0.3.0-shaped.** Everything through `design/plan.md` phase 10 is built and green: scaffolding (`init`), artifact creation (`spec`, `plan`), and all eight validators behind `scc validate`. `init` also scaffolds the six knowledge-base skills named in `design/orchestration.md` §6 — one per `docs/` artifact a validator checks, plus `prd` — each with a `scc-`-prefixed slash command derived from the same list (`assets.KnowledgeSkills`). `scc update` (phase 11) is not started, deliberately — a three-way merge is untestable until a second template version exists, so until then the upgrade story is "re-run `init`; it never overwrites what you edited".
+**Status: v0.4.0-shaped.** Everything through `design/plan.md` phase 10 is built and green: scaffolding (`init`), artifact creation (`spec`, `plan`), and all eight validators behind `scc validate`. `init` also scaffolds the six knowledge-base skills named in `design/orchestration.md` §6 — one per `docs/` artifact a validator checks, plus `prd` — each with a `scc-`-prefixed slash command derived from the same list (`assets.KnowledgeSkills`), wherever the harness has a command surface.
+
+Two things landed after phase 10 and both are documented in `design/orchestration.md` §6 and §12:
+
+- **Three harnesses, one template set.** `scc init --claude|--codex|--opencode` (Claude Code is the default, and a terminal with no flag gets a picker). One prose source: paths come from a `paths.Harness` profile and the header each loader parses is synthesized at render time — YAML frontmatter for Claude Code and opencode, a TOML agent role file for Codex.
+- **`scc update` (phase 11), as replace-or-keep rather than the planned three-way merge.** It hashes every managed file against this build and against the manifest, prints the plan grouped by outcome, asks, and then replaces what is safe to replace. An edited file is kept and named; `--force` is the separate decision. `internal/merge` is still unbuilt.
 
 `scc` is a redesign of `csdd` (`github.com/protonspy/csdd`), narrowed to spec-driven development and deliberately leaner. When reaching for something from there, port the *decision*, not the file. Already decided against: a TUI, an embedded web dashboard, an MCP server, a devcontainer.
 
@@ -55,21 +60,21 @@ cmd/scc/main.go         os.Exit(cli.Run(os.Args[1:]))
         |
    paths · workspace · render · textutil · finding
         |
-   plain files on disk: .claude/ · specs/ · plans/ · docs/ · CLAUDE.md
+   plain files on disk: <harness>/ · specs/ · plans/ · docs/ · CLAUDE.md|AGENTS.md
 ```
 
 `internal/cli/cli.go` is the whole dispatcher: `Run(args)` switches on `args[0]` and hands off to `run<Resource>` in a file named for that resource. Each handler owns its own `flag.FlagSet`. Adding a subcommand means adding a case there plus one file — nothing is registered dynamically, so the command set is readable in one place.
 
 | Package | Role |
 |---|---|
-| `internal/paths` | Every directory/file name in the on-disk layout, in one place. Never hardcode `".claude"` or `"specs"` elsewhere. |
-| `internal/workspace` | Resolves the root by walking up for the `.claude/scc-manifest.json` marker; owns `KebabCheck`, `SafeName`, `AtomicWrite`. Knows nothing about specs or wikis. |
+| `internal/paths` | Every directory/file name in the on-disk layout, in one place, plus the `Harness` profile (`Claude`, `Codex`, `OpenCode`) that says where each tool keeps things. Never hardcode `".claude"` or `"specs"` elsewhere — the harness-relative paths are methods on `Harness`. |
+| `internal/workspace` | Resolves the root by walking up for *any* harness's `scc-manifest.json` marker; `Harnesses(root)` says which trees exist. Owns `KebabCheck`, `SafeName`, `AtomicWrite`. Knows nothing about specs or wikis. |
 | `internal/render` | CLI terminal output (`✓ ✗ ! •`, `NO_COLOR`/TTY aware), split across stdout/stderr. |
 | `internal/textutil` | Line-ending and BOM normalization, in exactly one place. |
 | `internal/finding` | One finding type and one frozen JSON shape (`{findings, count}`) for every validator, plus the grouped human report. |
-| `internal/manifest` | `.claude/scc-manifest.json`: `{path, hash, version}` per managed file, deterministic serialization, `Status → pristine\|edited\|missing`. Unknown fields are preserved. |
-| `internal/assets` | The embedded template set — rules, review agents, skills, slash commands, artifact templates. **Workspace templates are data-free** (that is what makes a future three-way merge possible); **artifact templates take data** (`spec new` renders them and the user owns the result). `Version` is the template-set version and must be bumped whenever a workspace template changes. |
-| `internal/scaffold` | Applies the template set to a root. Idempotent, never overwrites, manifest written last. |
+| `internal/manifest` | `<harness>/scc-manifest.json`: `{path, hash, version}` per managed file plus the harness, deterministic serialization, `Status → pristine\|edited\|missing`. Unknown fields are preserved. Every call takes the `paths.Harness` whose manifest it means. |
+| `internal/assets` | The embedded template set — rules, review agents, skills, slash commands, artifact templates. **Workspace templates are data-free except for the harness profile** (a `(version, harness)` pair still renders byte-identically everywhere, and the manifest records both, so the future three-way merge can still reconstruct the old side); **artifact templates take data** (`spec new` renders them and the user owns the result). `Render(h, file)` is the only way to get a workspace file's bytes: it expands paths and synthesizes the per-harness header for agents and commands. `Version` is the template-set version and must be bumped whenever a workspace template changes. |
+| `internal/scaffold` | Applies the template set to a root (`Apply`) and brings an existing one current (`PlanUpdate`/`ApplyUpdate`). Idempotent, never overwrites without being told to, manifest written last. |
 | `internal/mdscan` | The only Markdown parser: fence- and HTML-comment-aware headings, checkboxes, links, wikilinks, slugs, plus a small frontmatter reader. `Body` is the comment/fence-stripped text every validator applies its grammar to. |
 | `internal/ears` | EARS requirement parsing, all five patterns plus complex. |
 | `internal/validate` | The eight validators, one file each, sharing `mdscan` and `finding`. |
@@ -89,9 +94,11 @@ cmd/scc/main.go         os.Exit(cli.Run(os.Args[1:]))
 
 **Writes are atomic.** Use `workspace.AtomicWrite` for anything a concurrent reader might see.
 
-**The marker is the file `.claude/scc-manifest.json`, never the `.claude/` directory.** Two reasons, and both are load-bearing: `~/.claude` is Claude Code's own global config directory and exists on every machine that runs it, so an upward walk accepting the *directory* would resolve the root to `$HOME` for any command run outside a workspace — every command would then read and write the user's global configuration. And `.claude/` exists in every repo that merely *uses* Claude Code, where scc was never initialized. `workspace.Find` therefore stats a regular file.
+**The marker is the file `<harness>/scc-manifest.json`, never the harness directory.** Two reasons, and both are load-bearing: every harness has a global twin in the user's home (`~/.claude`, `~/.codex`, `~/.config/opencode`) that exists on any machine running that tool, so an upward walk accepting the *directory* would resolve the root to `$HOME` for any command run outside a workspace — every command would then read and write the user's global configuration. And those directories exist in every repo that merely *uses* the tool, where scc was never initialized. `workspace.Find` therefore stats a regular file, for each harness in turn.
 
-**scc has exactly one file and no config file.** The manifest is it — content hashes, doubling as the marker. scc runs no tests and no linters, so it has nothing to configure; a project's test and lint commands are a rule under `.claude/rules/`, which is Markdown the orchestrator already reads. Resist adding `scc.json`: a JSON schema to version, read by nothing inside the binary, is dead weight.
+**scc has exactly one file per harness and no config file.** The manifest is it — content hashes, doubling as the marker. scc runs no tests and no linters, so it has nothing to configure; a project's test and lint commands are a rule under `<harness>/rules/`, which is Markdown the orchestrator already reads. Resist adding `scc.json`: a JSON schema to version, read by nothing inside the binary, is dead weight.
+
+**Adding a harness touches one place.** A new `paths.Harness` value plus its entry in `paths.Harnesses()` is the whole change — `init`'s flags, the picker, `update`'s targets, the skills validator's search path, and the workspace walk all derive from that list. If a change needs a `switch h.ID` outside `assets.renderAgent`/`renderCommand`, the profile is missing a field.
 
 **Never author what the user owns.** Upgrades preserve user-edited files rather than overwriting them; the manifest of content hashes is what makes a pristine file distinguishable from an edited one.
 
