@@ -30,10 +30,10 @@ plans/<name>.md    one file: structure, plus a checklist and/or spec references
 docs/              the knowledge base — wiki, adr, codewiki, glossary, stack
 
 {{.Rules}}/ — the methodology above
-{{.Skills}}/ — how to author each part of docs/, invoked when it applies
+{{.Skills}}/ — how to author each part of docs/, and how to run a plan to the end
 {{.Agents}}/ — code-review and security-review, run before the PR
 {{- if .HasCommands}}
-{{.Commands}}/ — the same skills on demand, as /scc-wiki, /scc-adr, /scc-prd, …
+{{.Commands}}/ — the same skills on demand, as /scc-plan-run, /scc-wiki, /scc-adr, …
 {{- end}}
 ```
 

@@ -4,7 +4,7 @@ description: Own docs/stack.md — every adopted technology with one line on why
 ---
 
 You own `docs/stack.md`. The rule it enforces is in
-[knowledge-base.md](../../rules/knowledge-base.md), and it is short: **technology
+`{{.Rules}}/knowledge-base.md`, and it is short: **technology
 not listed here is an open decision, never something adopted silently.**
 
 This is checkable because dependency manifests are structured data. `scc validate`

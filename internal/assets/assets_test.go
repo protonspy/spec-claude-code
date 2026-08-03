@@ -1,6 +1,7 @@
 package assets
 
 import (
+	"path"
 	"strings"
 	"testing"
 
@@ -376,11 +377,11 @@ func TestAgentProseIsSafeToEmbedInTOML(t *testing.T) {
 	}
 }
 
-// Every skill in KnowledgeSkills ships a SKILL.md in every harness, and its slash
-// command wherever the harness has a command surface. The two are derived from one
-// list so they cannot drift, and this is the assertion that keeps the derivation
-// honest — including for Codex, where the answer is deliberately no commands at
-// all.
+// Every skill in Skills() — knowledge and workflow alike — ships a SKILL.md in every
+// harness, and its slash command wherever the harness has a command surface. The two
+// are derived from one list so they cannot drift, and this is the assertion that
+// keeps the derivation honest — including for Codex, where the answer is
+// deliberately no commands at all.
 func TestEverySkillShipsWithItsCommand(t *testing.T) {
 	for _, h := range paths.Harnesses() {
 		skills, commands := map[string]bool{}, map[string]bool{}
@@ -394,22 +395,54 @@ func TestEverySkillShipsWithItsCommand(t *testing.T) {
 				commands[name] = true
 			}
 		}
-		if len(skills) != len(KnowledgeSkills) {
-			t.Fatalf("%s: %d skills, want %d", h.ID, len(skills), len(KnowledgeSkills))
+		all := Skills()
+		if len(skills) != len(all) {
+			t.Fatalf("%s: %d skills, want %d", h.ID, len(skills), len(all))
 		}
-		wantCommands := len(KnowledgeSkills)
+		wantCommands := len(all)
 		if h.CommandsSeg == "" {
 			wantCommands = 0
 		}
 		if len(commands) != wantCommands {
 			t.Fatalf("%s: %d commands, want %d", h.ID, len(commands), wantCommands)
 		}
-		for _, name := range KnowledgeSkills {
+		for _, name := range all {
 			if !skills[name] {
-				t.Errorf("%s: %s is in KnowledgeSkills and ships no SKILL.md", h.ID, name)
+				t.Errorf("%s: %s is in Skills() and ships no SKILL.md", h.ID, name)
 			}
 			if wantCommands > 0 && !commands[commandPrefix+name] {
 				t.Errorf("%s: %s ships no %s%s command", h.ID, name, commandPrefix, name)
+			}
+		}
+	}
+}
+
+// A skill names a rule by its path from the workspace root — `.claude/rules/x.md`,
+// expanded per harness — and never by a relative walk out of its own directory.
+//
+// Two things have to hold at once, and only one form satisfies both. An agent reads
+// files from the root, so the harness-relative path is the one it can act on. But
+// `skill` resolves a Markdown link against the skill's own directory and holds it to
+// the Agent Skills spec's one-level-deep rule, so writing that same path as a *link*
+// would make scc fail its own validator. Inline code is the form that is both correct
+// to read and invisible to the link check.
+//
+// TestFreshArtifactsPassTheirOwnValidators in internal/cli catches the link half of
+// this; this test catches the other half, which no validator can see — a `../..` that
+// stays inside a code span is silently useless to the agent reading it.
+func TestSkillsNameRulesByTheirHarnessPath(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		for _, f := range Workspace(h) {
+			if !strings.HasSuffix(f.Rel, "/SKILL.md") {
+				continue
+			}
+			out, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, f.Rel, err)
+			}
+			if strings.Contains(out, "../") {
+				t.Errorf("%s %s: reaches out of the skill directory with \"../\"; name the rule as %s/<rule>.md",
+					h.ID, f.Rel, path.Join(h.Dir, h.RulesSeg))
 			}
 		}
 	}

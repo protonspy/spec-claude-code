@@ -67,8 +67,8 @@ func TestScaffoldedSkillsPassTheSkillValidator(t *testing.T) {
 			got = append(got, e.Name())
 		}
 	}
-	if len(got) != len(assets.KnowledgeSkills) {
-		t.Errorf("scaffolded skills = %v, want %v", got, assets.KnowledgeSkills)
+	if len(got) != len(assets.Skills()) {
+		t.Errorf("scaffolded skills = %v, want %v", got, assets.Skills())
 	}
 
 	stdout, stderr, code := run(t, "skill", "validate", "--root", root, "--json")

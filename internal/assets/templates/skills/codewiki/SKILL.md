@@ -8,7 +8,7 @@ is about. The citation is what makes this different from a wiki page: it goes st
 loudly. When the code moves, `scc validate` fails instead of the page quietly
 becoming a lie.
 
-The format is in [knowledge-base.md](../../rules/knowledge-base.md). This skill is
+The format is in `{{.Rules}}/knowledge-base.md`. This skill is
 the procedure and the judgment.
 
 ## The citation form

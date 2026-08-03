@@ -415,7 +415,7 @@ merge base stays exact.
 
 **Codex ships no slash commands, deliberately.** Its custom prompts are user-global
 and now deprecated in favor of skills, so there is nothing project-scoped to write
-and scc does not write into anyone's home directory. The six skills are the whole
+and scc does not write into anyone's home directory. The skills are the whole
 surface there, which is what Codex itself recommends.
 
 **Codex and opencode share `AGENTS.md`, and the first one initialized wins it.** A
@@ -431,10 +431,10 @@ rewriting a file the user owns.
 `scc update` keeps both trees current regardless, because it works from each
 harness's own manifest rather than from the entry file.
 
-### Which skills ship — the authors of `docs/`
+### Which skills ship — the authors of `docs/`, plus one runner
 
-Six, and the rule that picks them is mechanical: **a skill ships for each `docs/`
-artifact a validator checks, and for nothing else.**
+Seven, in two lists, and each list has its own rule. The first is mechanical: **a
+skill ships for each `docs/` artifact a validator checks, and for nothing else.**
 
 | Skill | Authors | Checked by |
 |---|---|---|
@@ -455,6 +455,61 @@ delivery are rules under `.claude/rules/` (§3, §7, §9) — read when the conc
 live. csdd shipped `tdd-cycle`, `unit-cycle`, and `verify-change` as skills; here
 that would be a second copy of a rule, and the copy is the one that goes stale.
 
+**The one exception, and the line it draws — `plan-run`.** The second list holds
+skills that *run* the methodology rather than describe it, and it holds exactly one.
+
+| Skill | Runs | Owned by no rule |
+|---|---|---|
+| `plan-run` | a whole `plans/<name>.md`, group by group | the loop **across** units of work |
+
+The rule above is what makes it admissible rather than a leak. §9's delivery sequence
+ends at one merged pull request, because that is where one unit of work ends — a spec,
+or a plan's leaf. A plan is many of those in sequence, and running one to the end means
+picking the next group, branching it from the merge the previous group produced,
+holding CI green because every later group inherits that base, and recovering the
+position from `main` when a session dies mid-plan. None of that is in any rule, and
+none of it belongs in one: a rule is read when a concern is live, and this is a
+procedure a person starts on purpose and lets run.
+
+So the line is not "methodology may now be a skill." It is: **a skill may hold a
+procedure no rule holds; it may never restate one that a rule does.** `plan-run`
+therefore cites `delivery.md` for the single-group mechanics instead of copying
+them — if it ever grows its own account of how to open a PR, it has crossed back over.
+
+**It has its own kickoff, and that is not a violation of §4 — it is §4 applied.** The
+rule there is *ask once, before doing anything, and record the answer*; the mistake it
+forbids is asking repeatedly, not asking at all. A plan's recorded `autonomy` and `ci`
+were given when the plan was **written**. Starting a loop that will open and merge pull
+requests for hours is a different and larger thing to agree to, and it raises a
+question authoring never had — worktree per group, or the checkout you are in.
+
+So `plan-run` asks three questions, once, **after reporting the groups**, because the
+answers are only meaningful to someone who can see what they are agreeing to. Anything
+already in the frontmatter is shown as a proposed answer to confirm, never as a
+decision already taken. Four keys go back into the plan, and a resumed session reads
+them instead of asking again:
+
+| Key | Values | Decides |
+|---|---|---|
+| `autonomy` | `auto` · `gated` | straight through, or stop at each group boundary |
+| `worktree` | `per-group` · `in-place` | a worktree per group, or a branch in the current checkout |
+| `ci` | `wait` · `no-wait` | whether the checks have to settle before the merge |
+| `merge` | `auto` · `manual` | whether the loop merges, or stops at the PR for the developer |
+
+`worktree` and `merge` are new, plan-only, and validated by `plan` on exactly the terms
+`autonomy` and `ci` are — **only when present**, since a plan no loop has run over is
+not a plan with a defect. They are validated at all because the skill writes them and
+every later session reads them, so `worktree: yes` would silently decide how the next
+ten groups get built.
+
+The tempting alternative was for the loop to **override** `ci: no-wait`, on the
+argument that the next group branches from the merge and an unverified base poisons
+everything after it. Rejected: the argument is sound and the developer is still the one
+who gets to weigh it. Stating the cost at the moment of the question is how a tool
+respects a decision it disagrees with; overriding is how it stops being trusted.
+`no-wait` therefore stays available inside a loop, and the skill says out loud what it
+buys and what it costs before accepting it.
+
 **One slash command per skill, namespaced `scc-`.** A skill is model-invoked through
 its description; a command is the human saying *now*. Both are cheap, they are derived
 from one list so they cannot drift, and the prefix is not decoration — slash commands
@@ -464,6 +519,30 @@ share a flat namespace across every source Claude Code loads them from, and a ba
 The skills carry the *procedure and the judgment*; the format they produce stays in
 `.claude/rules/knowledge-base.md`, stated once. A skill that restated the format would
 be the same duplication the methodology rules are being kept out of skills to avoid.
+
+**How a skill names a rule — the path from the root, and never a link.** Every
+template writes a rule's path the same way, `<harness>/rules/<rule>.md`, expanded at
+render time so it is correct in each of the three trees. A `SKILL.md` is no exception,
+but it must write that path as **inline code rather than as a Markdown link**, and the
+two constraints that force it point in opposite directions:
+
+- An agent reads files from the workspace root. `<harness>/rules/delivery.md` is the
+  path it can act on directly; a relative walk like `../../rules/delivery.md` is one
+  the agent has to resolve against a directory it was never told it was in.
+- `skill` resolves a Markdown link **against the skill's own directory** and holds it
+  to the Agent Skills spec's one-level-deep rule. The same path written as a link
+  would resolve to `<harness>/skills/<n>/<harness>/rules/…`, and scc would report two
+  findings against its own scaffold.
+
+Inline code satisfies both: correct to read, and not a link, so the check that would
+misjudge it never sees it. This was got wrong once in the other direction — skills
+linking relatively, which conformed but handed the agent a path it could not use.
+
+Guarded from both sides, because neither guard alone is enough.
+`TestFreshArtifactsPassTheirOwnValidators` catches the link form, since a validator
+firing on scc's own output is the one defect that teaches users to disbelieve the
+other seven. `TestSkillsNameRulesByTheirHarnessPath` catches what no validator can
+see — a `../..` sitting inside a code span is silently useless to whoever reads it.
 
 ### The four seeded anchors — `docs/` is not an empty tree
 
