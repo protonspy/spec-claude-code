@@ -64,7 +64,10 @@ import (
 // 6: the knowledge base states the stack check without naming an ecosystem.
 // 7: the plan-run workflow skill and its command — running a whole plan, group by
 // group, is a procedure with an entry point rather than a rule read in passing.
-const Version = "7"
+// 8: the entry file names *when* to read each rule instead of tabulating all nine
+// as equals — five read on their own trigger, four looked up by name — and the two
+// review agents are tightened in the same pass.
+const Version = "8"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -220,6 +223,22 @@ func Seeds() []Seed {
 		{Name: "docs/wiki/index.md", Rel: path.Join(paths.DocsSeg, paths.WikiSeg, paths.WikiIndex)},
 	}
 }
+
+// RTKTemplate is the embedded name of the RTK usage block.
+const RTKTemplate = "rtk.md"
+
+// RTKBlock returns the marker-delimited RTK instructions `scc rtk` splices into
+// the entry file.
+//
+// A fragment, which is a fourth category and the only one that is not a file: it
+// lands *inside* a document the user owns, so the markers rather than a path are
+// what make it replaceable. RTK stamps its own version into the opening marker and
+// rewrites between the two, so scc shipping the block verbatim means `rtk init` and
+// `scc rtk` converge on one copy instead of racing to append a second.
+//
+// Data-free like every workspace template, and for a stronger reason than usual:
+// the same block has to be recognizable to a tool that is not scc.
+func RTKBlock() (string, error) { return Content(RTKTemplate) }
 
 // ReviewAgents names the two subagents scc ships. Both read and neither writes:
 // review is where a cold context is worth paying for, and authorship is not.

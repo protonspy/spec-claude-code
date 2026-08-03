@@ -88,9 +88,13 @@ func TestWorkspaceSetAndTreeAgree(t *testing.T) {
 		}
 		referenced[s.Name] = true
 	}
+	if _, err := RTKBlock(); err != nil {
+		t.Errorf("RTKBlock(): %v", err)
+	}
+	referenced[RTKTemplate] = true
 	for name := range inTree {
 		if !referenced[name] {
-			t.Errorf("embedded template %q is in no harness's Workspace(), Seeds(), and is not an artifact template", name)
+			t.Errorf("embedded template %q is in no harness's Workspace(), Seeds(), and is neither an artifact template nor a fragment", name)
 		}
 	}
 }
@@ -254,21 +258,32 @@ func TestScaffoldedEntryFileStaysShort(t *testing.T) {
 	}
 }
 
-// Every rule the scaffolded entry file points at has to exist under this
-// harness's own rules directory, or the entry file sends the agent to a file that
-// isn't there.
-func TestEntryFileLinksResolve(t *testing.T) {
+// Every rule scc scaffolds has to be named in the entry file, and the entry file
+// has to say where the rules live. Together those are the whole path from a cold
+// session to a rule: a rule nobody is told about is a file the agent never opens,
+// and a name with no directory is a lookup that fails.
+//
+// The check is the rule's own name rather than a Markdown link, because the entry
+// file addresses the set by pattern (`<rules dir>/<name>.md`) instead of listing
+// nine links. What it still guarantees is the thing that actually breaks: a rule
+// added to the template set without being announced fails here.
+func TestEntryFileNamesEveryRule(t *testing.T) {
 	for _, h := range paths.Harnesses() {
 		raw, err := Render(h, entryFile(t, h))
 		if err != nil {
 			t.Fatalf("%s: %v", h.ID, err)
 		}
+		rules := h.Dir + "/" + h.RulesSeg
+		if !strings.Contains(raw, rules) {
+			t.Errorf("%s: %s never says the rules are in %s/", h.ID, h.EntryFile, rules)
+		}
 		for _, f := range Workspace(h) {
-			if !strings.HasPrefix(f.Rel, h.Dir+"/"+h.RulesSeg+"/") {
+			if !strings.HasPrefix(f.Rel, rules+"/") {
 				continue
 			}
-			if !strings.Contains(raw, "("+f.Rel+")") {
-				t.Errorf("%s: %s does not link to %s", h.ID, h.EntryFile, f.Rel)
+			name := strings.TrimSuffix(path.Base(f.Rel), ".md")
+			if !strings.Contains(raw, name) {
+				t.Errorf("%s: %s never names the %s rule", h.ID, h.EntryFile, name)
 			}
 		}
 	}
