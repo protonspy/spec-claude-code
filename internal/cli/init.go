@@ -30,6 +30,7 @@ func runInit(args []string) int {
 	fs.SetOutput(os.Stderr)
 	root := addRoot(fs)
 	force := fs.Bool("force", false, "overwrite existing files, naming every edited file it clobbers")
+	withRTK := fs.Bool("rtk", false, "also wire in RTK: install it if missing, and put its usage block in the entry file")
 	picks := map[string]*bool{}
 	for _, h := range paths.Harnesses() {
 		picks[h.ID] = fs.Bool(h.ID, false, "scaffold for "+h.ID+" ("+h.EntryFile+", "+h.Dir+"/)")
@@ -60,8 +61,21 @@ func runInit(args []string) int {
 		return ExitError
 	}
 
+	// RTK is opt-in, and stays opt-in: wiring it in can shell out to cargo for
+	// minutes and it tells the agent to prefix every command with a binary this
+	// machine may not have. A default that does either would be scc making a
+	// decision about someone else's toolchain.
+	rtkCode := ExitOK
+	var rtkOut *rtkReport
+	if *withRTK {
+		rtkOut, rtkCode = applyRTK(target, rtkOptions{quiet: *jsonOut})
+	}
+
 	if *jsonOut {
-		return emitJSON(res)
+		if c := emitJSON(initReport{Result: res, RTK: rtkOut}); c != ExitOK {
+			return c
+		}
+		return rtkCode
 	}
 
 	// Clobbered files come first: it is the only outcome that destroyed something,
@@ -84,7 +98,15 @@ func runInit(args []string) int {
 		render.Info(fmt.Sprintf("read %s, then fill in %s/project.md with this project's commands",
 			harness.EntryFile, path.Join(harness.Dir, harness.RulesSeg)))
 	}
-	return ExitOK
+	return rtkCode
+}
+
+// initReport is init's JSON document. The scaffold result is embedded, so its shape
+// is unchanged for every caller already parsing it, and "rtk" appears only in the
+// runs that asked for RTK.
+type initReport struct {
+	*scaffold.Result
+	RTK *rtkReport `json:"rtk,omitempty"`
 }
 
 // mustCwd is only ever used to make a path friendlier to print, so a failure

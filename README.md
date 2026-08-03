@@ -33,6 +33,29 @@ Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc i
 | `plan new\|list\|delete\|validate` | One file, for everything else: a checklist, a decomposition into specs, or both. |
 | `skill validate` | Conformance to the published [Agent Skills](https://agentskills.io/specification) spec. |
 | `validate` | Every applicable validator, one exit code, one JSON document. |
+| `rtk` | Wires in [RTK](https://github.com/rtk-ai/rtk): installs it if missing, then splices its usage block into the entry file. |
+
+### RTK, optionally
+
+[RTK](https://github.com/rtk-ai/rtk) is a CLI proxy that filters command output down
+to what is worth spending context on. `scc rtk` — or `scc init --rtk` in one step —
+installs it with cargo when it is not on PATH, and puts its usage block into
+`CLAUDE.md`/`AGENTS.md` so the agent knows to prefix commands with it:
+
+```bash
+npx @protonspy/scc init --rtk    # scaffold, then wire RTK in
+npx @protonspy/scc rtk           # wire it into a workspace that already exists
+npx @protonspy/scc rtk --check   # CI: exit 2 when the block is missing
+```
+
+The block sits between RTK's own `<!-- rtk-instructions -->` markers, and scc inserts
+one only where there is none: a block already in the file is left exactly as it is,
+whatever version it claims, because RTK writes that block and `rtk init` is what
+refreshes it. `--force` replaces it with the copy this scc ships. Everything outside
+the markers is untouched either way.
+
+Opt-in on purpose: it tells the agent to prefix every command with a binary the
+machine may not have. `--no-install` writes the block and never touches cargo.
 
 ### Three harnesses, one methodology
 

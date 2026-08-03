@@ -18,6 +18,7 @@ Three things landed after phase 10 and all are documented in `design/orchestrati
 
 - **Three harnesses, one template set.** `scc init --claude|--codex|--opencode` (Claude Code is the default, and a terminal with no flag gets a picker). One prose source: paths come from a `paths.Harness` profile and the header each loader parses is synthesized at render time — YAML frontmatter for Claude Code and opencode, a TOML agent role file for Codex.
 - **`scc update` (phase 11), as replace-or-keep rather than the planned three-way merge.** It hashes every managed file against this build and against the manifest, prints the plan grouped by outcome, asks, and then replaces what is safe to replace. An edited file is kept and named; `--force` is the separate decision. `internal/merge` is still unbuilt.
+- **`scc rtk`, and `scc init --rtk`.** Wires in [RTK](https://github.com/rtk-ai/rtk), the CLI proxy that filters command output: `cargo install` when the binary is missing, plus a splice of RTK's marker-delimited usage block into the entry file. Insert-only — a block already between the markers is left alone whatever version it claims, because RTK owns that text and `rtk init` refreshes it; `--force` is the separate decision. Opt-in in both places, since the block tells the agent to prefix every command with a binary the machine may not have. `--check` reports without writing and exits 2 when the block is missing.
 - **The four seeded `docs/` anchors** (`assets.Seeds`). `init` writes `glossary.md`, `stack.md`, `wiki/index.md`, and `wiki/changelog.md` — the knowledge base's only fixed-name documents, each holding the format its validator checks. A seed is written once and tracked nowhere: not in the manifest, not by `scc update`.
 
 `scc` is a redesign of `csdd` (`github.com/protonspy/csdd`), narrowed to spec-driven development and deliberately leaner. When reaching for something from there, port the *decision*, not the file. Already decided against: a TUI, an embedded web dashboard, an MCP server, a devcontainer.
@@ -79,6 +80,7 @@ cmd/scc/main.go         os.Exit(cli.Run(os.Args[1:]))
 | `internal/mdscan` | The only Markdown parser: fence- and HTML-comment-aware headings, checkboxes, links, wikilinks, slugs, plus a small frontmatter reader. `Body` is the comment/fence-stripped text every validator applies its grammar to. |
 | `internal/ears` | EARS requirement parsing, all five patterns plus complex. |
 | `internal/validate` | The eight validators, one file each, sharing `mdscan` and `finding`. The exception is `stack_manifests.go`: the seven dependency-file readers age on their own schedule, so they sit beside the rule rather than inside it. |
+| `internal/rtk` | RTK's marker pair and the idempotent splice of its block into the entry file, plus finding or `cargo install`ing the binary. The only package that shells out to another program — keep that boundary here rather than in a command handler. |
 | `internal/cli` | The dispatcher and every command handler. |
 
 `go.mod` is stdlib-only. Keep it that way unless a dependency earns its place — the binary is distributed to six platforms and every dep is a supply-chain surface.

@@ -60,6 +60,8 @@ func Run(args []string) int {
 		return runInit(args[1:])
 	case "update":
 		return runUpdate(args[1:])
+	case "rtk":
+		return runRTK(args[1:])
 	case "spec":
 		return runSpec(args[1:])
 	case "plan":
@@ -104,6 +106,7 @@ Usage:
 Commands:
   init      Scaffold a workspace: rules, agents, skills, commands, layout, manifest
   update    Bring the managed files onto this build's templates, after showing the plan
+  rtk       Install RTK if missing and put its usage block in the entry file
   spec      Create and inspect specs — new | list | show | delete | validate
   plan      Create and inspect plans — new | list | delete | validate
   skill     Agent Skills conformance — validate
