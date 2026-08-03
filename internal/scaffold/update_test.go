@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -242,4 +243,89 @@ func TestApplyUpdateDropsUnmanagedFiles(t *testing.T) {
 			t.Errorf("%s is still in the manifest", rel)
 		}
 	}
+}
+
+// A skill that did not exist when the workspace was scaffolded reaches it through
+// `scc update`, in every harness that has the surface for it.
+//
+// This is the path a new skill actually ships on, and it is the one with something
+// to get wrong: the destination is a directory that does not exist yet, so a create
+// that only wrote files would fail on precisely the workspaces the update is for.
+// Nothing here is specific to plan-run — it is read out of assets.WorkflowSkills, so
+// the next workflow skill is covered the day it is added.
+func TestApplyUpdateAddsASkillTheWorkspacePredates(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		root := t.TempDir()
+		applyTo(t, root, h, false)
+
+		// Roll the workspace back to before the skill existed: the files gone, and
+		// no manifest entry claiming scc ever wrote them.
+		var rels []string
+		for _, skill := range assets.WorkflowSkills {
+			rels = append(rels, path.Join(h.Dir, h.SkillsSeg, skill, "SKILL.md"))
+			if h.CommandsSeg != "" {
+				rels = append(rels, path.Join(h.Dir, h.CommandsSeg, "scc-"+skill+".md"))
+			}
+		}
+		m, _, err := manifest.Load(root, h)
+		if err != nil {
+			t.Fatalf("%s: Load: %v", h.ID, err)
+		}
+		for _, rel := range rels {
+			if err := os.RemoveAll(filepath.Dir(filepath.Join(root, filepath.FromSlash(rel)))); err != nil {
+				t.Fatalf("%s: %v", h.ID, err)
+			}
+			m.Remove(rel)
+		}
+		if err := manifest.Save(root, h, m); err != nil {
+			t.Fatalf("%s: Save: %v", h.ID, err)
+		}
+
+		plan := planFor(t, root, h)
+		for _, rel := range rels {
+			if got := action(t, plan, rel); got != UpCreate {
+				t.Errorf("%s: %s planned as %q, want %q", h.ID, rel, got, UpCreate)
+			}
+		}
+		if _, err := ApplyUpdate(root, h, plan, UpdateOptions{SCCVersion: "v0.0.0-test"}); err != nil {
+			t.Fatalf("%s: ApplyUpdate: %v", h.ID, err)
+		}
+
+		after, _, err := manifest.Load(root, h)
+		if err != nil {
+			t.Fatalf("%s: Load: %v", h.ID, err)
+		}
+		for _, rel := range rels {
+			f := findWorkspaceFile(t, h, rel)
+			want, err := assets.Render(h, f)
+			if err != nil {
+				t.Fatalf("%s: Render %s: %v", h.ID, rel, err)
+			}
+			if got := read(t, root, rel); got != want {
+				t.Errorf("%s: %s is not what this version renders", h.ID, rel)
+			}
+			e, ok := after.Get(rel)
+			if !ok {
+				t.Errorf("%s: %s was written and not recorded", h.ID, rel)
+				continue
+			}
+			if e.Version != assets.Version {
+				t.Errorf("%s: %s recorded at version %q, want %q", h.ID, rel, e.Version, assets.Version)
+			}
+		}
+		if plan := planFor(t, root, h); plan.Writes(true) {
+			t.Errorf("%s: a second update would write again", h.ID)
+		}
+	}
+}
+
+func findWorkspaceFile(t *testing.T, h paths.Harness, rel string) assets.File {
+	t.Helper()
+	for _, f := range assets.Workspace(h) {
+		if f.Rel == rel {
+			return f
+		}
+	}
+	t.Fatalf("%s ships no file at %s", h.ID, rel)
+	return assets.File{}
 }

@@ -8,7 +8,7 @@ working in parallel produce three names for one thing inside a week, and every o
 of them ends up in code, requirements, and the wiki, where nobody can tell whether
 two documents are describing the same concept or two different ones.
 
-The entry format is in [knowledge-base.md](../../rules/knowledge-base.md). This
+The entry format is in `{{.Rules}}/knowledge-base.md`. This
 skill is when to reach for it and how to decide.
 
 ## The entry

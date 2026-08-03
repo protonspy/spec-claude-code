@@ -9,12 +9,12 @@ file under `plans/`, holding the decomposition and nothing else.
 **A note on the word.** "PRD" is what you arrive with — a product document, a
 roadmap line, a paragraph in a chat. It is not an artifact this project keeps. The
 artifact is a **plan**, and the vocabulary in
-[routing.md](../../rules/routing.md) is what the rest of the workspace uses. Do not
+`{{.Rules}}/routing.md` is what the rest of the workspace uses. Do not
 create a `docs/prd/` directory.
 
 ## First, check this is a plan at all
 
-[routing.md](../../rules/routing.md) asks one question, and it is worth asking
+`{{.Rules}}/routing.md` asks one question, and it is worth asking
 before you start: does this need requirements and a design settled before any code?
 
 - **Too large for one spec** — decomposes into several. That is a plan. Continue.

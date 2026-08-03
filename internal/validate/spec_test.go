@@ -342,10 +342,15 @@ func TestSpecOnAnUnknownFeatureIsAnError(t *testing.T) {
 }
 
 func contains(haystack []string, want string) bool {
+	return count(haystack, want) > 0
+}
+
+func count(haystack []string, want string) int {
+	n := 0
 	for _, s := range haystack {
 		if s == want {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }

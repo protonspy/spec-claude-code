@@ -5,7 +5,7 @@ description: Record a decision that is hard to reverse as a numbered ADR under d
 
 You write the record of a decision, so that the reasoning survives the people who
 were in the room. The filename shape, the frontmatter, and the citation form are in
-[knowledge-base.md](../../rules/knowledge-base.md). This skill is when to write one
+`{{.Rules}}/knowledge-base.md`. This skill is when to write one
 and how to write one worth reading.
 
 ## Is this an ADR?

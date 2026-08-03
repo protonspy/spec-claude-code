@@ -114,6 +114,35 @@ func TestPlanKickoffAnswers(t *testing.T) {
 	}
 }
 
+// The two answers `plan-run` writes back before it starts a loop. A wrong value is
+// worth a finding because the skill writes these and every later session reads them —
+// `worktree: yes` would quietly decide how the rest of the plan gets built.
+func TestPlanLoopAnswers(t *testing.T) {
+	root := t.TempDir()
+	writePlan(t, root, "sweep",
+		"---\nworktree: yes\nmerge: whenever\n---\n\n# Sweep\n\n- [ ] 1.1 (Unit) Do it\n")
+	got := planFindings(t, root, "sweep")
+	if n := count(got, "plan.loop-invalid"); n != 2 {
+		t.Errorf("rules = %v, want two plan.loop-invalid findings, got %d", got, n)
+	}
+}
+
+// Absent is not wrong. A plan nobody has run a loop over carries neither key, and
+// scaffolded plans never carry them — a validator firing on scc's own output is the
+// one defect that teaches users to disbelieve the other seven.
+func TestPlanLoopAnswersAreOptional(t *testing.T) {
+	root := t.TempDir()
+	writePlan(t, root, "sweep", "---\nautonomy: auto\nci: wait\n---\n\n# Sweep\n\n- [ ] 1.1 (Unit) Do it\n")
+	if got := planFindings(t, root, "sweep"); contains(got, "plan.loop-invalid") {
+		t.Errorf("rules = %v, want no plan.loop-invalid", got)
+	}
+	writePlan(t, root, "run",
+		"---\nautonomy: auto\nci: wait\nworktree: per-group\nmerge: auto\n---\n\n# Run\n\n- [ ] 1.1 (Unit) Do it\n")
+	if got := planFindings(t, root, "run"); len(got) != 0 {
+		t.Errorf("a plan carrying every valid answer reported %v", got)
+	}
+}
+
 // A spec path inside a fenced block is an example, not a reference.
 func TestPlanExamplesAreNotReferences(t *testing.T) {
 	root := t.TempDir()

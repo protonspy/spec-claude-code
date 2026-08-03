@@ -7,7 +7,7 @@ You own `docs/wiki/`: the durable half of what this project knows. A spec says w
 one feature does now; the wiki says what is true across features and outlasts them.
 
 The format is not yours to invent — it is in
-[knowledge-base.md](../../rules/knowledge-base.md), and `scc validate` enforces it.
+`{{.Rules}}/knowledge-base.md`, and `scc validate` enforces it.
 This skill is the procedure.
 
 ## Ingest — something landed in `docs/raw/`

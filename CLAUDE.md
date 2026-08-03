@@ -12,7 +12,7 @@ This file covers working *on* scc. The product's own rules and methodology are n
 
 Note: this repo is not itself an scc workspace (no harness directory, `specs/`, `plans/`, or `docs/` are committed) — those trees only exist in workspaces the binary scaffolds, and in test temp dirs.
 
-**Status: v0.4.0-shaped.** Everything through `design/plan.md` phase 10 is built and green: scaffolding (`init`), artifact creation (`spec`, `plan`), and all eight validators behind `scc validate`. `init` also scaffolds the six knowledge-base skills named in `design/orchestration.md` §6 — one per `docs/` artifact a validator checks, plus `prd` — each with a `scc-`-prefixed slash command derived from the same list (`assets.KnowledgeSkills`), wherever the harness has a command surface.
+**Status: v0.4.0-shaped.** Everything through `design/plan.md` phase 10 is built and green: scaffolding (`init`), artifact creation (`spec`, `plan`), and all eight validators behind `scc validate`. `init` also scaffolds the seven skills named in `design/orchestration.md` §6 — the six knowledge-base authors (one per `docs/` artifact a validator checks, plus `prd`) and the `plan-run` workflow skill — each with a `scc-`-prefixed slash command derived from the same list (`assets.Skills()`, which is `KnowledgeSkills` + `WorkflowSkills`), wherever the harness has a command surface.
 
 Three things landed after phase 10 and all are documented in `design/orchestration.md` §6 and §12:
 

@@ -62,7 +62,9 @@ import (
 // report in a fixed shape the orchestrator can act on.
 // 5: one template set for three harnesses — Claude Code, Codex, opencode.
 // 6: the knowledge base states the stack check without naming an ecosystem.
-const Version = "6"
+// 7: the plan-run workflow skill and its command — running a whole plan, group by
+// group, is a procedure with an entry point rather than a rule read in passing.
+const Version = "7"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -148,11 +150,10 @@ func Workspace(h paths.Harness) []File {
 			Kind: Agent,
 		})
 	}
-	// The knowledge base's authors. Every one of these produces an artifact
-	// `scc validate` already checks — a workspace that ships the eight validators
-	// and no skill teaching the formats would demand conformance to documents
-	// nobody was told how to write.
-	for _, skill := range KnowledgeSkills {
+	// The knowledge base's authors, and the workflow skills that run the
+	// methodology rather than describe it. Why each list holds what it holds is on
+	// the lists themselves; here they are one set of files on identical terms.
+	for _, skill := range Skills() {
 		set = append(set, File{
 			Name: "skills/" + skill + "/SKILL.md",
 			Rel:  under(h.SkillsSeg, skill, "SKILL.md"),
@@ -224,15 +225,35 @@ func Seeds() []Seed {
 // review is where a cold context is worth paying for, and authorship is not.
 var ReviewAgents = []string{"code-review", "security-review"}
 
-// KnowledgeSkills names the skills scc ships, each one the author of a `docs/`
-// artifact a validator checks. Both the skill directory and its slash command are
-// derived from this list, so the two cannot drift apart.
+// KnowledgeSkills names the skills that author a `docs/` artifact a validator
+// checks — one per artifact, so a workspace shipping the eight validators never
+// demands conformance to a document nobody was told how to write.
 //
 // The methodology is deliberately absent from it: the cycles, verification, and
 // delivery are rules under the harness's rules directory, read when the concern
 // is live. A skill restating a rule is a second copy of one fact, and the copy
 // goes stale.
 var KnowledgeSkills = []string{"adr", "codewiki", "glossary", "prd", "stack", "wiki"}
+
+// WorkflowSkills names the skills that drive the methodology instead of authoring a
+// document. There is one, and the bar for a second is the rule above: if a skill
+// would restate what a rule already says, it should be the rule.
+//
+// plan-run clears that bar because it holds what no rule does — the loop *across*
+// units of work. delivery.md ends at one merged pull request, which is exactly where
+// one unit of work ends; running a whole plan means picking the next group, branching
+// it from the merge the last group produced, and recovering the position from `main`
+// when a session dies mid-plan. That is a procedure, and a procedure a person invokes
+// needs an entry point they can type.
+var WorkflowSkills = []string{"plan-run"}
+
+// Skills is every skill scc ships, knowledge first. Both the skill directory and its
+// slash command are derived from this one list, so the two cannot drift apart, and a
+// skill added to either half above reaches workspaces that already exist through
+// `scc update` on the same terms as any other managed file.
+func Skills() []string {
+	return append(append([]string{}, KnowledgeSkills...), WorkflowSkills...)
+}
 
 // commandPrefix namespaces the scaffolded slash commands.
 const commandPrefix = "scc-"

@@ -67,6 +67,7 @@ func Plan(root, name string) (*finding.Set, error) {
 		return set, nil
 	}
 	checkKickoffAs(set, file, doc.Frontmatter, "plan.kickoff-invalid")
+	checkLoopAnswers(set, file, doc.Frontmatter)
 
 	// A plan's tasks carry no requirement citations: a plan has no requirements. The
 	// rest of the grammar is identical, because the methodology is a property of the
@@ -103,6 +104,31 @@ func Plan(root, name string) (*finding.Set, error) {
 			"a plan holds a checklist of tasks, references to the specs it decomposes into, or both — this has neither")
 	}
 	return set, nil
+}
+
+// The answers the `plan-run` skill asks for before it starts a loop, and writes back
+// into the plan so a resumed session reads them instead of asking a second time.
+//
+// Plan-only, and validated on exactly the terms the kickoff answers are: only when
+// present, because a plan nobody has ever run a loop over is not a plan with a defect.
+// They are checked at all for one reason — the skill writes them and every later
+// session reads them, so `worktree: yes` instead of `per-group` would silently decide
+// how the next ten groups get built.
+var loopValues = map[string]map[string]bool{
+	"worktree": {"per-group": true, "in-place": true},
+	"merge":    {"auto": true, "manual": true},
+}
+
+func checkLoopAnswers(set *finding.Set, file string, fm mdscan.Frontmatter) {
+	for _, key := range []string{"worktree", "merge"} {
+		value, ok := fm.Get(key)
+		if !ok {
+			continue
+		}
+		if !loopValues[key][value] {
+			set.Addf(file, 1, "plan.loop-invalid", "`%s: %s` is not one of %s", key, value, allowed(loopValues[key]))
+		}
+	}
 }
 
 // checkKickoffAs is checkKickoff with the rule slug the caller's subject uses, so a

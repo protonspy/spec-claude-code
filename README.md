@@ -36,8 +36,9 @@ Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc i
 
 ### Three harnesses, one methodology
 
-The same rules, review agents, and knowledge-base skills are scaffolded into
-whichever tool you work in — only the paths and the frontmatter dialect change.
+The same rules, review agents, and skills — the knowledge base's authors, plus
+`plan-run`, which drives a whole plan group by group — are scaffolded into whichever
+tool you work in. Only the paths and the frontmatter dialect change.
 
 | | Claude Code | Codex | opencode |
 |---|---|---|---|
