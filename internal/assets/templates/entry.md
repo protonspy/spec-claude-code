@@ -49,7 +49,7 @@ docs/              knowledge base — wiki, adr, codewiki, glossary, stack
 
 ## Checking your work
 
-`scc validate` — or `npx scc-cli validate` if not installed (`@<version>` pins for CI).
+`scc validate` — or `npx @protonspy/scc validate` if not installed (`@<version>` pins for CI).
 `scc update` brings a newer scc's rules and agents in: it shows the plan, then asks.
 
 Exit `0` ok · `1` could not run · `2` ran and found something. A finding is an answer, not a crash.

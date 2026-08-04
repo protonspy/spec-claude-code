@@ -132,14 +132,14 @@ func TestUnknownFlagIsAUsageError(t *testing.T) {
 }
 
 // SCC_PROG lets the npm launcher make help text echo the spelling the user typed
-// (`npx scc-cli`) instead of a bare binary name they may not have.
+// (`npx @protonspy/scc`) instead of a bare binary name they may not have.
 func TestProgHonorsEnvOverride(t *testing.T) {
-	t.Setenv("SCC_PROG", "npx scc-cli")
-	if got := prog(); got != "npx scc-cli" {
+	t.Setenv("SCC_PROG", "npx @protonspy/scc")
+	if got := prog(); got != "npx @protonspy/scc" {
 		t.Errorf("prog() = %q, want the override", got)
 	}
 	_, stderr, _ := run(t, "help")
-	if !strings.Contains(stderr, "npx scc-cli") {
+	if !strings.Contains(stderr, "npx @protonspy/scc") {
 		t.Errorf("usage did not use SCC_PROG: %q", stderr)
 	}
 }

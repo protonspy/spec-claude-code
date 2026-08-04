@@ -10,11 +10,14 @@
 //                  (default: "artifacts").
 //
 // Output: npm/dist/
-//   scc-<platform>-<arch>/     one per target, carrying the native binary
-//   launchers/<name>/          the shim, published under each launcher name
+//   scc-<platform>-<arch>/       one per target, carrying the native binary
+//   launchers/<name>/            the shim, under a name that is already ours
+//   launchers-optional/<name>/   the same shim, under a name being tried
 //
-// Publish order is the layout: every scc-*/ package must reach the registry
-// before any launchers/ package that optionally depends on it.
+// Publish order is the layout, and so is the failure policy: every scc-*/
+// package must reach the registry before any launcher that optionally depends
+// on it, and only launchers-optional/ is allowed to fail without failing the
+// release. See the LAUNCHERS comment below for why that tier exists.
 //
 // The Go binaries are reused as-is from the release artifacts (they already
 // carry the version baked in via -ldflags), so the npm binary is byte-identical
@@ -129,23 +132,38 @@ for (const t of TARGETS) {
 }
 
 // --- launcher packages -----------------------------------------------------
-// Two names, one package. `scc-cli` is the documented install line; the scoped
-// `@protonspy/scc` stays published so anybody who already installed it keeps
-// receiving versions. Both carry the same shim, the same optionalDependencies,
-// and the same `bin` — so both put the same `scc` command on PATH. The package
-// name is what npm resolves and the bin name is what you type, and those were
-// never required to match: the bare `scc` on npm has been taken since 2013.
+// One package, published under more than one name. Both carry the same shim, the
+// same optionalDependencies and the same `bin`, so both put the same `scc`
+// command on PATH: npm resolves the *package* name and installs the *bin* name,
+// and those were never required to match. The bare `scc` on npm has belonged to
+// an unrelated project since 2013, which is why neither name is it.
 //
-// They are emitted under launchers/ rather than beside the platform packages,
-// and that is load-bearing rather than tidy: the publish order is expressed as
-// "everything in dist/scc-*/ first, then everything in dist/launchers/", and a
-// second launcher sitting at the top level would be swept into the platform
-// glob and published ahead of the binaries it optionally depends on. Anyone
-// installing during that window gets a launcher that cannot resolve a binary.
+// The split into required/ and optional/ is what a failed release taught us.
+// npm applies a typosquatting similarity check that runs only on a real publish
+// — `npm view` returning 404 and `npm publish --dry-run` passing both say
+// nothing about it, and v0.9.0 died on a 403 for a name both had called free.
+// The name that was rejected happened to publish first, so `set -e` took the
+// working launcher down with it and shipped six orphaned platform packages.
+//
+// So: a required launcher is one whose name is already ours, and a failure there
+// is a real failure. An optional launcher is a name being tried for the first
+// time; the publish step is allowed to skip it and carry on, because a registry
+// refusing a name is not a reason to abandon a release whose binaries are built
+// and whose primary launcher works.
+//
+// Only a required name may be documented. Pointing an install line — or the
+// `entry.md` embedded in six binaries — at a package that might be refused is
+// the same bug in a costlier place. Promote a name to required, and into the
+// docs, in the release *after* the one that proved it publishes.
 const LAUNCHERS = [
-  { dir: "scc-cli", name: "scc-cli" },
-  { dir: BIN, name: `${SCOPE}/${BIN}` },
+  { dir: "scc", name: `${SCOPE}/${BIN}`, required: true },
+  { dir: "spec-claude-code-cli", name: "spec-claude-code-cli", required: false },
 ];
+
+// Where each tier lands. Publishing walks dist/scc-*/ first, then required, then
+// optional — the order is the layout, so a launcher can never reach the registry
+// ahead of the binaries its optionalDependencies name.
+const tier = (l) => (l.required ? "launchers" : "launchers-optional");
 
 const launcherSrc = join(npmDir, BIN);
 // The checked-in package.json is a template: its name and optionalDependencies
@@ -153,7 +171,7 @@ const launcherSrc = join(npmDir, BIN);
 // launcher name can ever be half-wired.
 const launcherPkg = JSON.parse(readFileSync(join(launcherSrc, "package.json"), "utf8"));
 for (const launcher of LAUNCHERS) {
-  const out = join(outDir, "launchers", launcher.dir);
+  const out = join(outDir, tier(launcher), launcher.dir);
   mkdirSync(join(out, "bin"), { recursive: true });
   cpSync(join(launcherSrc, "bin", `${BIN}.js`), join(out, "bin", `${BIN}.js`));
   cpSync(join(launcherSrc, "README.md"), join(out, "README.md"));
@@ -166,5 +184,5 @@ for (const launcher of LAUNCHERS) {
       2
     ) + "\n"
   );
-  console.log(`built ${launcher.name}@${version}`);
+  console.log(`built ${launcher.name}@${version}${launcher.required ? "" : "  (optional)"}`);
 }

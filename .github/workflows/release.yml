@@ -187,6 +187,17 @@ jobs:
             echo ">> publishing $name@$ver"
             npm publish "$dir" --access public --provenance
           }
+          # A name being tried for the first time can be refused by npm's
+          # typosquatting check, which runs only on a real publish — no local
+          # check predicts it. That refusal must not take the release with it, so
+          # an optional launcher is attempted last and allowed to fail.
+          publish_optional() {
+            if publish "$1"; then
+              return 0
+            fi
+            echo "::warning::optional launcher $1 was not published; the release stands on the required ones"
+          }
+
           # The platform packages must land before any launcher that optionally
           # depends on them: a launcher on the registry ahead of its binaries is a
           # broken install for whoever hits that window.
@@ -195,6 +206,10 @@ jobs:
           done
           for d in npm/dist/launchers/*/; do
             publish "${d%/}"
+          done
+          for d in npm/dist/launchers-optional/*/; do
+            [ -d "$d" ] || continue
+            publish_optional "${d%/}"
           done
 
   # Tag the released commit and create the GitHub Release — only after npm
