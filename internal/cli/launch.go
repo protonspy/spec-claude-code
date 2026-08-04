@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/headroom"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 	"github.com/protonspy/spec-claude-code/internal/render"
@@ -28,9 +29,15 @@ import (
 // how RTK is wired. The difference is who bears the cost of being wrong: RTK's
 // block edits a file the user owns and tells the agent to prefix every command
 // with a binary the machine may not have, so it stays opt-in. Headroom wraps one
-// process for the length of one session, changes nothing on disk, and degrades to
-// starting the agent bare — so defaulting to it costs nothing when it is absent
-// and saves context when it is there.
+// process for the length of one session and degrades to starting the agent bare —
+// so defaulting to it costs nothing when it is absent and saves context when it
+// is there.
+//
+// What it does leave behind is MCP registrations in the agent's own config, which
+// outlive the session that made them. That is why the default is
+// --headroom-mcp=retrieve rather than Headroom's own defaults: the proxy needs
+// its retrieve tool to make compression markers actionable, and the code-memory
+// server it would otherwise install is a job this workspace gives CodeGraph.
 //
 // The agent's own exit code is passed straight through, which is the one place
 // scc's 0/1/2 contract does not apply — and it has to be. A launcher that
@@ -48,12 +55,22 @@ func runLaunch(args []string) int {
 	fs.SetOutput(os.Stderr)
 	root := addRoot(fs)
 	noHeadroom := fs.Bool("no-headroom", false, "start the agent directly, without Headroom's compression proxy")
-	noInstall := fs.Bool("no-install", false, "never install Headroom; use it only if it is already on PATH")
-	yes := fs.Bool("yes", false, "answer the install prompt with yes, for an unattended run")
+	mcp := fs.String("headroom-mcp", headroom.MCPRetrieve.String(),
+		"which MCP servers Headroom may register: all | retrieve (its own only) | none")
+	contextTool := fs.Bool("headroom-context-tool", false,
+		"let Headroom set up its own CLI context tool (RTK or lean-ctx) and append its guidance to the entry file")
+	noGraph := fs.Bool("no-graph", false, "start the agent without building or refreshing the symbol graph")
+	noInstall := fs.Bool("no-install", false, "never install anything; use Headroom and CodeGraph only if they are already on PATH")
+	yes := fs.Bool("yes", false, "answer the install prompts with yes, for an unattended run")
 	dryRun := fs.Bool("dry-run", false, "print the command this would run, and run nothing")
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, own)
 	if err != nil {
+		return ExitError
+	}
+	mcpMode, err := headroom.ParseMCPMode(*mcp)
+	if err != nil {
+		render.Err(err.Error())
 		return ExitError
 	}
 
@@ -77,10 +94,12 @@ func runLaunch(args []string) int {
 	// JSON document on stdout cannot both exist.
 	plan := *jsonOut || *dryRun
 	opts := headroomOptions{
-		disabled:  *noHeadroom,
-		noInstall: *noInstall || plan,
-		yes:       *yes,
-		quiet:     *jsonOut,
+		disabled:    *noHeadroom,
+		noInstall:   *noInstall || plan,
+		yes:         *yes,
+		quiet:       *jsonOut,
+		mcp:         mcpMode,
+		contextTool: *contextTool,
 	}
 
 	cmd := launchCommand{Harness: harness.ID, Dir: target, Bin: harness.Bin, Args: passthrough}
@@ -88,9 +107,16 @@ func runLaunch(args []string) int {
 		cmd.Headroom = hr
 		if hr.Wrapping {
 			cmd.Bin = headroom.Bin
-			cmd.Args = headroom.WrapArgs(hr.Agent, passthrough)
+			cmd.Args = headroom.WrapArgs(hr.Agent, hr.Options, passthrough)
 		}
 	}
+	cmd.Graph = resolveGraph(target, graphOptions{
+		disabled:  *noGraph,
+		noInstall: *noInstall,
+		yes:       *yes,
+		plan:      plan,
+		quiet:     *jsonOut,
+	})
 	if cmd.Args == nil {
 		// A JSON consumer gets [] rather than null: the field is a command line,
 		// and an empty one is still a list.
@@ -127,6 +153,7 @@ type launchCommand struct {
 	Bin      string          `json:"bin"`
 	Args     []string        `json:"args"`
 	Headroom *headroomReport `json:"headroom,omitempty"`
+	Graph    *graphReport    `json:"graph,omitempty"`
 }
 
 // String is the command as a person would type it. Not shell-quoted, because it
@@ -151,6 +178,16 @@ type headroomReport struct {
 	// describes the binary, which is a different question from what the command
 	// ended up doing.
 	Install string `json:"install"`
+	// MCP is the mode asked for: all | retrieve | none.
+	MCP string `json:"mcp"`
+	// ContextTool is whether Headroom was left free to set up its own CLI
+	// context tool — RTK or lean-ctx — and append its guidance to the entry file.
+	ContextTool bool `json:"context_tool"`
+	// Options is how this Headroom build spells everything above, reported apart
+	// from the rest of the command line because scc put it there and the user did
+	// not. Empty — with a warning on the human path — when the build advertises no
+	// way to decline what was declined.
+	Options []string `json:"options,omitempty"`
 	// Reason names why a launch is not wrapping, for the run where that is a
 	// surprise. Empty when it is.
 	Reason string `json:"reason,omitempty"`
@@ -161,6 +198,10 @@ type headroomOptions struct {
 	noInstall bool
 	yes       bool
 	quiet     bool
+	mcp       headroom.MCPMode
+	// contextTool lets Headroom set up RTK or lean-ctx and write its guidance
+	// into the entry file. Off by default: `scc rtk` owns that block here.
+	contextTool bool
 }
 
 // resolveHeadroom decides whether this launch goes through Headroom, installing
@@ -181,10 +222,11 @@ func resolveHeadroom(h paths.Harness, opts headroomOptions) *headroomReport {
 	if !wraps {
 		return &headroomReport{Install: installSkipped, Reason: "Headroom does not wrap " + h.Label}
 	}
-	report := &headroomReport{Agent: agent}
+	report := &headroomReport{Agent: agent, MCP: opts.mcp.String(), ContextTool: opts.contextTool}
 
 	if p, ok := headroom.Path(); ok {
-		report.Wrapping, report.Path, report.Version, report.Install = true, p, headroom.Version(p), installPresent
+		report.Path, report.Version, report.Install = p, headroom.Version(p), installPresent
+		wrapWith(report, opts)
 		return report
 	}
 
@@ -232,9 +274,186 @@ func resolveHeadroom(h paths.Harness, opts headroomOptions) *headroomReport {
 		warnUnwrapped(report, opts)
 		return report
 	}
-	report.Wrapping, report.Path, report.Version, report.Install = true, p, headroom.Version(p), installInstalled
+	report.Path, report.Version, report.Install = p, headroom.Version(p), installInstalled
 	render.OK(strings.TrimSpace(headroom.Bin + " installed: " + p + " " + report.Version))
+	wrapWith(report, opts)
 	return report
+}
+
+// wrapWith settles the wrap: this launch is going through Headroom, and these are
+// the options it goes through with.
+//
+// The opt-out flags are read off `headroom wrap <agent> --help` rather than
+// compiled into scc, because they are Headroom's vocabulary and it has already
+// renamed this one once — `--no-serena` became `--code-memory none`. A name
+// hardcoded here would have turned that release into a launch that dies on "no
+// such option", which is a strictly worse outcome than a launch that registers
+// one MCP server too many.
+func wrapWith(report *headroomReport, opts headroomOptions) {
+	report.Wrapping = true
+	if opts.mcp == headroom.MCPAll && opts.contextTool {
+		return
+	}
+	flags := headroom.HelpFlags(headroom.WrapHelp(report.Path, report.Agent))
+
+	declined, got := 0, 0
+	if opts.mcp != headroom.MCPAll {
+		declined++
+		if args := headroom.MCPOffArgs(flags, opts.mcp); len(args) > 0 {
+			report.Options, got = append(report.Options, args...), got+1
+		}
+	}
+	if !opts.contextTool {
+		declined++
+		if args := headroom.ContextToolOffArgs(flags); len(args) > 0 {
+			report.Options, got = append(report.Options, args...), got+1
+		}
+	}
+
+	if got == declined || opts.quiet {
+		return
+	}
+	// Something was declined and this build offers no way to decline it. Say so:
+	// the alternative is a user who set the flag, saw no error, and assumes it
+	// took.
+	render.Warn(fmt.Sprintf("this %s build advertises no way to decline everything scc asked it to; run it with --help to see what it takes", headroom.Bin))
+	render.Detail("  `" + headroom.Bin + " wrap " + report.Agent + " --help`, and `" + headroom.Bin + " unwrap " + report.Agent + "` to undo what it registered")
+}
+
+// graphReport says what happened to the symbol graph on the way to starting the
+// agent.
+type graphReport struct {
+	// Action is what scc did: built | synced | current | skipped | failed.
+	Action string `json:"action"`
+	// Indexed is whether the workspace had a graph before this launch.
+	Indexed bool   `json:"indexed"`
+	Path    string `json:"path,omitempty"`
+	Version string `json:"version,omitempty"`
+	// Reason names why nothing was built, for the run where that is a surprise.
+	Reason string `json:"reason,omitempty"`
+}
+
+// The values graphReport.Action takes.
+const (
+	graphBuilt   = "built"
+	graphSynced  = "synced"
+	graphSkipped = "skipped"
+	graphFailed  = "failed"
+)
+
+type graphOptions struct {
+	disabled  bool
+	noInstall bool
+	yes       bool
+	plan      bool
+	quiet     bool
+}
+
+// resolveGraph brings the workspace's symbol graph up to date before the agent
+// starts, which is the only moment where doing so is free: the session is about
+// to begin, nobody is waiting on a prompt yet, and the alternative is an agent
+// whose first graph query answers out of an index from last week.
+//
+// It degrades exactly the way the Headroom path does, and for the same reason. A
+// graph is an enhancement — the agent can still read files — so a missing binary,
+// a declined install, or a failed index all end in the agent starting anyway with
+// a line saying what happened. `scc launch` that refused to run because an index
+// was stale would be scc putting its own tidiness above the thing the user asked
+// for.
+func resolveGraph(root string, opts graphOptions) *graphReport {
+	if opts.disabled {
+		return nil
+	}
+	report := &graphReport{Indexed: codegraph.Indexed(root)}
+
+	bin, ok := codegraph.Path()
+	if !ok {
+		report.Action = graphSkipped
+		installer, available := codegraph.Available()
+		switch {
+		case opts.noInstall || opts.plan:
+			report.Reason = codegraph.Bin + " is not on PATH"
+		case !available:
+			report.Reason = fmt.Sprintf("npm is not on PATH, so %s cannot be installed", codegraph.Bin)
+		case opts.yes:
+			// Asked for by flag; no question to put.
+		case opts.quiet || !interactive():
+			report.Reason = fmt.Sprintf("%s is not on PATH, and nobody is here to answer the install prompt", codegraph.Bin)
+		default:
+			render.Warn(fmt.Sprintf("%s is not on PATH — it gives the agent a symbol graph instead of file-by-file reading", codegraph.Bin))
+			render.Detail("  " + codegraph.Repo)
+			if !confirm(promptIn, fmt.Sprintf("Install it now with `%s`?", installer.Cmd)) {
+				report.Reason = "install declined"
+			}
+		}
+		if report.Reason != "" {
+			warnNoGraph(report, opts)
+			return report
+		}
+		render.Info(fmt.Sprintf("installing %s: %s", codegraph.Bin, installer.Cmd))
+		out := os.Stdout
+		if opts.quiet {
+			out = os.Stderr
+		}
+		if err := codegraph.Install(installer, out, os.Stderr); err != nil {
+			report.Action, report.Reason = graphFailed, err.Error()
+			warnNoGraph(report, opts)
+			return report
+		}
+		if bin, ok = codegraph.Path(); !ok {
+			report.Action = graphFailed
+			report.Reason = fmt.Sprintf("%s reported success but %s is still not on PATH", installer.Prog, codegraph.Bin)
+			warnNoGraph(report, opts)
+			return report
+		}
+	}
+	report.Path, report.Version = bin, codegraph.Version(bin)
+
+	// A plan-only run reports what it would do and indexes nothing: --json has to
+	// leave stdout clean for the document, and --dry-run means what it says.
+	if opts.plan {
+		report.Action = graphSkipped
+		report.Reason = "plan-only run"
+		return report
+	}
+
+	args, action, doing := codegraph.InitArgs(), graphBuilt, "building the symbol graph — the first index takes a while"
+	if report.Indexed {
+		args, action, doing = codegraph.SyncArgs(), graphSynced, "refreshing the symbol graph"
+	}
+	if !opts.quiet {
+		render.Info(codegraph.Bin + " " + doing)
+	}
+	// The indexer's own output goes to stderr in both streams when the caller is
+	// emitting JSON, because stdout carries the document and nothing else.
+	out := os.Stdout
+	if opts.quiet {
+		out = os.Stderr
+	}
+	code, err := codegraph.Run(bin, root, args, out, os.Stderr)
+	switch {
+	case err != nil:
+		report.Action, report.Reason = graphFailed, err.Error()
+	case code != 0:
+		report.Action = graphFailed
+		report.Reason = fmt.Sprintf("%s %s exited %d", codegraph.Bin, args[0], code)
+	default:
+		report.Action = action
+		return report
+	}
+	warnNoGraph(report, opts)
+	return report
+}
+
+// warnNoGraph says, once, why the agent is starting without a fresh graph.
+func warnNoGraph(report *graphReport, opts graphOptions) {
+	if opts.quiet {
+		return
+	}
+	render.Warn(fmt.Sprintf("starting without a fresh symbol graph: %s", report.Reason))
+	if report.Action != graphFailed {
+		render.Detail("  install it with: " + codegraph.InstallHint())
+	}
 }
 
 // warnUnwrapped says, once, why the agent is starting without compression. It is
@@ -308,6 +527,13 @@ func harnessIDs(all []paths.Harness) string {
 // `--`. Everything after it is passed through untouched, so `scc launch claude --
 // --dangerously-skip-permissions` reaches Claude Code rather than being rejected
 // here as an unknown flag.
+//
+// "Untouched by scc" is the whole promise, and it is worth being precise about
+// what it is not: when the launch is wrapped, those arguments land after `wrap
+// <agent>`, and `headroom wrap` takes every flag it recognizes for itself before
+// forwarding the rest. A pass-through argument that collides with one of
+// Headroom's — `--verbose` is defined by both — is eaten there, not here. A second
+// terminator forces the issue: `scc launch claude -- -- -p`.
 func splitPassthrough(args []string) (own, rest []string) {
 	for i, a := range args {
 		if a == "--" {

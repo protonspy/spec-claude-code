@@ -37,7 +37,7 @@ func TestAgentRejectsAnUnknownHarness(t *testing.T) {
 // into their backing array would corrupt what the caller still holds.
 func TestWrapArgsPrefixesWithoutAliasing(t *testing.T) {
 	rest := []string{"--resume", "--model", "opus"}
-	got := WrapArgs("claude", rest)
+	got := WrapArgs("claude", nil, rest)
 
 	want := []string{"wrap", "claude", "--resume", "--model", "opus"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
@@ -48,8 +48,89 @@ func TestWrapArgsPrefixesWithoutAliasing(t *testing.T) {
 		t.Errorf("WrapArgs wrote through to the caller's slice: %v", rest)
 	}
 
-	if got := WrapArgs("codex", nil); strings.Join(got, " ") != "wrap codex" {
+	if got := WrapArgs("codex", nil, nil); strings.Join(got, " ") != "wrap codex" {
 		t.Errorf("WrapArgs with no pass-through = %v", got)
+	}
+}
+
+// scc's own options go in front of the pass-through, so a user who names the same
+// flag after `--` is the one who wins: click takes the last occurrence, and the
+// argument the user typed has to beat the default scc supplied.
+func TestWrapArgsPutsSCCsOptionsBeforeThePassthrough(t *testing.T) {
+	got := WrapArgs("claude", []string{"--code-memory", "none"}, []string{"--code-memory", "serena"})
+	want := "wrap claude --code-memory none --code-memory serena"
+	if strings.Join(got, " ") != want {
+		t.Errorf("WrapArgs = %q, want %q", strings.Join(got, " "), want)
+	}
+}
+
+// The opt-out flags are read off the binary's own help rather than compiled in,
+// because Headroom has already renamed this control once. Each spelling has to
+// resolve to the vector that build actually accepts.
+func TestMCPOffArgsFollowsTheBuildsOwnSpelling(t *testing.T) {
+	current := HelpFlags("  --no-mcp   Skip it\n  --code-memory [serena|none]  Code-memory MCP\n")
+	if got := strings.Join(MCPOffArgs(current, MCPRetrieve), " "); got != "--code-memory none" {
+		t.Errorf("retrieve on a current build = %q", got)
+	}
+	if got := strings.Join(MCPOffArgs(current, MCPNone), " "); got != "--code-memory none --no-mcp" {
+		t.Errorf("none on a current build = %q", got)
+	}
+
+	// The older vocabulary, which opencode's wrap still speaks.
+	older := HelpFlags("  --no-mcp  Skip\n  --no-serena  Never register Serena\n  --no-tokensave  Skip tokensave\n")
+	if got := strings.Join(MCPOffArgs(older, MCPRetrieve), " "); got != "--no-serena --no-tokensave" {
+		t.Errorf("retrieve on an older build = %q", got)
+	}
+
+	// MCPAll is scc keeping its hands off, whatever the build offers.
+	if got := MCPOffArgs(current, MCPAll); len(got) != 0 {
+		t.Errorf("all = %v, want no arguments", got)
+	}
+}
+
+// A build that advertises no opt-out has answered the question, and scc has to
+// take the answer: inventing a flag would trade one unwanted MCP server for a
+// launch that dies on "no such option".
+func TestMCPOffArgsInventsNothing(t *testing.T) {
+	for _, mode := range []MCPMode{MCPRetrieve, MCPNone} {
+		if got := MCPOffArgs(HelpFlags("Usage: headroom wrap claude [OPTIONS]\n"), mode); len(got) != 0 {
+			t.Errorf("%s against a build with no opt-out = %v, want nothing", mode, got)
+		}
+	}
+}
+
+// Headroom's context-tool setup writes RTK guidance into the same entry file
+// `scc rtk` splices, behind its own marker pair — so the file ends up carrying
+// the instructions twice. --no-context-tool is the primary spelling and covers
+// lean-ctx too; --no-rtk is the same option's older alias.
+func TestContextToolOffArgsPrefersThePrimarySpelling(t *testing.T) {
+	both := HelpFlags("  --no-context-tool, --no-rtk  Skip CLI context-tool setup\n")
+	if got := strings.Join(ContextToolOffArgs(both), " "); got != "--no-context-tool" {
+		t.Errorf("with both spellings = %q, want --no-context-tool", got)
+	}
+
+	older := HelpFlags("  --no-rtk  Skip rtk setup\n")
+	if got := strings.Join(ContextToolOffArgs(older), " "); got != "--no-rtk" {
+		t.Errorf("with only the alias = %q, want --no-rtk", got)
+	}
+
+	if got := ContextToolOffArgs(HelpFlags("Usage: headroom wrap claude\n")); len(got) != 0 {
+		t.Errorf("against a build with no opt-out = %v, want nothing", got)
+	}
+}
+
+func TestParseMCPModeRoundTrips(t *testing.T) {
+	for _, want := range []MCPMode{MCPAll, MCPRetrieve, MCPNone} {
+		got, err := ParseMCPMode(want.String())
+		if err != nil {
+			t.Fatalf("ParseMCPMode(%q): %v", want.String(), err)
+		}
+		if got != want {
+			t.Errorf("ParseMCPMode(%q) = %v", want.String(), got)
+		}
+	}
+	if _, err := ParseMCPMode("serena"); err == nil {
+		t.Error("ParseMCPMode accepted a mode scc does not define")
 	}
 }
 
