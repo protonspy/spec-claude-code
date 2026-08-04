@@ -70,6 +70,10 @@ func Run(args []string) int {
 		return runSpec(args[1:])
 	case "plan":
 		return runPlan(args[1:])
+	case "map":
+		return runMap(args[1:])
+	case "patch":
+		return runPatch(args[1:])
 	case "skill":
 		return runSkill(args[1:])
 	case "validate":
@@ -115,6 +119,8 @@ Commands:
   graph     The workspace's symbol graph — build | sync | status | query | explore
   spec      Create and inspect specs — new | list | show | delete | validate
   plan      Create and inspect plans — new | list | delete | validate
+  map       Read a plan or spec by address, not by the whole file — outline | tasks | show | blocks | find | trace
+  patch     Change one at an address, without reading it first; verified and rolled back on findings
   skill     Agent Skills conformance — validate
   validate  Run every applicable validator; exit 2 on findings
   version   Print the version
