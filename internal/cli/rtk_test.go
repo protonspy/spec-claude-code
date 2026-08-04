@@ -58,6 +58,42 @@ func TestRTKAddsTheBlockToTheEntryFile(t *testing.T) {
 	}
 }
 
+// `headroom wrap --rtk` appends the same guidance to the same entry file behind
+// its own marker pair, and neither marker is a substring of the other — so both
+// tools' idempotency checks pass and the file ends up telling the agent the same
+// thing twice. scc cannot address a block it does not own, so it does the one
+// thing left: names it, says how to remove it, and touches nothing.
+func TestRTKReportsHeadroomsCompetingBlock(t *testing.T) {
+	root := initWorkspace(t)
+	entry := filepath.Join(root, paths.Claude.EntryFile)
+	foreign := "\n<!-- headroom:rtk-instructions -->\nPrefix every command with rtk.\n<!-- /headroom:rtk-instructions -->\n"
+	before := readEntry(t, root, paths.Claude.EntryFile) + foreign
+	if err := os.WriteFile(entry, []byte(before), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	stdout, stderr, code := run(t, "rtk", "--root", root, "--no-install", "--json")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d (stderr: %s)", code, ExitOK, stderr)
+	}
+	if !strings.Contains(stderr, "Headroom") || !strings.Contains(stderr, "headroom unwrap") {
+		t.Errorf("stderr does not name the competing block and its fix: %q", stderr)
+	}
+
+	// Reported, never touched: that block is Headroom's to rewrite and remove.
+	if !strings.Contains(readEntry(t, root, paths.Claude.EntryFile), foreign) {
+		t.Error("scc modified Headroom's block")
+	}
+
+	var report rtkReport
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("stdout is not valid JSON (%v): %q", err, stdout)
+	}
+	if len(report.Files) == 0 || report.Files[0].Foreign != "Headroom" {
+		t.Errorf("files = %+v, want the foreign block named", report.Files)
+	}
+}
+
 // The command an agent runs at the top of a session has to be free to re-run: a
 // second pass reports the block as current and leaves the file byte-identical.
 func TestRTKIsIdempotent(t *testing.T) {
@@ -89,10 +125,61 @@ func TestRTKIsIdempotent(t *testing.T) {
 	}
 }
 
-// The block between RTK's markers is RTK's. scc inserts one where there is none and
-// otherwise keeps its hands off — a newer block, or one the user edited, survives
-// every re-run. --force is the separate, explicit decision.
-func TestRTKLeavesAnExistingBlockAlone(t *testing.T) {
+// The block scc ships wins by default. `rtk init` writes the same v2 instruction
+// in roughly five times the bytes, and the entry file is preloaded into every
+// request of the session, so leaving the larger one in place because it got there
+// first is a standing cost rather than deference.
+func TestRTKReplacesAnExistingBlockWithItsOwn(t *testing.T) {
+	root := initWorkspace(t)
+	entry := filepath.Join(root, paths.Claude.EntryFile)
+	base := readEntry(t, root, paths.Claude.EntryFile)
+	fat := "\n<!-- rtk-instructions v2 -->\n## RTK\n" + strings.Repeat("verbose guidance line\n", 200) + "<!-- /rtk-instructions -->\n"
+	if err := os.WriteFile(entry, []byte(base+fat), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	stdout, stderr, code := run(t, "rtk", "--root", root, "--no-install", "--json")
+	if code != ExitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	got := readEntry(t, root, paths.Claude.EntryFile)
+	if strings.Contains(got, "verbose guidance line") {
+		t.Error("the larger block survived")
+	}
+	// Only the region between the markers: everything above it is the user's.
+	if !strings.HasPrefix(got, base) {
+		t.Error("the document above the block was rewritten")
+	}
+
+	var report rtkReport
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("stdout is not valid JSON (%v): %q", err, stdout)
+	}
+	f := report.Files[0]
+	if f.Action != "replaced" {
+		t.Errorf("action = %q, want replaced", f.Action)
+	}
+	if f.WasBytes <= f.Bytes {
+		t.Errorf("bytes = %d, was_bytes = %d, want the replacement to be the smaller one", f.Bytes, f.WasBytes)
+	}
+	// Same version on both sides, so there is nothing to warn about.
+	if f.Was != "" {
+		t.Errorf("was = %q, want it silent when the versions match", f.Was)
+	}
+
+	// Re-running changes nothing: the block is now byte-identical to scc's.
+	if _, _, code := run(t, "rtk", "--root", root, "--no-install"); code != ExitOK {
+		t.Fatalf("second pass exit = %d", code)
+	}
+	if again := readEntry(t, root, paths.Claude.EntryFile); again != got {
+		t.Error("a second pass rewrote the file")
+	}
+}
+
+// Preferring scc's block costs something exactly once: when the block replaced
+// claimed a newer version. That is a downgrade, so it is said out loud rather
+// than left to be inferred, and --keep is the standing answer.
+func TestRTKNamesTheVersionItDowngradesAndKeepCanRefuse(t *testing.T) {
 	root := initWorkspace(t)
 	entry := filepath.Join(root, paths.Claude.EntryFile)
 	base := readEntry(t, root, paths.Claude.EntryFile)
@@ -101,35 +188,31 @@ func TestRTKLeavesAnExistingBlockAlone(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
+	// --keep leaves it exactly as it was.
+	if _, stderr, code := run(t, "rtk", "--root", root, "--no-install", "--keep"); code != ExitOK {
+		t.Fatalf("--keep exit = %d (stderr: %s)", code, stderr)
+	}
+	if got := readEntry(t, root, paths.Claude.EntryFile); got != theirs {
+		t.Errorf("--keep rewrote the block:\n%s", got)
+	}
+
+	// Without it, scc's block wins — and the run says which version it displaced.
 	stdout, stderr, code := run(t, "rtk", "--root", root, "--no-install", "--json")
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
-	if got := readEntry(t, root, paths.Claude.EntryFile); got != theirs {
-		t.Errorf("a newer block was rewritten:\n%s", got)
+	if strings.Contains(readEntry(t, root, paths.Claude.EntryFile), "newer text") {
+		t.Error("the v9 block survived without --keep")
+	}
+	if !strings.Contains(stderr, "v9") || !strings.Contains(stderr, "--keep") {
+		t.Errorf("stderr does not name the downgrade and its escape: %q", stderr)
 	}
 	var report rtkReport
 	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
 		t.Fatalf("stdout is not valid JSON (%v): %q", err, stdout)
 	}
-	if len(report.Files) != 1 || report.Files[0].Block != "v9" {
-		t.Errorf("files = %+v, want the v9 block reported as found", report.Files)
-	}
-	// And --check calls it wired, because it is: the version is RTK's to judge.
-	if _, _, code := run(t, "rtk", "--root", root, "--check"); code != ExitOK {
-		t.Errorf("--check exit = %d, want %d with a block already in place", code, ExitOK)
-	}
-
-	// --force is the explicit "use the one this scc ships".
-	if _, stderr, code := run(t, "rtk", "--root", root, "--no-install", "--force"); code != ExitOK {
-		t.Fatalf("--force exit = %d (stderr: %s)", code, stderr)
-	}
-	got := readEntry(t, root, paths.Claude.EntryFile)
-	if strings.Contains(got, "newer text") || strings.Contains(got, "v9") {
-		t.Error("--force did not replace the block")
-	}
-	if !strings.HasPrefix(got, base) {
-		t.Error("--force rewrote the document above the block")
+	if report.Files[0].Was != "v9" {
+		t.Errorf("was = %q, want v9", report.Files[0].Was)
 	}
 }
 
