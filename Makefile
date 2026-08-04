@@ -9,7 +9,7 @@
 #
 # Manual npm publish (bootstrap / fallback, when CI can't do it):
 #   make dist      VERSION=v0.1.0    # cross-compile all 6 targets into dist/
-#   make npm-build VERSION=v0.1.0    # assemble npm/dist/ (7 packages) from those
+#   make npm-build VERSION=v0.1.0    # assemble npm/dist/ (8 packages) from those
 #   make npm-dry-run                 # validate every package without publishing
 #   make npm-publish [OTP=123456]    # publish (skips already-published)
 #
@@ -86,17 +86,17 @@ npm-build: require-version ## Assemble npm/dist/ from the artifacts (VERSION=vX.
 .PHONY: npm-dry-run
 npm-dry-run: ## Dry-run publish every assembled package
 	@set -euo pipefail; \
-	if [ ! -f npm/dist/$(BIN)/package.json ]; then echo "npm/dist not assembled — run: make npm-build VERSION=vX.Y.Z first" >&2; exit 1; fi; \
-	for d in npm/dist/$(BIN)-*/ npm/dist/$(BIN)/; do \
+	if [ ! -f npm/dist/launchers/$(BIN)/package.json ]; then echo "npm/dist not assembled — run: make npm-build VERSION=vX.Y.Z first" >&2; exit 1; fi; \
+	for d in npm/dist/$(BIN)-*/ npm/dist/launchers/*/; do \
 	  [ -f "$$d/package.json" ] || continue; \
 	  echo "== $$d"; npm publish "$$d" --access public --dry-run; done
 
 .PHONY: npm-publish
 npm-publish: ## Publish the assembled packages, skips already-published; OTP=123456 if 2FA
 	@set -euo pipefail; \
-	if [ ! -f npm/dist/$(BIN)/package.json ]; then echo "npm/dist not assembled — run: make dist VERSION=vX.Y.Z && make npm-build VERSION=vX.Y.Z" >&2; exit 1; fi; \
+	if [ ! -f npm/dist/launchers/$(BIN)/package.json ]; then echo "npm/dist not assembled — run: make dist VERSION=vX.Y.Z && make npm-build VERSION=vX.Y.Z" >&2; exit 1; fi; \
 	otp=; if [ -n "$(OTP)" ]; then otp="--otp=$(OTP)"; fi; \
-	for d in npm/dist/$(BIN)-*/ npm/dist/$(BIN)/; do \
+	for d in npm/dist/$(BIN)-*/ npm/dist/launchers/*/; do \
 	  [ -f "$$d/package.json" ] || continue; \
 	  name=$$(cd "$$d" && node -p "require('./package.json').name"); \
 	  ver=$$(cd "$$d" && node -p "require('./package.json').version"); \

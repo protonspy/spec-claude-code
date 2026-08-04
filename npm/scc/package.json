@@ -1,10 +1,13 @@
 {
   "name": "@protonspy/scc",
   "version": "0.0.0",
-  "description": "Spec-driven development for Claude Code — a single Go binary that turns the SDD workflow into a mechanically validated contract for humans and AI agents.",
+  "description": "Spec-driven development for coding agents — a single Go binary that turns the SDD workflow into a mechanically validated contract. Works with Claude Code, Codex, and opencode.",
   "keywords": [
     "claude",
     "claude-code",
+    "codex",
+    "opencode",
+    "coding-agent",
     "spec-driven-development",
     "sdd",
     "cli",
