@@ -27,7 +27,7 @@ func runRTK(args []string) int {
 	root := addRoot(fs)
 	check := fs.Bool("check", false, "report only, write nothing; exit 2 when the block is missing")
 	noInstall := fs.Bool("no-install", false, "never run cargo; only write the block")
-	force := fs.Bool("force", false, "replace an existing block with the one this scc ships (default: leave it alone)")
+	keep := fs.Bool("keep", false, "leave an existing block alone (default: replace it with the one this scc ships)")
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
@@ -45,7 +45,7 @@ func runRTK(args []string) int {
 		return ExitError
 	}
 
-	report, code := applyRTK(target, rtkOptions{check: *check, noInstall: *noInstall, force: *force, quiet: *jsonOut})
+	report, code := applyRTK(target, rtkOptions{check: *check, noInstall: *noInstall, keep: *keep, quiet: *jsonOut})
 	if *jsonOut {
 		if c := emitJSON(report); c != ExitOK {
 			return c
@@ -60,9 +60,10 @@ func runRTK(args []string) int {
 type rtkOptions struct {
 	check     bool
 	noInstall bool
-	// force replaces a block that is already there. Off by default: the block
-	// between RTK's markers is RTK's, and `rtk init` is what refreshes it.
-	force bool
+	// keep leaves a block that is already there. Off by default: scc's block says
+	// what RTK's says in roughly a fifth of the bytes, and the entry file is
+	// preloaded into every request of the session.
+	keep bool
 	// quiet suppresses the human status lines because the caller is emitting JSON
 	// on stdout, which nothing else may touch.
 	quiet bool
@@ -84,8 +85,21 @@ type rtkFile struct {
 	Path   string `json:"path"`
 	Action string `json:"action"` // added | present | replaced | missing
 	// Block is the version the opening marker claims, for a file that had one.
-	// Reported, never compared: which version supersedes which is RTK's to say.
 	Block string `json:"block,omitempty"`
+	// Was is the version of the block that got replaced, when it differed from the
+	// one scc ships. This is the honest half of preferring scc's block by default:
+	// between two v2 blocks the smaller one simply wins, but a v3 replaced by a v2
+	// is a downgrade and has to be visible rather than inferred.
+	Was string `json:"was,omitempty"`
+	// Bytes and WasBytes size the block now in the file against the one it
+	// replaced — the whole argument for replacing it, stated in the unit that
+	// matters.
+	Bytes    int `json:"bytes,omitempty"`
+	WasBytes int `json:"was_bytes,omitempty"`
+	// Foreign names another tool's RTK block found in the same file — Headroom
+	// writes one behind its own markers. Reported and never touched: scc does not
+	// own that block, and the file would carry the same instructions twice.
+	Foreign string `json:"foreign,omitempty"`
 }
 
 // The values rtkReport.Install takes. Not rtk.Action: these describe the binary,
@@ -135,8 +149,8 @@ func applyRTK(root string, opts rtkOptions) (*rtkReport, int) {
 		report.Files = append(report.Files, file)
 		switch action := file.Action; action {
 		case string(rtk.Present):
-			// Already wired. Whose block it is and which version it claims is RTK's
-			// business, so this reports and stops there.
+			// The block in the file is already scc's, or --keep asked for the one
+			// that was there. Either way there is nothing to do.
 			if !opts.quiet {
 				render.Info(strings.TrimSpace(fmt.Sprintf("%s — RTK block already there %s", entry, file.Block)))
 			}
@@ -157,7 +171,14 @@ func applyRTK(root string, opts rtkOptions) (*rtkReport, int) {
 			}
 			report.Changed++
 			if !opts.quiet {
-				render.OK(fmt.Sprintf("%s — RTK block %s", entry, action))
+				render.OK(fmt.Sprintf("%s — RTK block %s%s", entry, action, sizeNote(file)))
+			}
+			// A replaced block that claimed a different version is the one case
+			// where preferring scc's costs something, so it is said out loud
+			// rather than left to be inferred from the file.
+			if file.Was != "" {
+				render.Warn(fmt.Sprintf("%s — the block it replaced claimed %s; scc ships %s", entry, file.Was, file.Block))
+				render.Detail(fmt.Sprintf("  keep theirs with: %s rtk --keep", prog()))
 			}
 		}
 	}
@@ -172,6 +193,16 @@ func applyRTK(root string, opts rtkOptions) (*rtkReport, int) {
 		return report, ExitFindings
 	}
 	return report, code
+}
+
+// sizeNote is the whole argument for replacing a block, in the unit that makes it:
+// bytes the entry file no longer spends in every request of the session. Silent
+// when nothing was replaced, and when the replacement was not actually smaller.
+func sizeNote(file rtkFile) string {
+	if file.WasBytes <= file.Bytes {
+		return ""
+	}
+	return fmt.Sprintf(" (%d → %d bytes)", file.WasBytes, file.Bytes)
 }
 
 // ensureBinary finds RTK, or builds it when it is missing and the user did not opt
@@ -239,7 +270,7 @@ func spliceEntry(root, entry, block string, opts rtkOptions) (rtkFile, error) {
 	if err != nil {
 		return rtkFile{}, err
 	}
-	next, action, err := rtk.Splice(string(raw), block, opts.force)
+	next, action, err := rtk.Splice(string(raw), block, opts.keep)
 	if err != nil {
 		return rtkFile{}, err
 	}
@@ -249,7 +280,24 @@ func spliceEntry(root, entry, block string, opts rtkOptions) (rtkFile, error) {
 	if action != rtk.Present {
 		found = rtk.BlockVersion(block)
 	}
-	file := rtkFile{Path: entry, Action: string(action), Block: found}
+	file := rtkFile{Path: entry, Action: string(action), Block: found, Bytes: len(block)}
+	if action == rtk.Present {
+		file.Bytes = len(rtk.Block(string(raw)))
+	}
+	if action == rtk.Replaced {
+		was := rtk.Block(string(raw))
+		file.WasBytes = len(was)
+		// Only when it differs: naming the version on every replacement would bury
+		// the one case that actually needs reading.
+		if v := rtk.BlockVersion(was); v != found {
+			file.Was = v
+		}
+	}
+	if foreign, ok := rtk.ForeignBlock(string(raw)); ok {
+		file.Foreign = foreign.Tool
+		render.Warn(fmt.Sprintf("%s also carries %s's RTK block; the agent will read these instructions twice", entry, foreign.Tool))
+		render.Detail("  remove that one with: " + foreign.Fix)
+	}
 	if action == rtk.Present || opts.check {
 		return file, nil
 	}

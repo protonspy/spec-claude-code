@@ -31,6 +31,67 @@ func TestShippedBlockIsMarkerDelimited(t *testing.T) {
 	}
 }
 
+// scc shares RTK's markers rather than namespacing its own, and that is what
+// makes `rtk init` and `scc rtk` converge on one copy: `rtk init` writes this
+// exact pair into the project's entry file. A marker of scc's own would make each
+// tool blind to the other's block and leave the file carrying both.
+func TestTheMarkersAreRTKsOwn(t *testing.T) {
+	if openPrefix != "<!-- rtk-instructions" || closeTag != "<!-- /rtk-instructions -->" {
+		t.Errorf("markers are %q / %q, which is not what `rtk init` writes", openPrefix, closeTag)
+	}
+	// And the namespaced variant somebody will eventually propose must not match,
+	// or scc would claim a block it does not own.
+	if _, _, err := Splice("<!-- scc:rtk-instructions -->\nx\n<!-- /scc:rtk-instructions -->\n", block(t), false); err != nil {
+		t.Errorf("a namespaced block confused the splice: %v", err)
+	}
+}
+
+// Headroom writes the same guidance behind its own marker pair, into the same
+// entry file. scc cannot address that block — it is Headroom's — but a file
+// carrying both tells the agent the same thing twice in every request, so the one
+// thing scc must not do is fail to notice.
+func TestForeignBlockFindsHeadroomsCopy(t *testing.T) {
+	doc := "# CLAUDE.md\n\n<!-- headroom:rtk-instructions -->\nuse rtk\n<!-- /headroom:rtk-instructions -->\n"
+	f, ok := ForeignBlock(doc)
+	if !ok {
+		t.Fatal("Headroom's block went undetected")
+	}
+	if f.Tool != "Headroom" || f.Fix == "" {
+		t.Errorf("foreign = %+v, want it named with a way to remove it", f)
+	}
+
+	// scc's own block is not foreign, and neither is a document with no block.
+	if _, ok := ForeignBlock(block(t)); ok {
+		t.Error("scc's own block was reported as another tool's")
+	}
+	if _, ok := ForeignBlock("# CLAUDE.md\n\nnothing here\n"); ok {
+		t.Error("a blockless document reported a foreign block")
+	}
+}
+
+// Neither marker is a substring of the other, which is why both tools' idempotency
+// checks pass and both append. Splice must leave Headroom's block exactly where it
+// is and add scc's alongside — anything else would be scc editing a document it
+// does not own.
+func TestSpliceLeavesAForeignBlockAlone(t *testing.T) {
+	foreign := "<!-- headroom:rtk-instructions -->\nuse rtk\n<!-- /headroom:rtk-instructions -->"
+	doc := "# CLAUDE.md\n\n" + foreign + "\n"
+
+	got, action, err := Splice(doc, block(t), false)
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	if action != Added {
+		t.Errorf("action = %q, want %q", action, Added)
+	}
+	if !strings.Contains(got, foreign) {
+		t.Error("Splice modified Headroom's block")
+	}
+	if !strings.Contains(got, openPrefix) {
+		t.Error("Splice did not add scc's own block")
+	}
+}
+
 func TestSpliceAppendsToADocumentWithoutABlock(t *testing.T) {
 	doc := "# CLAUDE.md\n\nSome rules.\n"
 	got, action, err := Splice(doc, block(t), false)
@@ -72,35 +133,11 @@ func TestSpliceIsIdempotent(t *testing.T) {
 	}
 }
 
-// The block between the markers is RTK's: `rtk init` writes it and stamps its own
-// version into the opening marker. scc inserts one only where there is none, so a
-// block this build does not recognize — a newer one, or one the user edited —
-// survives contact.
-func TestSpliceLeavesAnExistingBlockAlone(t *testing.T) {
-	doc := "# CLAUDE.md\n\n<!-- rtk-instructions v9 -->\n## RTK\nnewer text\n<!-- /rtk-instructions -->\n"
-	got, action, err := Splice(doc, block(t), false)
-	if err != nil {
-		t.Fatalf("Splice: %v", err)
-	}
-	if action != Present {
-		t.Errorf("action = %q, want %q", action, Present)
-	}
-	if got != doc {
-		t.Errorf("an existing block was rewritten without force:\n%s", got)
-	}
-	if v := BlockVersion(doc); v != "v9" {
-		t.Errorf("BlockVersion = %q, want %q", v, "v9")
-	}
-	if v := BlockVersion("# CLAUDE.md\n\nno block here.\n"); v != "" {
-		t.Errorf("BlockVersion of a blockless document = %q, want empty", v)
-	}
-}
-
-// force is the explicit "use the one this scc ships". It replaces the block where
-// it stands, between the markers and nowhere else.
-func TestSpliceReplacesAnOlderBlockInPlaceWithForce(t *testing.T) {
+// The block scc ships wins by default, replacing whatever is between the markers
+// — in place, between the markers and nowhere else.
+func TestSpliceReplacesAnExistingBlockInPlace(t *testing.T) {
 	doc := "# CLAUDE.md\n\nAbove.\n\n<!-- rtk-instructions v1 -->\n## RTK\nold text\n<!-- /rtk-instructions -->\n\nBelow.\n"
-	got, action, err := Splice(doc, block(t), true)
+	got, action, err := Splice(doc, block(t), false)
 	if err != nil {
 		t.Fatalf("Splice: %v", err)
 	}
@@ -115,6 +152,46 @@ func TestSpliceReplacesAnOlderBlockInPlaceWithForce(t *testing.T) {
 	}
 	if strings.Count(got, openPrefix) != 1 {
 		t.Errorf("the document carries %d opening markers, want 1", strings.Count(got, openPrefix))
+	}
+}
+
+// keep is the standing "leave whatever is already there", for a block somebody
+// curated on purpose — or one whose version is ahead of what this build ships.
+func TestSpliceKeepsAnExistingBlockWhenAsked(t *testing.T) {
+	doc := "# CLAUDE.md\n\n<!-- rtk-instructions v9 -->\n## RTK\nnewer text\n<!-- /rtk-instructions -->\n"
+	got, action, err := Splice(doc, block(t), true)
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	if action != Present {
+		t.Errorf("action = %q, want %q", action, Present)
+	}
+	if got != doc {
+		t.Errorf("keep rewrote the block:\n%s", got)
+	}
+	if v := BlockVersion(doc); v != "v9" {
+		t.Errorf("BlockVersion = %q, want %q", v, "v9")
+	}
+	if v := BlockVersion("# CLAUDE.md\n\nno block here.\n"); v != "" {
+		t.Errorf("BlockVersion of a blockless document = %q, want empty", v)
+	}
+}
+
+// Block is what lets a caller measure what is there against what it would write,
+// which is the whole basis for replacing it: `rtk init` and scc both stamp v2 and
+// say the same thing, but one spends roughly five times the bytes.
+func TestBlockExtractsWhatIsThere(t *testing.T) {
+	inner := "<!-- rtk-instructions v1 -->\nold text\n<!-- /rtk-instructions -->"
+	doc := "# CLAUDE.md\n\nAbove.\n\n" + inner + "\n\nBelow.\n"
+	if got := Block(doc); got != inner {
+		t.Errorf("Block = %q, want %q", got, inner)
+	}
+	if got := Block("# CLAUDE.md\n\nnothing here.\n"); got != "" {
+		t.Errorf("Block of a blockless document = %q, want empty", got)
+	}
+	// A half block is not a block: the opening marker without its close.
+	if got := Block("<!-- rtk-instructions v1 -->\ndangling\n"); got != "" {
+		t.Errorf("Block of a half block = %q, want empty", got)
 	}
 }
 

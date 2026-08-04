@@ -30,10 +30,55 @@ const Bin = "rtk"
 // The markers RTK itself writes. The opening one carries a version, so it is
 // matched by prefix: a block stamped v1 or v9 is still the block, and replacing it
 // with the one this build ships is exactly what an update means.
+//
+// Sharing RTK's markers rather than namespacing scc's own is the load-bearing
+// choice here, and it is worth naming what it buys: `rtk init` writes this exact
+// pair into the project's entry file, so addressing the block by these markers is
+// what makes `rtk init` and `scc rtk` converge on one copy. A marker of scc's own
+// — `scc:rtk-instructions`, say — would make each tool blind to the other's block
+// and leave the file carrying both.
 const (
 	openPrefix = "<!-- rtk-instructions"
 	closeTag   = "<!-- /rtk-instructions -->"
 )
+
+// Foreign is a marker some other tool writes for the same guidance.
+//
+// Headroom's context-tool setup appends RTK instructions to the same entry file
+// behind its own namespaced pair. scc cannot address that block — it is
+// Headroom's, written by Headroom, refreshed on Headroom's schedule — and it must
+// not silently ignore it either, because a file carrying both blocks tells the
+// agent the same thing twice in every request of the session. So: detected,
+// named, and left exactly where it is.
+type Foreign struct {
+	// Tool is what to call it when telling somebody it is there.
+	Tool string
+	// Open is the marker that proves it.
+	Open string
+	// Fix is the command that removes it, run by the tool that owns it.
+	Fix string
+}
+
+// foreigners are the blocks scc knows to look for. A short list on purpose: a
+// marker that turns out not to be there costs one Contains call, and a marker
+// nobody warns about costs a duplicated block in every session.
+var foreigners = []Foreign{
+	{
+		Tool: "Headroom",
+		Open: "<!-- headroom:rtk-instructions -->",
+		Fix:  "headroom unwrap <agent>",
+	},
+}
+
+// ForeignBlock reports the other tool's RTK block in doc, if there is one.
+func ForeignBlock(doc string) (Foreign, bool) {
+	for _, f := range foreigners {
+		if strings.Contains(doc, f.Open) {
+			return f, true
+		}
+	}
+	return Foreign{}, false
+}
 
 // Action is what splicing the block did to a document.
 type Action string
@@ -41,16 +86,23 @@ type Action string
 const (
 	// Added: the document carried no block, so one was appended.
 	Added Action = "added"
-	// Present: it already carried a block, which was left exactly as it was.
-	//
-	// This is the default outcome for an existing block whatever its version says,
-	// and the reason is ownership: RTK writes that block, stamps its own version
-	// into the opening marker, and `rtk init` is what refreshes it. An scc that
-	// rewrote it on every run would silently downgrade a v3 block to whatever this
-	// build happens to ship, and it would do it to a file the user owns.
+	// Present: the block in the document is already the one scc ships, byte for
+	// byte, or the caller asked for an existing block to be kept.
 	Present Action = "present"
-	// Replaced: the caller passed force, so an existing block was overwritten with
-	// the one this build ships.
+	// Replaced: the document carried a different block, and scc's replaced it.
+	//
+	// This is the default, and the reason is size. `rtk init` and scc both stamp
+	// v2 and give the agent the same instruction, but RTK's own block spends
+	// roughly five times the bytes doing it — and the entry file is preloaded into
+	// every request of the session, so the difference is paid continuously rather
+	// than once. Between two blocks of the same version, the condensed one is
+	// simply better, and leaving the larger one in place because it got there first
+	// is not deference, it is a standing cost.
+	//
+	// What that does give up is version ordering: a future `rtk init` writing v3
+	// would be overwritten by scc's v2. Splice therefore keeps the replaced block's
+	// version visible so the caller can say so, and Keep is the standing answer for
+	// anyone who has deliberately curated their own.
 	Replaced Action = "replaced"
 )
 
@@ -62,19 +114,19 @@ func InstallCmd() string { return "cargo install --git " + Repo }
 // Splice returns doc with the block present exactly once, and what it had to do to
 // get there.
 //
-// Insert only when the marker is absent. A document that already carries a block is
-// returned untouched and reported Present, because that block is RTK's — see the
-// Action constants. force is the explicit "replace it with what this scc ships",
-// and it is the only path that ever overwrites one.
+// The block scc ships wins by default — see Replaced for why. keep is the standing
+// "leave whatever is already there", for a document whose block somebody curated
+// on purpose.
 //
-// It preserves the document's own line endings: an entry file checked out CRLF
-// stays CRLF, because scc is a guest in this file and rewriting every line of
-// someone else's document is not a change they asked for.
+// Only the region between the markers is ever rewritten. Everything outside them
+// is untouched, always, and the document's own line endings are preserved: an
+// entry file checked out CRLF stays CRLF, because scc is a guest in this file and
+// rewriting every line of someone else's document is not a change they asked for.
 //
 // A document carrying an opening marker with no closing one is malformed rather
 // than blockless, and it is an error: appending a second block there would leave
 // the file with two openings and one close, which no tool could then update.
-func Splice(doc, block string, force bool) (string, Action, error) {
+func Splice(doc, block string, keep bool) (string, Action, error) {
 	block = strings.TrimRight(textutil.NormalizeNewlines(block), "\n")
 	eol := "\n"
 	if strings.Contains(doc, "\r\n") {
@@ -100,10 +152,31 @@ func Splice(doc, block string, force bool) (string, Action, error) {
 		return "", "", fmt.Errorf("found %s with no closing %s", openPrefix+" …", closeTag)
 	}
 	end += len(closeTag)
-	if !force || rest[:end] == block {
+	if keep || rest[:end] == block {
 		return doc, Present, nil
 	}
 	return doc[:start] + block + doc[start+end:], Replaced, nil
+}
+
+// Block returns the marker-delimited block in doc, markers included, or "" when
+// doc carries none.
+//
+// It exists so a caller can measure what is already there against what it would
+// have written. That comparison matters more than it sounds: `rtk init` and scc
+// both stamp v2 and say the same thing, but RTK's own block spends roughly five
+// times the bytes doing it, and the entry file is preloaded into every request of
+// the session. Version ordering cannot separate those two — only size can.
+func Block(doc string) string {
+	start := strings.Index(doc, openPrefix)
+	if start < 0 {
+		return ""
+	}
+	rest := doc[start:]
+	end := strings.Index(rest, closeTag)
+	if end < 0 {
+		return ""
+	}
+	return rest[:end+len(closeTag)]
 }
 
 // BlockVersion reports what the opening marker in doc claims — "v2" for
