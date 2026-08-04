@@ -14,11 +14,14 @@ Note: this repo is not itself an scc workspace (no harness directory, `specs/`, 
 
 **Status: v0.4.0-shaped.** Everything through `design/plan.md` phase 10 is built and green: scaffolding (`init`), artifact creation (`spec`, `plan`), and all eight validators behind `scc validate`. `init` also scaffolds the seven skills named in `design/orchestration.md` §6 — the six knowledge-base authors (one per `docs/` artifact a validator checks, plus `prd`) and the `plan-run` workflow skill — each with a `scc-`-prefixed slash command derived from the same list (`assets.Skills()`, which is `KnowledgeSkills` + `WorkflowSkills`), wherever the harness has a command surface.
 
-Three things landed after phase 10 and all are documented in `design/orchestration.md` §6 and §12:
+These landed after phase 10, and all are documented in `design/orchestration.md` §6 and §12:
 
 - **Three harnesses, one template set.** `scc init --claude|--codex|--opencode` (Claude Code is the default, and a terminal with no flag gets a picker). One prose source: paths come from a `paths.Harness` profile and the header each loader parses is synthesized at render time — YAML frontmatter for Claude Code and opencode, a TOML agent role file for Codex.
+
+  The profile also carries `PreloadsRules`, because where the rules go is scc's choice but what the harness then does with them is not. Claude Code loads `.claude/rules/*.md` at launch with the same priority as `CLAUDE.md`; Codex and opencode load nothing from `rules/`, which is scc's own directory there. The entry file branches on it: told to "read the rule when the concern is live", an agent that already has all nine in context re-reads them, putting the same ~26KB in twice — and learns that the one document it is meant to trust is wrong about its own environment. Confirm per harness with `/context`.
 - **`scc update` (phase 11), as replace-or-keep rather than the planned three-way merge.** It hashes every managed file against this build and against the manifest, prints the plan grouped by outcome, asks, and then replaces what is safe to replace. An edited file is kept and named; `--force` is the separate decision. `internal/merge` is still unbuilt.
 - **`scc rtk`, and `scc init --rtk`.** Wires in [RTK](https://github.com/rtk-ai/rtk), the CLI proxy that filters command output: `cargo install` when the binary is missing, plus a splice of RTK's marker-delimited usage block into the entry file. Insert-only — a block already between the markers is left alone whatever version it claims, because RTK owns that text and `rtk init` refreshes it; `--force` is the separate decision. Opt-in in both places, since the block tells the agent to prefix every command with a binary the machine may not have. `--check` reports without writing and exits 2 when the block is missing.
+- **`scc launch <harness>`.** Starts the harness this workspace was scaffolded for, from the workspace root, behind [Headroom](https://github.com/headroomlabs-ai/headroom)'s compression proxy (`headroom wrap <slug>`). Headroom is the *default* here, which is the deliberate opposite of how RTK is wired: RTK edits a file the user owns and changes how every later command is typed, while Headroom wraps one process for one session and changes nothing on disk. So it degrades instead of failing — missing binary, declined install, unattended run, or a harness Headroom does not wrap all end in the agent starting bare with a warning saying why. `--no-headroom` forces that path, and a missing binary prompts for `uv tool install` (`--yes`/`--no-install` are the unattended answers). This is the one command that does not obey the 0/1/2 exit-code contract; see the convention below.
 - **The four seeded `docs/` anchors** (`assets.Seeds`). `init` writes `glossary.md`, `stack.md`, `wiki/index.md`, and `wiki/changelog.md` — the knowledge base's only fixed-name documents, each holding the format its validator checks. A seed is written once and tracked nowhere: not in the manifest, not by `scc update`.
 
 `scc` is a redesign of `csdd` (`github.com/protonspy/csdd`), narrowed to spec-driven development and deliberately leaner. When reaching for something from there, port the *decision*, not the file. Already decided against: a TUI, an embedded web dashboard, an MCP server, a devcontainer.
@@ -69,7 +72,7 @@ cmd/scc/main.go         os.Exit(cli.Run(os.Args[1:]))
 
 | Package | Role |
 |---|---|
-| `internal/paths` | Every directory/file name in the on-disk layout, in one place, plus the `Harness` profile (`Claude`, `Codex`, `OpenCode`) that says where each tool keeps things. Never hardcode `".claude"` or `"specs"` elsewhere — the harness-relative paths are methods on `Harness`. |
+| `internal/paths` | Every directory/file name in the on-disk layout, in one place, plus the `Harness` profile (`Claude`, `Codex`, `OpenCode`) that says where each tool keeps things — and, in `PreloadsRules`, what it does with them. Never hardcode `".claude"` or `"specs"` elsewhere — the harness-relative paths are methods on `Harness`. |
 | `internal/workspace` | Resolves the root by walking up for *any* harness's `scc-manifest.json` marker; `Harnesses(root)` says which trees exist. Owns `KebabCheck`, `SafeName`, `AtomicWrite`. Knows nothing about specs or wikis. |
 | `internal/render` | CLI terminal output (`✓ ✗ ! •`, `NO_COLOR`/TTY aware), split across stdout/stderr. |
 | `internal/textutil` | Line-ending and BOM normalization, in exactly one place. |
@@ -80,14 +83,19 @@ cmd/scc/main.go         os.Exit(cli.Run(os.Args[1:]))
 | `internal/mdscan` | The only Markdown parser: fence- and HTML-comment-aware headings, checkboxes, links, wikilinks, slugs, plus a small frontmatter reader. `Body` is the comment/fence-stripped text every validator applies its grammar to. |
 | `internal/ears` | EARS requirement parsing, all five patterns plus complex. |
 | `internal/validate` | The eight validators, one file each, sharing `mdscan` and `finding`. The exception is `stack_manifests.go`: the seven dependency-file readers age on their own schedule, so they sit beside the rule rather than inside it. |
-| `internal/rtk` | RTK's marker pair and the idempotent splice of its block into the entry file, plus finding or `cargo install`ing the binary. The only package that shells out to another program — keep that boundary here rather than in a command handler. |
+| `internal/rtk` | RTK's marker pair and the idempotent splice of its block into the entry file, plus finding or `cargo install`ing the binary. |
+| `internal/headroom` | Headroom's agent-slug table, the `wrap` argument vector, and finding or installing the binary (uv, then pip — never npm, which ships the SDK and no CLI). The slugs live here rather than on `paths.Harness` because they are Headroom's vocabulary, not scc's layout. |
 | `internal/cli` | The dispatcher and every command handler. |
+
+`internal/rtk` and `internal/headroom` are the only packages that shell out to another program. Keep that boundary there rather than in a command handler: a third party's binary name, install command, and argument vocabulary all age on that third party's schedule, and one package per integration is what keeps a version bump from touching the dispatcher.
 
 `go.mod` is stdlib-only. Keep it that way unless a dependency earns its place — the binary is distributed to six platforms and every dep is a supply-chain surface.
 
 ## Conventions
 
 **Exit codes are the contract.** `0` ok · `1` usage/runtime error · `2` validation findings. Every lint/validate command returns `2` on findings so CI and agents can branch on it. A finding is a legitimate answer to a lint question, not a failure of the tool — don't collapse `2` into `1`.
+
+`scc launch` is the single exception, and it has to be: it returns whatever the agent it started returned. A launcher that flattened the exit status of what it launched into its own vocabulary would be unusable in the scripts people actually write. scc's own failures — no workspace, unknown harness, binary not on PATH — still happen before anything starts and still report `1`.
 
 **A validator that fires on scc's own output is the worst bug in the product.** The templates carry their instructions in HTML comments and fenced examples, which is exactly what `mdscan` excludes — and `TestFreshArtifactsPassTheirOwnValidators` in `internal/cli` is the gate. Treat it as required reading before changing a template or a validator: one wrong finding teaches the user to disbelieve all eight.
 
@@ -125,6 +133,7 @@ Tests live beside the code and lean on a few package-local helpers rather than a
 - **A version is immutable.** Re-dispatching an already-released version from a *different* commit is refused, because publishing is idempotent and the run would otherwise go green having shipped nothing.
 - **Publishing is idempotent.** Already-published packages are skipped, so a run that died after `npm-publish` can be resumed by re-dispatching the same commit.
 - **Adding a platform touches three places** that must agree: `TARGETS` in `npm/scripts/build-packages.mjs`, `PLATFORMS` in the `Makefile`, and the `build` matrix in `release.yml`.
+- **The launcher is published under two names**, listed in `LAUNCHERS` in the same script: `scc-cli` is the documented install, and `@protonspy/scc` stays published so earlier installs keep receiving versions. Both ship the same shim and put the same `scc` command on PATH — npm resolves the package name and installs the `bin` name, and those never had to match. Launchers are emitted under `npm/dist/launchers/` rather than beside the platform packages so that publish order stays structural: `dist/scc-*/` first, `dist/launchers/*/` second. A launcher that reached the registry ahead of the binaries in its `optionalDependencies` is a broken install for anyone in that window.
 - Actions are pinned by commit SHA. Keep them pinned.
 
 ## Commits
