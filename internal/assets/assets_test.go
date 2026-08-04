@@ -289,6 +289,48 @@ func TestEntryFileNamesEveryRule(t *testing.T) {
 	}
 }
 
+// The entry file must not tell an agent to go and read rules its harness already
+// put in front of it, and must tell one whose harness did not.
+//
+// Both halves matter, and they fail in opposite directions. Told to read what it
+// already has, the agent re-reads all nine rules and pays for the same ~26KB twice
+// — and, worse, catches the one document it is meant to trust being wrong about
+// its own environment. Not told to read what it does not have, it works from a
+// methodology it never opened. So this asserts the two lead-ins are mutually
+// exclusive rather than merely present: a template that shipped both sentences
+// would satisfy a "contains" check while contradicting itself in the file.
+func TestEntryFileMatchesWhetherTheHarnessPreloadsRules(t *testing.T) {
+	const (
+		preloaded = "nothing to open"
+		lazy      = "Open the file whose moment has arrived"
+	)
+	for _, h := range paths.Harnesses() {
+		raw, err := Render(h, entryFile(t, h))
+		if err != nil {
+			t.Fatalf("%s: %v", h.ID, err)
+		}
+		gotPreloaded := strings.Contains(raw, preloaded)
+		gotLazy := strings.Contains(raw, lazy)
+
+		if gotPreloaded == gotLazy {
+			t.Errorf("%s: %s carries %v of the two rule lead-ins; it must carry exactly one",
+				h.ID, h.EntryFile, map[bool]string{true: "both", false: "neither"}[gotPreloaded])
+			continue
+		}
+		if gotPreloaded != h.PreloadsRules {
+			t.Errorf("%s: PreloadsRules=%v but %s tells the agent %s",
+				h.ID, h.PreloadsRules, h.EntryFile,
+				map[bool]string{true: "the rules are already loaded", false: "to open them itself"}[gotPreloaded])
+		}
+		// The preloaded wording names the tool that did the loading, which is the
+		// only place a workspace template addresses the harness by its own name.
+		if h.PreloadsRules && !strings.Contains(raw, h.Label) {
+			t.Errorf("%s: %s says the rules are preloaded without naming %s as what loaded them",
+				h.ID, h.EntryFile, h.Label)
+		}
+	}
+}
+
 func entryFile(t *testing.T, h paths.Harness) File {
 	t.Helper()
 	for _, f := range Workspace(h) {

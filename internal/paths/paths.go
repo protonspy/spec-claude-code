@@ -88,11 +88,26 @@ type Harness struct {
 	// the skills alone there rather than writing into the user's home directory.
 	CommandsSeg string
 
-	// RulesSeg is where the methodology goes under Dir. No harness loads it on
-	// its own — the entry file's table is what sends the agent to a rule when
-	// the concern is live — so this is scc's choice in all three, kept parallel
-	// so one layout is learned once.
+	// RulesSeg is where the methodology goes under Dir. The path is scc's choice
+	// in all three, kept parallel so one layout is learned once — but what the
+	// harness then does with it is not, which is what PreloadsRules records.
 	RulesSeg string
+
+	// PreloadsRules is whether the harness reads every file under RulesSeg into
+	// context by itself at session start.
+	//
+	// It changes what the entry file may truthfully say, which is why it is a
+	// field rather than a footnote. Claude Code loads `.claude/rules/*.md` at
+	// launch with the same priority as CLAUDE.md, so an entry file telling that
+	// agent to "read the rule when the concern is live" describes a mechanism
+	// that already ran — it asks for a re-read that puts the same bytes in
+	// context twice, and it makes the one document the agent is meant to trust
+	// wrong about its own environment. For Codex and opencode, RulesSeg is scc's
+	// invention and nothing loads it, so there the instruction is the only thing
+	// that gets a rule read at all.
+	//
+	// Verifiable per harness: `/context` in Claude Code lists what loaded.
+	PreloadsRules bool
 }
 
 // Format is the dialect a harness's subagent definitions are written in.
@@ -121,6 +136,7 @@ var (
 		ID: "claude", Label: "Claude Code", Bin: "claude", Dir: ClaudeDir, EntryFile: "CLAUDE.md",
 		AgentsSeg: "agents", AgentFormat: FormatMarkdown,
 		SkillsSeg: "skills", CommandsSeg: "commands", RulesSeg: "rules",
+		PreloadsRules: true,
 	}
 	Codex = Harness{
 		ID: "codex", Label: "Codex", Bin: "codex", Dir: CodexDir, EntryFile: "AGENTS.md",

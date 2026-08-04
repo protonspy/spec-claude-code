@@ -67,7 +67,11 @@ import (
 // 8: the entry file names *when* to read each rule instead of tabulating all nine
 // as equals — five read on their own trigger, four looked up by name — and the two
 // review agents are tightened in the same pass.
-const Version = "8"
+// 9: the npx fallback names the unscoped `scc-cli` package; the entry file gives
+// each rule its own trigger line instead of running four of them together in a
+// sentence — project.md above all, since a build command nobody read is guessed —
+// and it stops telling a harness that preloads the rules to go and read them.
+const Version = "9"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -317,7 +321,10 @@ func Content(name string) (string, error) {
 // things, and nothing else. Every field is derived from the profile, so a
 // template cannot come to depend on the machine, the project, or the clock.
 type layout struct {
-	Harness     string
+	Harness string
+	// Label is the tool's own name, for the one sentence a template addresses to
+	// the agent about the tool it is running inside.
+	Label       string
 	Dir         string
 	Entry       string
 	Rules       string
@@ -326,17 +333,23 @@ type layout struct {
 	Commands    string
 	HasCommands bool
 	Manifest    string
+	// RulesPreloaded says the harness already put Rules in the agent's context,
+	// so a template can stop telling it to go and read them. See
+	// paths.Harness.PreloadsRules.
+	RulesPreloaded bool
 }
 
 func layoutOf(h paths.Harness) layout {
 	l := layout{
-		Harness:  h.ID,
-		Dir:      h.Dir,
-		Entry:    h.EntryFile,
-		Rules:    path.Join(h.Dir, h.RulesSeg),
-		Skills:   path.Join(h.Dir, h.SkillsSeg),
-		Agents:   path.Join(h.Dir, h.AgentsSeg),
-		Manifest: path.Join(h.Dir, paths.ManifestSeg),
+		Harness:        h.ID,
+		Label:          h.Label,
+		Dir:            h.Dir,
+		Entry:          h.EntryFile,
+		Rules:          path.Join(h.Dir, h.RulesSeg),
+		Skills:         path.Join(h.Dir, h.SkillsSeg),
+		Agents:         path.Join(h.Dir, h.AgentsSeg),
+		Manifest:       path.Join(h.Dir, paths.ManifestSeg),
+		RulesPreloaded: h.PreloadsRules,
 	}
 	if h.CommandsSeg != "" {
 		l.Commands = path.Join(h.Dir, h.CommandsSeg)
