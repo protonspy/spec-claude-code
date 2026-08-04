@@ -71,7 +71,7 @@ import (
 // each rule its own trigger line instead of running four of them together in a
 // sentence — project.md above all, since a build command nobody read is guessed —
 // and it stops telling a harness that preloads the rules to go and read them.
-const Version = "9"
+const Version = "10"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
