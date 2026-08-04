@@ -7,8 +7,8 @@ name: release
 #   (or: make release VERSION=v0.1.0)
 #
 # It runs the full pipeline for the given version: CI gate → cross-platform
-# binaries → publish every npm package (the launcher + 6 platform binaries, all
-# at the same version) → tag the commit + GitHub Release. Nothing is released on
+# binaries → publish every npm package (2 launcher names + 6 platform binaries,
+# all at the same version) → tag the commit + GitHub Release. Nothing is released on
 # push; releasing is always a deliberate manual action.
 on:
   workflow_dispatch:
@@ -164,7 +164,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: node npm/scripts/build-packages.mjs "$VERSION" artifacts
 
-      - name: Publish (platform packages first, then the launcher)
+      - name: Publish (platform packages first, then the launchers)
         env:
           # Automation token (bypasses 2FA). setup-node wrote an .npmrc that
           # reads this. --provenance still attaches a signed attestation via the
@@ -187,11 +187,15 @@ jobs:
             echo ">> publishing $name@$ver"
             npm publish "$dir" --access public --provenance
           }
-          # The platform packages must land before the launcher that depends on them.
+          # The platform packages must land before any launcher that optionally
+          # depends on them: a launcher on the registry ahead of its binaries is a
+          # broken install for whoever hits that window.
           for d in npm/dist/scc-*/; do
             publish "${d%/}"
           done
-          publish npm/dist/scc
+          for d in npm/dist/launchers/*/; do
+            publish "${d%/}"
+          done
 
   # Tag the released commit and create the GitHub Release — only after npm
   # publishing succeeds, so a failed publish never leaves a dangling tag/release.

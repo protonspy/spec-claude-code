@@ -10,8 +10,11 @@
 //                  (default: "artifacts").
 //
 // Output: npm/dist/
-//   scc/                       launcher package (shim + optionalDependencies)
 //   scc-<platform>-<arch>/     one per target, carrying the native binary
+//   launchers/<name>/          the shim, published under each launcher name
+//
+// Publish order is the layout: every scc-*/ package must reach the registry
+// before any launchers/ package that optionally depends on it.
 //
 // The Go binaries are reused as-is from the release artifacts (they already
 // carry the version baked in via -ldflags), so the npm binary is byte-identical
@@ -125,17 +128,43 @@ for (const t of TARGETS) {
   console.log(`built ${pkgName}@${version}`);
 }
 
-// --- launcher package ------------------------------------------------------
-const rootSrc = join(npmDir, BIN);
-const rootOut = join(outDir, BIN);
-mkdirSync(join(rootOut, "bin"), { recursive: true });
-cpSync(join(rootSrc, "bin", `${BIN}.js`), join(rootOut, "bin", `${BIN}.js`));
-cpSync(join(rootSrc, "README.md"), join(rootOut, "README.md"));
+// --- launcher packages -----------------------------------------------------
+// Two names, one package. `scc-cli` is the documented install line; the scoped
+// `@protonspy/scc` stays published so anybody who already installed it keeps
+// receiving versions. Both carry the same shim, the same optionalDependencies,
+// and the same `bin` — so both put the same `scc` command on PATH. The package
+// name is what npm resolves and the bin name is what you type, and those were
+// never required to match: the bare `scc` on npm has been taken since 2013.
+//
+// They are emitted under launchers/ rather than beside the platform packages,
+// and that is load-bearing rather than tidy: the publish order is expressed as
+// "everything in dist/scc-*/ first, then everything in dist/launchers/", and a
+// second launcher sitting at the top level would be swept into the platform
+// glob and published ahead of the binaries it optionally depends on. Anyone
+// installing during that window gets a launcher that cannot resolve a binary.
+const LAUNCHERS = [
+  { dir: "scc-cli", name: "scc-cli" },
+  { dir: BIN, name: `${SCOPE}/${BIN}` },
+];
 
-// The checked-in optionalDependencies are a placeholder; the real list is
-// generated from TARGETS above so a new platform can never be half-wired.
-const rootPkg = JSON.parse(readFileSync(join(rootSrc, "package.json"), "utf8"));
-rootPkg.version = version;
-rootPkg.optionalDependencies = optionalDependencies;
-writeFileSync(join(rootOut, "package.json"), JSON.stringify(rootPkg, null, 2) + "\n");
-console.log(`built ${rootPkg.name}@${version}`);
+const launcherSrc = join(npmDir, BIN);
+// The checked-in package.json is a template: its name and optionalDependencies
+// are both placeholders, generated here so that neither a new platform nor a new
+// launcher name can ever be half-wired.
+const launcherPkg = JSON.parse(readFileSync(join(launcherSrc, "package.json"), "utf8"));
+for (const launcher of LAUNCHERS) {
+  const out = join(outDir, "launchers", launcher.dir);
+  mkdirSync(join(out, "bin"), { recursive: true });
+  cpSync(join(launcherSrc, "bin", `${BIN}.js`), join(out, "bin", `${BIN}.js`));
+  cpSync(join(launcherSrc, "README.md"), join(out, "README.md"));
+
+  writeFileSync(
+    join(out, "package.json"),
+    JSON.stringify(
+      { ...launcherPkg, name: launcher.name, version, optionalDependencies },
+      null,
+      2
+    ) + "\n"
+  );
+  console.log(`built ${launcher.name}@${version}`);
+}

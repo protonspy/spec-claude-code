@@ -6,9 +6,10 @@ How `scc` reaches npm. Nothing here is built from source at install time.
 
 | Path | What it is |
 |---|---|
-| `scc/` | The published launcher package (`@protonspy/scc`): a Node shim, no binary. |
+| `scc/` | The launcher source: a Node shim, no binary. Its `package.json` is a template — `name`, `version`, and `optionalDependencies` are all generated. |
 | `scripts/build-packages.mjs` | Assembles `npm/dist/` from the release artifacts. |
-| `dist/` | Generated, git-ignored. One directory per package to publish. |
+| `dist/scc-<platform>/` | Generated. One per target, carrying the native binary. |
+| `dist/launchers/<name>/` | Generated. The same shim, once per published launcher name. |
 
 ## How the install works
 
@@ -19,6 +20,28 @@ matching the host, and `bin/scc.js` resolves that package's binary and execs it.
 
 No postinstall script and no network access at install time — the binary is
 already there or the install failed.
+
+## Two launcher names
+
+The launcher is published twice, from one source, listed in `LAUNCHERS` in
+`build-packages.mjs`:
+
+| Name | Role |
+|---|---|
+| `scc-cli` | The documented install. Unscoped, so `npm i -g scc-cli` is the whole line. |
+| `@protonspy/scc` | Kept published so earlier installs keep receiving versions. |
+
+Both put the same `scc` command on PATH: npm resolves the *package* name and
+puts the *bin* name on PATH, and those never had to match. The bare `scc` on npm
+has belonged to an unrelated project since 2013, which is why neither name is it.
+
+Installing both globally is the one thing to avoid — they compete for the same
+command name, and npm resolves that by letting the last one win.
+
+The split is also why launchers live under `dist/launchers/` instead of beside
+the platform packages: publishing walks `dist/scc-*/` first and `dist/launchers/*/`
+second, and a launcher that reached the registry ahead of the binaries it depends
+on would be a broken install for anyone who hit that window.
 
 ## Releasing
 

@@ -39,11 +39,16 @@ try {
   process.exit(1);
 }
 
-// When invoked via `npx @protonspy/scc` (which is `npm exec` under the hood),
-// echo that exact spelling in the binary's help/usage output. A global install
-// runs this same launcher as the bare `scc` command — there npm is not in the
-// picture (npm_command is unset), so the binary keeps its default name. An
-// explicit SCC_PROG always wins.
+// When invoked via `npx scc-cli` (which is `npm exec` under the hood), echo that
+// exact spelling in the binary's help/usage output. A global install runs this
+// same launcher as the bare `scc` command — there npm is not in the picture
+// (npm_command is unset), so the binary keeps its default name. An explicit
+// SCC_PROG always wins.
+//
+// The name is read from this package's own package.json rather than written in,
+// because one shim is published under two names (`scc-cli` and `@protonspy/scc`)
+// and a hardcoded spelling would be wrong for whichever one the user did not
+// type — telling them to re-run a command under a package they never installed.
 const env = { ...process.env };
 if (!env.SCC_PROG) {
   const argv1 = process.argv[1] || "";
@@ -51,7 +56,15 @@ if (!env.SCC_PROG) {
     process.env.npm_command === "exec" ||
     argv1.includes("/_npx/") ||
     argv1.includes("\\_npx\\");
-  if (viaNpx) env.SCC_PROG = "npx @protonspy/scc";
+  if (viaNpx) {
+    let self = "scc-cli";
+    try {
+      self = require("../package.json").name || self;
+    } catch {
+      /* published without its manifest — fall back to the documented name */
+    }
+    env.SCC_PROG = `npx ${self}`;
+  }
 }
 
 const child = spawn(binPath, process.argv.slice(2), { stdio: "inherit", env });
