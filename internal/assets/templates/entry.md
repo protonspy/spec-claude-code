@@ -29,6 +29,9 @@ Triggered by what you are about to touch:
   project's commands exist nowhere else: `scc` ships the file as a stub for the team
   to fill in, and runs none of them itself. A command that did not come from there is
   a guess, and a guessed test command that exits 0 looks exactly like a passing suite.
+- `code-search.md` — **before you go looking for code you have not read yet.** This
+  workspace keeps a symbol graph, and a structural question answered from it costs one
+  call instead of a grep and six reads.
 - `specs.md` — writing requirements, design, or tasks for a spec
 - `tasks.md` — working through a spec's task list
 - `knowledge-base.md` — something was learned, or a decision was made

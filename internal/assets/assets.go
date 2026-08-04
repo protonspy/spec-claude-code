@@ -143,6 +143,7 @@ func Workspace(h paths.Harness) []File {
 		"delivery.md",
 		"specs.md",
 		"knowledge-base.md",
+		"code-search.md",
 	} {
 		set = append(set, File{
 			Name: "rules/" + rule,
