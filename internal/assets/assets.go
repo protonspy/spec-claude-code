@@ -71,7 +71,13 @@ import (
 // each rule its own trigger line instead of running four of them together in a
 // sentence — project.md above all, since a build command nobody read is guessed —
 // and it stops telling a harness that preloads the rules to go and read them.
-const Version = "10"
+// 11: artifacts.md — plans and specs are addressable, so `scc map` answers a
+// structural question and `scc patch` edits by address, and neither one costs the
+// file. The entry file carries the reflex; the rule carries the how.
+// 12: the entry file's layout block is one column across all three harnesses. The
+// padding is computed from the profile rather than written into the template,
+// because a run of spaces that lines up for `.codex/` is ragged for `.opencode/`.
+const Version = "12"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -144,6 +150,7 @@ func Workspace(h paths.Harness) []File {
 		"specs.md",
 		"knowledge-base.md",
 		"code-search.md",
+		"artifacts.md",
 	} {
 		set = append(set, File{
 			Name: "rules/" + rule,
@@ -338,6 +345,35 @@ type layout struct {
 	// so a template can stop telling it to go and read them. See
 	// paths.Harness.PreloadsRules.
 	RulesPreloaded bool
+
+	// The same three paths, trailing slash included, padded to the column the
+	// entry file's layout block puts its descriptions in.
+	//
+	// The padding is computed rather than written into the template because a
+	// harness's own directory names differ in width — `.codex/rules/` is three
+	// characters shorter than `.opencode/rules/` — so any literal run of spaces
+	// would line up in exactly one of the three and read as ragged in the other
+	// two. TestEntryLayoutBlockIsAligned is what keeps these and the template's
+	// hand-written left column agreeing.
+	RulesCol    string
+	SkillsCol   string
+	CommandsCol string
+}
+
+// layoutColumn is where a description starts in the entry file's layout block.
+// It has to clear both the widest path any harness produces (`.opencode/command/`,
+// 18) and the widest literal in the template (`specs/<feature>/`, 16).
+const layoutColumn = 20
+
+// column renders one path as the left half of that block: trailing slash, then
+// spaces out to layoutColumn. A path too wide to pad still gets one space, so a
+// future harness with a long name degrades to ragged rather than to a run-on line.
+func column(p string) string {
+	s := p + "/"
+	if pad := layoutColumn - len([]rune(s)); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s + " "
 }
 
 func layoutOf(h paths.Harness) layout {
@@ -352,8 +388,11 @@ func layoutOf(h paths.Harness) layout {
 		Manifest:       path.Join(h.Dir, paths.ManifestSeg),
 		RulesPreloaded: h.PreloadsRules,
 	}
+	l.RulesCol = column(l.Rules)
+	l.SkillsCol = column(l.Skills)
 	if h.CommandsSeg != "" {
 		l.Commands = path.Join(h.Dir, h.CommandsSeg)
+		l.CommandsCol = column(l.Commands)
 		l.HasCommands = true
 	}
 	return l

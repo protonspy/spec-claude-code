@@ -800,3 +800,80 @@ func TestSplitMetaRejectsAMalformedHeader(t *testing.T) {
 		}
 	}
 }
+
+// The entry file's layout block is a column: paths on the left, what each holds
+// on the right. Half that column is written by hand in the template and half is
+// computed from the harness profile, so nothing but this test keeps the two
+// halves agreeing — and the failure is invisible in review, because a template
+// that lines up for one harness reads as ragged in the other two.
+func TestEntryLayoutBlockIsAligned(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		raw, err := Render(h, entryFile(t, h))
+		if err != nil {
+			t.Fatalf("%s: %v", h.ID, err)
+		}
+		lines := layoutBlock(t, h.ID, raw)
+		if len(lines) < 4 {
+			t.Fatalf("%s: layout block has %d lines, expected the whole tree", h.ID, len(lines))
+		}
+		want := -1
+		for _, line := range lines {
+			got := descriptionColumn(line)
+			if got < 0 {
+				t.Errorf("%s: %q has no column break", h.ID, line)
+				continue
+			}
+			if want < 0 {
+				want = got
+				continue
+			}
+			if got != want {
+				t.Errorf("%s: description starts at column %d, but the block's column is %d:\n  %q",
+					h.ID, got, want, line)
+			}
+		}
+		if want != layoutColumn {
+			t.Errorf("%s: block column is %d, but layoutColumn is %d — the template's hand-written "+
+				"left column and the computed one have drifted apart", h.ID, want, layoutColumn)
+		}
+	}
+}
+
+// layoutBlock returns the non-blank lines inside the fenced block under ## Layout.
+func layoutBlock(t *testing.T, id, raw string) []string {
+	t.Helper()
+	var out []string
+	inSection, inFence := false, false
+	for _, line := range strings.Split(raw, "\n") {
+		switch {
+		case strings.HasPrefix(line, "## Layout"):
+			inSection = true
+		case inSection && strings.HasPrefix(line, "```"):
+			if inFence {
+				return out
+			}
+			inFence = true
+		case inFence && strings.TrimSpace(line) != "":
+			out = append(out, line)
+		}
+	}
+	t.Fatalf("%s: no fenced layout block found", id)
+	return nil
+}
+
+// descriptionColumn is where the description starts: the first rune after the
+// run of two or more spaces that separates it from the path.
+func descriptionColumn(line string) int {
+	runes := []rune(line)
+	for i := 0; i < len(runes)-1; i++ {
+		if runes[i] != ' ' || runes[i+1] != ' ' {
+			continue
+		}
+		for j := i; j < len(runes); j++ {
+			if runes[j] != ' ' {
+				return j
+			}
+		}
+	}
+	return -1
+}
