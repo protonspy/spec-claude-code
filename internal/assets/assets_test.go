@@ -267,6 +267,51 @@ func TestScaffoldedEntryFileStaysShort(t *testing.T) {
 // file addresses the set by pattern (`<rules dir>/<name>.md`) instead of listing
 // nine links. What it still guarantees is the thing that actually breaks: a rule
 // added to the template set without being announced fails here.
+// Every rule is preloaded into every request of the session on a harness that reads
+// `rules/` — so a line added here is not paid once, it is paid continuously, and the
+// whole set has to stay something an agent can hold rather than skim.
+//
+// 55 lines is the budget for a new rule. Three predate it and are capped where they
+// stand instead, because each is roughly half table and fenced example: cutting them
+// to 55 would leave under ten lines of prose across six sections, which is enough to
+// state a rule and not enough to say why — and a rule whose reason was deleted is one
+// an agent quietly deviates from. They may shrink; they may not grow.
+func TestRulesStayShortEnoughToBePreloaded(t *testing.T) {
+	const budget = 55
+	// Capped at what they measured when the budget landed. Lower a number here when a
+	// rewrite earns it; never raise one.
+	grandfathered := map[string]int{
+		"specs.md":          82,
+		"knowledge-base.md": 81,
+		"delivery.md":       62,
+	}
+
+	for _, f := range Workspace(paths.Claude) {
+		rules := paths.Claude.Dir + "/" + paths.Claude.RulesSeg
+		if !strings.HasPrefix(f.Rel, rules+"/") {
+			continue
+		}
+		raw, err := Render(paths.Claude, f)
+		if err != nil {
+			t.Fatalf("%s: %v", f.Name, err)
+		}
+		name := path.Base(f.Rel)
+		lines := strings.Count(strings.TrimRight(raw, "\n"), "\n") + 1
+
+		limit, capped := grandfathered[name]
+		if !capped {
+			limit = budget
+		}
+		if lines > limit {
+			t.Errorf("%s is %d lines, over its %d-line limit", name, lines, limit)
+		}
+		if capped && lines < limit {
+			t.Errorf("%s is down to %d lines — lower its cap from %d to lock the gain in",
+				name, lines, limit)
+		}
+	}
+}
+
 func TestEntryFileNamesEveryRule(t *testing.T) {
 	for _, h := range paths.Harnesses() {
 		raw, err := Render(h, entryFile(t, h))
