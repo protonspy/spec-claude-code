@@ -3,18 +3,19 @@ package validate
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/protonspy/spec-claude-code/internal/artifact"
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/mdscan"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 )
 
 // specReferenceRe matches a reference to a spec from inside a plan: `specs/<feature>/`,
-// with or without backticks around it.
-var specReferenceRe = regexp.MustCompile(`\b` + paths.SpecsSeg + `/([a-z0-9][a-z0-9-]*)/?`)
+// with or without backticks around it. Shared with the reader in internal/artifact,
+// which resolves the same reference to a decomposition leaf.
+var specReferenceRe = artifact.SpecRefRe
 
 // Plans validates every plan under plans/.
 func Plans(root string) (*finding.Set, error) {
