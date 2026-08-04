@@ -50,6 +50,15 @@ type Harness struct {
 	// flags and JSON; "Claude Code" is what the user actually installed.
 	Label string
 
+	// Bin is the harness's own executable, as it appears on PATH — what
+	// `scc launch` starts.
+	//
+	// The one field here that is not about the on-disk layout, and it belongs
+	// here anyway: scaffolding for a harness and then starting that harness in
+	// the workspace it just configured is one profile's question asked twice. A
+	// launcher switching on ID instead would be this profile missing a field.
+	Bin string
+
 	// Dir is the harness's configuration directory at the project root.
 	Dir string
 
@@ -109,17 +118,17 @@ func (h Harness) AgentExt() string {
 // surfaces all exist at project scope.
 var (
 	Claude = Harness{
-		ID: "claude", Label: "Claude Code", Dir: ClaudeDir, EntryFile: "CLAUDE.md",
+		ID: "claude", Label: "Claude Code", Bin: "claude", Dir: ClaudeDir, EntryFile: "CLAUDE.md",
 		AgentsSeg: "agents", AgentFormat: FormatMarkdown,
 		SkillsSeg: "skills", CommandsSeg: "commands", RulesSeg: "rules",
 	}
 	Codex = Harness{
-		ID: "codex", Label: "Codex", Dir: CodexDir, EntryFile: "AGENTS.md",
+		ID: "codex", Label: "Codex", Bin: "codex", Dir: CodexDir, EntryFile: "AGENTS.md",
 		AgentsSeg: "agents", AgentFormat: FormatTOML,
 		SkillsSeg: "skills", CommandsSeg: "", RulesSeg: "rules",
 	}
 	OpenCode = Harness{
-		ID: "opencode", Label: "opencode", Dir: OpenCodeDir, EntryFile: "AGENTS.md",
+		ID: "opencode", Label: "opencode", Bin: "opencode", Dir: OpenCodeDir, EntryFile: "AGENTS.md",
 		AgentsSeg: "agent", AgentFormat: FormatMarkdown,
 		SkillsSeg: "skills", CommandsSeg: "command", RulesSeg: "rules",
 	}

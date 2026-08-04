@@ -35,7 +35,7 @@ func chooseHarness(picks map[string]*bool, jsonOut bool) (paths.Harness, error) 
 		if jsonOut || !interactive() {
 			return paths.Claude, nil
 		}
-		return promptHarness(promptIn), nil
+		return promptHarness(promptIn, "Which harness is this workspace for?", paths.Harnesses()), nil
 	default:
 		// Exclusive rather than additive because each run writes one manifest and
 		// one entry file: two harnesses in one invocation would have to pick which
@@ -51,20 +51,21 @@ func chooseHarness(picks map[string]*bool, jsonOut bool) (paths.Harness, error) 
 	}
 }
 
-// promptHarness shows the supported harnesses and reads a choice. Claude Code is
-// first and is the default, because it is the harness the methodology was
-// designed against and the only one whose subagent, skill, and slash-command
-// surfaces all exist at project scope.
+// promptHarness shows a set of harnesses and reads a choice, with the first one
+// as the default. init offers all of them, in the order paths declares — Claude
+// Code first, because it is the harness the methodology was designed against and
+// the only one whose subagent, skill, and slash-command surfaces all exist at
+// project scope. launch offers only the ones this workspace was scaffolded for,
+// which is why the set is a parameter rather than read from paths here: asking
+// somebody to pick a harness that is not set up would be offering a broken answer.
 //
 // A numbered list read line by line, not a full-screen selector: scc is a
 // headless CLI that happens to be talkative when a human is present, and a raw
 // terminal mode would be a second interaction model to maintain — and to get
 // wrong on Windows — for one question asked once per repo.
-func promptHarness(in io.Reader) paths.Harness {
-	all := paths.Harnesses()
-
+func promptHarness(in io.Reader, question string, all []paths.Harness) paths.Harness {
 	fmt.Println()
-	render.Ask("Which harness is this workspace for?\n")
+	render.Ask(question + "\n")
 	fmt.Println()
 	width := 0
 	for _, h := range all {
@@ -98,12 +99,26 @@ func promptHarness(in io.Reader) paths.Harness {
 		if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(all) {
 			return all[n-1]
 		}
-		// A name works too — somebody who typed "codex" meant it.
-		if h, err := paths.ParseHarness(strings.ToLower(answer)); err == nil {
+		// A name works too — somebody who typed "codex" meant it. Matched against
+		// the offered set rather than against every harness scc knows, so a name
+		// that is not on the list is rejected the same way a number off the end is.
+		if h, ok := byName(all, answer); ok {
 			return h
 		}
 		render.Warn(fmt.Sprintf("not one of the choices: %q", answer))
 	}
+}
+
+// byName resolves a typed answer against the offered harnesses, by ID or by the
+// label the tool calls itself.
+func byName(all []paths.Harness, answer string) (paths.Harness, bool) {
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	for _, h := range all {
+		if answer == h.ID || answer == strings.ToLower(h.Label) {
+			return h, true
+		}
+	}
+	return paths.Harness{}, false
 }
 
 // Where an interactive prompt reads from, and whether anybody is there to answer

@@ -135,7 +135,7 @@ func TestPromptHarnessReadsAChoice(t *testing.T) {
 	for in, want := range cases {
 		var got paths.Harness
 		_, _, _ = capture(t, func() int {
-			got = promptHarness(strings.NewReader(in))
+			got = promptHarness(strings.NewReader(in), "Which harness?", paths.Harnesses())
 			return 0
 		})
 		if got.ID != want {
@@ -148,7 +148,7 @@ func TestPromptHarnessReadsAChoice(t *testing.T) {
 // is visible rather than something the user has to know to ask about.
 func TestPromptHarnessListsEveryHarness(t *testing.T) {
 	stdout, _, _ := capture(t, func() int {
-		promptHarness(strings.NewReader("\n"))
+		promptHarness(strings.NewReader("\n"), "Which harness?", paths.Harnesses())
 		return 0
 	})
 	for _, h := range paths.Harnesses() {
