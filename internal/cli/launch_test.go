@@ -16,19 +16,83 @@ import (
 // machine happened to have Headroom already. Every test therefore replaces PATH
 // wholesale with a directory it controls — which also makes "Headroom is absent"
 // a fact of the test rather than a fact about the developer's laptop.
-func isolatedPath(t *testing.T, bins ...string) {
+func isolatedPath(t *testing.T, bins ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, bin := range bins {
-		script, name := "#!/bin/sh\necho '"+bin+" 0.0.0-stub'\n", bin
+		script, name := "#!/bin/sh\n"+stubHelp(bin, "sh")+"echo '"+bin+" 0.0.0-stub'\n", bin
 		if runtime.GOOS == "windows" {
-			script, name = "@echo "+bin+" 0.0.0-stub\r\n", bin+".bat"
+			script, name = "@echo off\r\n"+stubHelp(bin, "bat")+"echo "+bin+" 0.0.0-stub\r\n", bin+".bat"
 		}
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
 			t.Fatalf("stub %s: %v", bin, err)
 		}
 	}
 	t.Setenv("PATH", dir)
+	return dir
+}
+
+// stubHelp gives the headroom stub a --help that advertises the opt-out flags,
+// because scc reads them off the binary rather than carrying them: a stub that
+// answered nothing would make every MCP assertion below pass for the wrong
+// reason.
+//
+// Shell builtins only — no `find`, no `grep`, no `printf`. isolatedPath replaces
+// PATH wholesale, so a stub that shelled out to anything would find nothing there
+// and silently report a Headroom with no flags at all. The text is abridged, and
+// deliberately free of the `|` a real help puts in `--code-memory [serena|none]`,
+// which in a .bat is a redirect rather than a character.
+func stubHelp(bin, shell string) string {
+	if bin != "headroom" {
+		return ""
+	}
+	opts := []string{
+		"Options:",
+		"  --no-mcp  Skip headroom MCP server registration",
+		"  --code-memory  Code-memory MCP to register: serena or none",
+		"  --no-context-tool, --no-rtk  Skip CLI context-tool setup",
+	}
+	if shell == "bat" {
+		s := ":sccargs\r\nif \"%~1\"==\"\" goto sccrun\r\nif \"%~1\"==\"--help\" goto scchelp\r\nshift\r\ngoto sccargs\r\n:scchelp\r\n"
+		for _, l := range opts {
+			s += "echo " + l + "\r\n"
+		}
+		return s + "exit /b 0\r\n:sccrun\r\n"
+	}
+	s := "for a in \"$@\"; do\n  if [ \"$a\" = \"--help\" ]; then\n"
+	for _, l := range opts {
+		s += "    echo '" + l + "'\n"
+	}
+	return s + "    exit 0\n  fi\ndone\n"
+}
+
+// recordingStub replaces a stub with one that appends its arguments to a log, so
+// a test can assert on what scc actually asked a third-party binary to do without
+// that binary being installed.
+func recordingStub(t *testing.T, dir, bin string) string {
+	t.Helper()
+	log := filepath.Join(dir, bin+".log")
+	script, name := "#!/bin/sh\necho \"$@\" >> '"+log+"'\nexit 0\n", bin
+	if runtime.GOOS == "windows" {
+		script, name = "@echo off\r\necho %* >> \""+log+"\"\r\nexit /b 0\r\n", bin+".bat"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+		t.Fatalf("stub %s: %v", bin, err)
+	}
+	return log
+}
+
+// recorded is everything the stub was asked to do, or "" when it was never run.
+func recorded(t *testing.T, log string) string {
+	t.Helper()
+	raw, err := os.ReadFile(log)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read %s: %v", log, err)
+	}
+	return string(raw)
 }
 
 // withLaunchExec replaces the process launcher with a recorder, so the whole
@@ -68,8 +132,8 @@ func TestLaunchWrapsWithHeadroomWhenItIsThere(t *testing.T) {
 	if cmd.Bin != "headroom" {
 		t.Errorf("bin = %q, want headroom", cmd.Bin)
 	}
-	if strings.Join(cmd.Args, " ") != "wrap claude" {
-		t.Errorf("args = %v, want [wrap claude]", cmd.Args)
+	if got, want := strings.Join(cmd.Args, " "), "wrap claude --code-memory none --no-context-tool"; got != want {
+		t.Errorf("args = %q, want %q", got, want)
 	}
 	if cmd.Harness != paths.Claude.ID {
 		t.Errorf("harness = %q, want claude", cmd.Harness)
@@ -121,14 +185,85 @@ func TestLaunchNoHeadroomSkipsItEntirely(t *testing.T) {
 	}
 }
 
-// Everything after `--` belongs to the agent. scc must not parse it, reject it,
-// or reorder it — it goes behind the wrap slug exactly as typed.
+// Headroom's wrap registers MCP servers into the user's agent config, and those
+// registrations outlive the session that made them. scc asks for its own retrieve
+// tool and nothing else, so a launch does not quietly install a code-memory
+// server the workspace has not asked for — this workspace's code intelligence is
+// CodeGraph's job.
+func TestLaunchTurnsHeadroomsCodeMemoryOffByDefault(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "headroom", "claude")
+
+	cmd := launchJSON(t, "launch", "--root", root, "--json")
+	if cmd.Headroom == nil {
+		t.Fatal("no headroom report")
+	}
+	if cmd.Headroom.MCP != "retrieve" {
+		t.Errorf("mcp = %q, want retrieve", cmd.Headroom.MCP)
+	}
+	if got := strings.Join(cmd.Headroom.Options, " "); !strings.Contains(got, "--code-memory none") {
+		t.Errorf("options = %q, want them to decline the code-memory server", got)
+	}
+}
+
+// Headroom's context-tool setup appends RTK guidance to the same entry file
+// `scc rtk` splices, behind its own marker pair — so a workspace wired by both
+// carries the instructions twice. Headroom already gates that behind
+// HEADROOM_RTK; scc passes the flag anyway, so an environment that exports it for
+// other reasons does not quietly turn every launch into a second copy.
+func TestLaunchDeclinesHeadroomsContextToolByDefault(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "headroom", "claude")
+
+	cmd := launchJSON(t, "launch", "--root", root, "--json")
+	if cmd.Headroom.ContextTool {
+		t.Error("context_tool = true, want Headroom's own setup declined")
+	}
+	if got := strings.Join(cmd.Args, " "); !strings.Contains(got, "--no-context-tool") {
+		t.Errorf("args = %q, want them to decline the context tool", got)
+	}
+
+	// And the escape hatch hands it back, without scc having an opinion left.
+	cmd = launchJSON(t, "launch", "--root", root, "--headroom-context-tool", "--headroom-mcp", "all", "--json")
+	if !cmd.Headroom.ContextTool {
+		t.Error("context_tool = false under --headroom-context-tool")
+	}
+	if got, want := strings.Join(cmd.Args, " "), "wrap claude"; got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+// The two ends of the same flag: `all` is scc keeping its hands off Headroom's
+// defaults, and `none` also drops the retrieve tool the proxy needs to make its
+// compression markers actionable.
+func TestLaunchHeadroomMCPModes(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "headroom", "claude")
+
+	cmd := launchJSON(t, "launch", "--root", root, "--headroom-mcp", "all", "--json")
+	if got, want := strings.Join(cmd.Args, " "), "wrap claude --no-context-tool"; got != want {
+		t.Errorf("all: args = %q, want %q", got, want)
+	}
+
+	cmd = launchJSON(t, "launch", "--root", root, "--headroom-mcp", "none", "--json")
+	if got, want := strings.Join(cmd.Args, " "), "wrap claude --code-memory none --no-mcp --no-context-tool"; got != want {
+		t.Errorf("none: args = %q, want %q", got, want)
+	}
+
+	if _, stderr, code := run(t, "launch", "--root", root, "--headroom-mcp", "serena", "--json"); code != ExitError {
+		t.Errorf("an undefined mode exited %d, want %d (stderr: %s)", code, ExitError, stderr)
+	}
+}
+
+// Everything after `--` belongs to the agent, and scc's own options go in front of
+// it — so a user who names the same flag after `--` is the one who wins, since
+// wrap takes the last occurrence.
 func TestLaunchPassesArgumentsThroughToTheAgent(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "headroom", "claude")
 
 	cmd := launchJSON(t, "launch", "claude", "--json", "--root", root, "--", "--resume", "--model", "opus")
-	if got, want := strings.Join(cmd.Args, " "), "wrap claude --resume --model opus"; got != want {
+	if got, want := strings.Join(cmd.Args, " "), "wrap claude --code-memory none --no-context-tool --resume --model opus"; got != want {
 		t.Errorf("args = %q, want %q", got, want)
 	}
 
@@ -136,6 +271,102 @@ func TestLaunchPassesArgumentsThroughToTheAgent(t *testing.T) {
 	cmd = launchJSON(t, "launch", "claude", "--json", "--no-headroom", "--root", root, "--", "--resume")
 	if got, want := strings.Join(cmd.Args, " "), "--resume"; got != want {
 		t.Errorf("bare args = %q, want %q", got, want)
+	}
+}
+
+// Launch is the one moment where indexing is free: the session is about to begin,
+// nobody is waiting on a prompt, and the alternative is an agent whose first graph
+// query answers out of last week's index. A workspace with no graph gets the full
+// build; one that already has a graph gets the incremental refresh.
+func TestLaunchBuildsTheGraphAndThenRefreshesIt(t *testing.T) {
+	root := initWorkspace(t)
+	dir := isolatedPath(t, "claude")
+	log := recordingStub(t, dir, "codegraph")
+	withLaunchExec(t, 0)
+
+	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	if got := recorded(t, log); !strings.Contains(got, "init") {
+		t.Errorf("codegraph was asked to do %q, want an init", got)
+	}
+
+	// Now the workspace has one, so the next launch refreshes rather than rebuilds.
+	if err := os.Mkdir(filepath.Join(root, ".codegraph"), 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	if err := os.Remove(log); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	got := recorded(t, log)
+	if !strings.Contains(got, "sync") {
+		t.Errorf("codegraph was asked to do %q, want a sync", got)
+	}
+	if strings.Contains(got, "init") {
+		t.Errorf("codegraph re-initialized a workspace that already had a graph: %q", got)
+	}
+}
+
+// A graph is an enhancement — the agent can still read files — so every way of not
+// getting one ends in the agent starting anyway, with a line saying what happened.
+// A launch that refused to run because an index was stale would put scc's
+// tidiness above the thing the user asked for.
+func TestLaunchStartsWithoutAGraphWhenCodeGraphIsMissing(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "claude")
+	withoutTerminal(t)
+	got := withLaunchExec(t, 0)
+
+	_, stderr, code := run(t, "launch", "--root", root, "--no-headroom")
+	if code != ExitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	if got.Bin != paths.Claude.Bin {
+		t.Errorf("launched %q, want the agent to have started anyway", got.Bin)
+	}
+	if !strings.Contains(stderr, "symbol graph") {
+		t.Errorf("stderr does not say the graph was skipped: %q", stderr)
+	}
+}
+
+// --no-graph is the explicit "just start the agent": no lookup, no index, no
+// report.
+func TestLaunchNoGraphSkipsItEntirely(t *testing.T) {
+	root := initWorkspace(t)
+	dir := isolatedPath(t, "claude")
+	log := recordingStub(t, dir, "codegraph")
+
+	cmd := launchJSON(t, "launch", "--root", root, "--no-headroom", "--no-graph", "--json")
+	if cmd.Graph != nil {
+		t.Errorf("graph = %+v, want it absent from the report", cmd.Graph)
+	}
+	if got := recorded(t, log); got != "" {
+		t.Errorf("--no-graph still ran codegraph: %q", got)
+	}
+}
+
+// Indexing a repository is work, and a plan-only run has not been asked to do any.
+// --json additionally cannot afford it: the indexer writes to stdout, which
+// carries the document and nothing else.
+func TestLaunchNeverIndexesOnAPlanOnlyRun(t *testing.T) {
+	root := initWorkspace(t)
+	dir := isolatedPath(t, "claude")
+	log := recordingStub(t, dir, "codegraph")
+
+	for _, flag := range []string{"--json", "--dry-run"} {
+		if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom", flag); code != ExitOK {
+			t.Fatalf("%s: exit = %d (stderr: %s)", flag, code, stderr)
+		}
+		if got := recorded(t, log); strings.Contains(got, "init") || strings.Contains(got, "sync") {
+			t.Errorf("%s indexed the workspace: %q", flag, got)
+		}
+	}
+	cmd := launchJSON(t, "launch", "--root", root, "--no-headroom", "--json")
+	if cmd.Graph == nil || cmd.Graph.Action != graphSkipped {
+		t.Errorf("graph = %+v, want the index reported as skipped", cmd.Graph)
 	}
 }
 
