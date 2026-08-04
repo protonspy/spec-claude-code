@@ -1,8 +1,8 @@
 # The knowledge base — `docs/`
 
 A spec answers *what this feature does now*. `docs/` answers *why* — the durable
-reasoning, the decisions, the material read from outside. Neither replaces the other,
-and keeping them separate is what lets a spec stay anchored to one feature.
+reasoning, the decisions, the material read from outside. Keeping them separate is
+what lets a spec stay anchored to one feature.
 
 ```
 docs/
@@ -21,67 +21,47 @@ synonyms used where a canonical term belongs, and dependencies missing from
 
 ## wiki/
 
-One page per concept, linked with `[[wikilinks]]`. Every page is reachable from
-`index.md` — an unreachable page is an orphan, and an orphan is a page nobody will
-ever find again. Record what changed in `changelog.md` when you change the wiki.
+One page per concept, linked with `[[wikilinks]]`, every page reachable from
+`index.md` — an orphan is a page nobody will ever find again. Record what changed in
+`changelog.md`.
 
-**`raw/` is a drop box, not storage.** Material collected from outside goes there to
-be read, distilled into a wiki page, and then removed. A file still sitting in
-`raw/` is a finding: it was collected and never processed.
+**`raw/` is a drop box, not storage.** Outside material goes there to be read,
+distilled into a wiki page, and removed. A file still sitting there is a finding: it
+was collected and never processed.
 
 ## adr/
 
-One record per decision that is **hard to reverse**. Numbered contiguously from
-`0001`, one file per record, cited from anywhere as
-`adr:0007-use-sqlite-for-the-cache`:
+One record per decision that is **hard to reverse**, numbered contiguously from
+`0001`, cited from anywhere as `adr:0007-use-sqlite-for-the-cache`. Frontmatter
+`status:` is `proposed | accepted | rejected | superseded`; the body is `## Context`,
+`## Decision`, `## Consequences`.
 
-```markdown
----
-status: accepted        # proposed | accepted | rejected | superseded
----
+**A superseded record is marked, never edited** — an ADR records what was believed at
+the time, and rewriting one destroys the thing it exists to preserve. Add the new
+record; in the old one set `status: superseded` and `superseded-by: 0012-…`.
 
-# 0007 · Use SQLite for the cache
-
-## Context
-## Decision
-## Consequences
-```
-
-**A superseded record is marked, never edited.** The point of an ADR is that it
-records what was believed at the time; rewriting one destroys exactly the thing it
-exists to preserve. Add the new record, and in the old one set:
-
-```yaml
-status: superseded
-superseded-by: 0012-move-the-cache-to-redis
-```
-
-Not every design decision is an ADR. If it is cheap to change, `design.md` is where
-it belongs.
+Not every design decision is an ADR. If it is cheap to change, it belongs in
+`design.md`.
 
 ## codewiki/
 
-Prose that explains code, one page per area, with every section citing the exact
-lines it is about:
+Prose explaining code, one page per area, every section citing the exact lines it is
+about:
 
 ```markdown
 ## How the dispatcher routes
 
 [internal/cli/cli.go:48-64]()
-
-One switch, no registration...
 ```
 
 A citation that no longer resolves is a finding, so this is the one part of `docs/`
-that goes stale loudly rather than quietly. **Every section cites something** — a
-section that cites nothing is prose that has drifted free of the code it describes.
-
-Write it for the parts where reading the code does not tell you why it is like that.
-Do not narrate what a reader can see.
+that goes stale loudly rather than quietly. **Every section cites something** — one
+that cites nothing has drifted free of the code it describes. Write it where reading
+the code does not tell you why it is like that; do not narrate what a reader can see.
 
 ## glossary.md
 
-One canonical term per concept, and the synonyms to avoid. One entry per line:
+One canonical term per concept and the synonyms to avoid, one entry per line:
 
 ```markdown
 - **order total** — the amount charged, in minor units. Avoid: grand total, sum
@@ -89,16 +69,13 @@ One canonical term per concept, and the synonyms to avoid. One entry per line:
 ```
 
 Domain vocabulary drifts by default — three names for one thing appear within a week
-of two people working in parallel. Pick one, list the others after `Avoid:`, and use
-the canonical term everywhere: in code, in requirements, in the wiki. An avoided
-synonym used as a whole word in `docs/` is a finding.
+of two people working in parallel. Use the canonical term in code, in requirements,
+in the wiki. An avoided synonym used as a whole word in `docs/` is a finding.
 
 ## stack.md
 
 Every adopted technology, with one line on why. **Technology not listed here is an
-open decision, never something adopted silently** — and because a project's
-dependency file is structured data rather than source, this is checkable: a direct
-dependency declared there and absent from `stack.md` is a finding.
-
-So adding a dependency is a two-step act: add it, and say here why it earned its
+open decision, never something adopted silently** — and because a dependency file is
+structured data, this is checkable: a direct dependency declared there and absent
+here is a finding. Adding a dependency is two acts: add it, and say why it earned its
 place.
