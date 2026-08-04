@@ -25,6 +25,8 @@ or from a harness with no MCP surface.
 
 **It indexes code, not this repository's knowledge.** `docs/` is Markdown and no part
 of it is in the graph: not the glossary, not the wiki, not an ADR, not a `design.md`.
+Plans and specs are not in it either, and they have their own index — see
+[artifacts.md](artifacts.md), which is the same rule for the other corpus.
 
 That matters more here than it would elsewhere, because this project deliberately
 keeps the *why* out of the code. A question the graph answers well — "where is this

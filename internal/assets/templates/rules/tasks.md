@@ -47,3 +47,7 @@ record: it survives the session, it gets reviewed, it gets committed, and it is 
 A session ending with its todo list complete and the file untouched has lost
 everything except the code: neither the next session nor the reviewer knows which
 tasks were done.
+
+Check it with `scc patch check <artifact> 1.2` rather than by editing the file. It
+addresses the task by its number, so the file never has to be read to change one box,
+and it re-validates afterwards — see [code-search.md](code-search.md).
