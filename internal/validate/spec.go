@@ -3,16 +3,17 @@ package validate
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/protonspy/spec-claude-code/internal/artifact"
 	"github.com/protonspy/spec-claude-code/internal/ears"
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 )
 
-// requirementRe matches a numbered requirement, and only in that position:
+// The requirement grammar, shared with the reader in internal/artifact so one
+// definition governs both:
 //
 //   - **R1.2** (MODIFIED) When the manifest is missing, the CLI shall exit 1
 //
@@ -20,7 +21,10 @@ import (
 // alternative — parsing every sentence as EARS — is a validator that fires on the
 // document's own introduction, which is exactly how a tool teaches its user to
 // disbelieve it.
-var requirementRe = regexp.MustCompile(`^\s*[-*+]\s+\*\*(R\d+(?:\.\d+)+)\*\*\s*(?:\(([^)]*)\)\s*)?(.*)$`)
+var (
+	requirementRe   = artifact.RequirementRe
+	requirementIDRe = artifact.RequirementIDRe
+)
 
 // The delta markers a change to an existing spec is written with. A change is
 // proposed as a delta so that adopting scc does not mean writing the spec for
