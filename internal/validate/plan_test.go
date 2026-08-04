@@ -114,16 +114,31 @@ func TestPlanKickoffAnswers(t *testing.T) {
 	}
 }
 
-// The two answers `plan-run` writes back before it starts a loop. A wrong value is
-// worth a finding because the skill writes these and every later session reads them —
+// The answers `plan-run` writes back before it starts a loop. A wrong value is worth
+// a finding because the skill writes these and every later session reads them —
 // `worktree: yes` would quietly decide how the rest of the plan gets built.
 func TestPlanLoopAnswers(t *testing.T) {
 	root := t.TempDir()
 	writePlan(t, root, "sweep",
-		"---\nworktree: yes\nmerge: whenever\n---\n\n# Sweep\n\n- [ ] 1.1 (Unit) Do it\n")
+		"---\nworktree: yes\nmerge: whenever\npr: sometimes\n---\n\n# Sweep\n\n- [ ] 1.1 (Unit) Do it\n")
 	got := planFindings(t, root, "sweep")
-	if n := count(got, "plan.loop-invalid"); n != 2 {
-		t.Errorf("rules = %v, want two plan.loop-invalid findings, got %d", got, n)
+	if n := count(got, "plan.loop-invalid"); n != 3 {
+		t.Errorf("rules = %v, want three plan.loop-invalid findings, got %d", got, n)
+	}
+}
+
+// `pr` decides whether the loop opens a PR per group or one at the end, which is the
+// difference between the review subagents running once and running once per group.
+// Both spellings have to survive, and a resumed session reads this key to know
+// whether `main` or the plan's branch is where its position lives.
+func TestPlanPRShapeAcceptsBothLoops(t *testing.T) {
+	root := t.TempDir()
+	for _, shape := range []string{"per-group", "per-plan"} {
+		writePlan(t, root, "sweep",
+			"---\npr: "+shape+"\n---\n\n# Sweep\n\n- [ ] 1.1 (Unit) Do it\n")
+		if got := planFindings(t, root, "sweep"); contains(got, "plan.loop-invalid") {
+			t.Errorf("pr: %s reported %v", shape, got)
+		}
 	}
 }
 
@@ -137,7 +152,7 @@ func TestPlanLoopAnswersAreOptional(t *testing.T) {
 		t.Errorf("rules = %v, want no plan.loop-invalid", got)
 	}
 	writePlan(t, root, "run",
-		"---\nautonomy: auto\nci: wait\nworktree: per-group\nmerge: auto\n---\n\n# Run\n\n- [ ] 1.1 (Unit) Do it\n")
+		"---\nautonomy: auto\nci: wait\npr: per-plan\nworktree: per-group\nmerge: auto\n---\n\n# Run\n\n- [ ] 1.1 (Unit) Do it\n")
 	if got := planFindings(t, root, "run"); len(got) != 0 {
 		t.Errorf("a plan carrying every valid answer reported %v", got)
 	}

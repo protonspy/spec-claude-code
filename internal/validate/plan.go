@@ -117,10 +117,11 @@ func Plan(root, name string) (*finding.Set, error) {
 var loopValues = map[string]map[string]bool{
 	"worktree": {"per-group": true, "in-place": true},
 	"merge":    {"auto": true, "manual": true},
+	"pr":       {"per-group": true, "per-plan": true},
 }
 
 func checkLoopAnswers(set *finding.Set, file string, fm mdscan.Frontmatter) {
-	for _, key := range []string{"worktree", "merge"} {
+	for _, key := range []string{"worktree", "merge", "pr"} {
 		value, ok := fm.Get(key)
 		if !ok {
 			continue
