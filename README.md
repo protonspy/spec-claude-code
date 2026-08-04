@@ -14,16 +14,16 @@ AI agents.
 No install — run it straight from npm inside the repo you want to govern:
 
 ```bash
-npx scc-cli init                     # asks which harness, then scaffolds the rules, agents, and layout
-npx scc-cli init --codex             # or name it: --claude (default), --codex, --opencode
-npx scc-cli spec new user-auth       # specs/user-auth/: requirements.md, design.md, tasks.md
-npx scc-cli plan new checkout-revamp # plans/checkout-revamp.md
-npx scc-cli validate                 # every check; exit 2 means it found something
-npx scc-cli update                   # show what a newer scc would change, then confirm
+npx @protonspy/scc init                     # asks which harness, then scaffolds the rules, agents, and layout
+npx @protonspy/scc init --codex             # or name it: --claude (default), --codex, --opencode
+npx @protonspy/scc spec new user-auth       # specs/user-auth/: requirements.md, design.md, tasks.md
+npx @protonspy/scc plan new checkout-revamp # plans/checkout-revamp.md
+npx @protonspy/scc validate                 # every check; exit 2 means it found something
+npx @protonspy/scc update                   # show what a newer scc would change, then confirm
 ```
 
-Installed globally (`npm i -g scc-cli`) the same commands are just `scc init`,
-`scc spec new user-auth`, and so on — the package is `scc-cli`, the command is `scc`.
+Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc init`,
+`scc spec new user-auth`, and so on.
 
 | Command | What it does |
 |---|---|
@@ -43,9 +43,9 @@ installs it with cargo when it is not on PATH, and puts its usage block into
 `CLAUDE.md`/`AGENTS.md` so the agent knows to prefix commands with it:
 
 ```bash
-npx scc-cli init --rtk    # scaffold, then wire RTK in
-npx scc-cli rtk           # wire it into a workspace that already exists
-npx scc-cli rtk --check   # CI: exit 2 when the block is missing
+npx @protonspy/scc init --rtk    # scaffold, then wire RTK in
+npx @protonspy/scc rtk           # wire it into a workspace that already exists
+npx @protonspy/scc rtk --check   # CI: exit 2 when the block is missing
 ```
 
 The block sits between RTK's own `<!-- rtk-instructions -->` markers, and scc inserts
@@ -89,21 +89,19 @@ accountability, and a checker that was confidently incomplete would be worse tha
 
 ## Install
 
-Published on npm as [`scc-cli`](https://www.npmjs.com/package/scc-cli) — the launcher
-pulls the right prebuilt binary for your platform as an optional dependency, so there
-is no toolchain to set up.
+Published on npm as [`@protonspy/scc`](https://www.npmjs.com/package/@protonspy/scc) —
+the launcher pulls the right prebuilt binary for your platform as an optional
+dependency, so there is no toolchain to set up.
 
 ```bash
-npx scc-cli help          # no install; pins nothing, always the latest
-npx scc-cli@0.0.1 help    # pin a version (CI)
-npm i -g scc-cli          # then: scc help
+npx @protonspy/scc help          # no install; pins nothing, always the latest
+npx @protonspy/scc@0.0.1 help    # pin a version (CI)
+npm i -g @protonspy/scc          # then: scc help
 ```
 
-The package is `scc-cli`; the command it installs is `scc`. Without `-g` it lands in
-`node_modules/.bin`, which npm scripts see and your shell does not — reach it there as
-`npx scc`. The same package is also published as `@protonspy/scc` for installs that
-predate the shorter name; use one or the other, not both, since they claim the same
-command.
+The package is `@protonspy/scc`; the command it installs is `scc`. Without `-g` it
+lands in `node_modules/.bin`, which npm scripts see and your shell does not — reach it
+there as `npx scc`.
 
 Or from source (Go 1.25+):
 

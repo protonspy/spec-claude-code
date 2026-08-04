@@ -67,7 +67,7 @@ import (
 // 8: the entry file names *when* to read each rule instead of tabulating all nine
 // as equals — five read on their own trigger, four looked up by name — and the two
 // review agents are tightened in the same pass.
-// 9: the npx fallback names the unscoped `scc-cli` package; the entry file gives
+// 9: the entry file gives
 // each rule its own trigger line instead of running four of them together in a
 // sentence — project.md above all, since a build command nobody read is guessed —
 // and it stops telling a harness that preloads the rules to go and read them.

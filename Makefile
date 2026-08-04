@@ -87,22 +87,29 @@ npm-build: require-version ## Assemble npm/dist/ from the artifacts (VERSION=vX.
 npm-dry-run: ## Dry-run publish every assembled package
 	@set -euo pipefail; \
 	if [ ! -f npm/dist/launchers/$(BIN)/package.json ]; then echo "npm/dist not assembled — run: make npm-build VERSION=vX.Y.Z first" >&2; exit 1; fi; \
-	for d in npm/dist/$(BIN)-*/ npm/dist/launchers/*/; do \
+	for d in npm/dist/$(BIN)-*/ npm/dist/launchers/*/ npm/dist/launchers-optional/*/; do \
 	  [ -f "$$d/package.json" ] || continue; \
 	  echo "== $$d"; npm publish "$$d" --access public --dry-run; done
+	@echo "note: --dry-run does not exercise npm's name-similarity check; only a real publish does"
 
 .PHONY: npm-publish
 npm-publish: ## Publish the assembled packages, skips already-published; OTP=123456 if 2FA
 	@set -euo pipefail; \
 	if [ ! -f npm/dist/launchers/$(BIN)/package.json ]; then echo "npm/dist not assembled — run: make dist VERSION=vX.Y.Z && make npm-build VERSION=vX.Y.Z" >&2; exit 1; fi; \
 	otp=; if [ -n "$(OTP)" ]; then otp="--otp=$(OTP)"; fi; \
-	for d in npm/dist/$(BIN)-*/ npm/dist/launchers/*/; do \
+	for d in npm/dist/$(BIN)-*/ npm/dist/launchers/*/ npm/dist/launchers-optional/*/; do \
 	  [ -f "$$d/package.json" ] || continue; \
 	  name=$$(cd "$$d" && node -p "require('./package.json').name"); \
 	  ver=$$(cd "$$d" && node -p "require('./package.json').version"); \
 	  if npm view "$$name@$$ver" version >/dev/null 2>&1; then \
 	    echo "skip $$name@$$ver (already published)"; continue; fi; \
-	  echo ">> publishing $$name@$$ver"; npm publish "$$d" --access public $$otp; \
+	  echo ">> publishing $$name@$$ver"; \
+	  case "$$d" in \
+	    npm/dist/launchers-optional/*) \
+	      npm publish "$$d" --access public $$otp \
+	        || echo "!! optional launcher $$name was not published; the release stands on the required ones" ;; \
+	    *) npm publish "$$d" --access public $$otp ;; \
+	  esac; \
 	done
 
 .PHONY: release
