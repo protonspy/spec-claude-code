@@ -62,6 +62,8 @@ func Run(args []string) int {
 		return runUpdate(args[1:])
 	case "rtk":
 		return runRTK(args[1:])
+	case "launch":
+		return runLaunch(args[1:])
 	case "spec":
 		return runSpec(args[1:])
 	case "plan":
@@ -107,6 +109,7 @@ Commands:
   init      Scaffold a workspace: rules, agents, skills, commands, layout, manifest
   update    Bring the managed files onto this build's templates, after showing the plan
   rtk       Install RTK if missing and put its usage block in the entry file
+  launch    Start a harness in this workspace, through Headroom's compression proxy
   spec      Create and inspect specs — new | list | show | delete | validate
   plan      Create and inspect plans — new | list | delete | validate
   skill     Agent Skills conformance — validate
@@ -123,5 +126,7 @@ Exit codes:
   0  ok
   1  usage or runtime error
   2  validation findings
-`, render.Bold(prog()), prog(), prog())
+
+"%s launch" is the one exception: it returns whatever the agent it started returned.
+`, render.Bold(prog()), prog(), prog(), prog())
 }
