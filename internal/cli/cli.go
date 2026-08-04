@@ -64,6 +64,8 @@ func Run(args []string) int {
 		return runRTK(args[1:])
 	case "launch":
 		return runLaunch(args[1:])
+	case "graph":
+		return runGraph(args[1:])
 	case "spec":
 		return runSpec(args[1:])
 	case "plan":
@@ -110,6 +112,7 @@ Commands:
   update    Bring the managed files onto this build's templates, after showing the plan
   rtk       Install RTK if missing and put its usage block in the entry file
   launch    Start a harness in this workspace, through Headroom's compression proxy
+  graph     The workspace's symbol graph — build | sync | status | query | explore
   spec      Create and inspect specs — new | list | show | delete | validate
   plan      Create and inspect plans — new | list | delete | validate
   skill     Agent Skills conformance — validate
