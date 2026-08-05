@@ -111,6 +111,19 @@ const (
 // has to run it themselves.
 func InstallCmd() string { return "cargo install --git " + Repo }
 
+// Available says whether the toolchain Install needs is on PATH. Headroom and
+// CodeGraph answer the same question about theirs, and a caller that offers to
+// install without asking it first ends up putting a prompt to somebody whose only
+// possible answer is no.
+//
+// Cargo is the whole answer here. RTK is distributed as source, so unlike the other
+// two there is no second installer to fall back to — which is also why this returns a
+// bool rather than the installer the others return.
+func Available() bool {
+	_, err := exec.LookPath("cargo")
+	return err == nil
+}
+
 // Splice returns doc with the block present exactly once, and what it had to do to
 // get there.
 //

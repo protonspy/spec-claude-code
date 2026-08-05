@@ -646,3 +646,82 @@ func sameDir(t *testing.T, a, b string) bool {
 	}
 	return os.SameFile(fa, fb)
 }
+
+// RTK joins the preflight the other two integrations already went through, so a
+// launch reports all three. --no-rtk is the standing "not in this workspace", and it
+// has to leave the field out entirely rather than report a skip: the two are
+// different answers, and only one of them means somebody decided.
+func TestLaunchReportsRTKAndNoRTKOmitsIt(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "claude")
+
+	var with launchCommand
+	stdout, _, code := run(t, "launch", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if err := json.Unmarshal([]byte(stdout), &with); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	}
+	if with.RTK == nil {
+		t.Fatal("a launch reported no rtk field at all")
+	}
+	if with.RTK.Install != installSkipped {
+		t.Errorf("install = %q, want %q with cargo absent", with.RTK.Install, installSkipped)
+	}
+	if with.RTK.Reason == "" {
+		t.Error("rtk was skipped without saying why")
+	}
+
+	var without launchCommand
+	stdout, _, code = run(t, "launch", "--root", root, "--json", "--no-rtk")
+	if code != ExitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if err := json.Unmarshal([]byte(stdout), &without); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	}
+	if without.RTK != nil {
+		t.Errorf("--no-rtk still reported %+v", without.RTK)
+	}
+}
+
+// --no-install covers RTK too. The flag says "never build anything", and a cargo
+// build that takes minutes is the most expensive thing it governs.
+func TestLaunchNoInstallCoversRTK(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "cargo", "claude")
+	withPrompt(t, "\n")
+	withLaunchExec(t, 0)
+
+	stdout, stderr, code := run(t, "launch", "--root", root, "--no-install")
+	if code != ExitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if strings.Contains(stdout+stderr, "add its usage block") {
+		t.Errorf("--no-install still offered the RTK setup: %q", stdout+stderr)
+	}
+}
+
+// An install prompt defaults to yes and a bare Enter takes it, which is the opposite
+// of confirm(). The balance is opposite too: a wrong yes here is a tool on the
+// machine, where a wrong yes in confirm() is somebody's file.
+func TestConfirmInstallDefaultsToYes(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		{"\n", true},
+		{"y\n", true},
+		{"  \n", true},
+		{"n\n", false},
+		{"N\n", false},
+		{"no\n", false},
+		{"não\n", false},
+		{"", false}, // end of input is not an answer
+	} {
+		if got := confirmInstall(strings.NewReader(tc.in), "Install?"); got != tc.want {
+			t.Errorf("confirmInstall(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}

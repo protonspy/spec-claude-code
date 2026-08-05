@@ -261,6 +261,32 @@ func reportPlans(harnesses []paths.Harness, plans []*scaffold.UpdatePlan, force 
 // confirm asks a yes/no question, defaulting to no. Anything other than an
 // explicit yes leaves the workspace untouched: the cost of a wrong "no" is
 // running the command again, and the cost of a wrong "yes" is somebody's work.
+// confirmInstall asks a yes/no question defaulting to *yes*, and is only ever used to
+// offer installing one of the third-party tools a launch wants.
+//
+// The opposite default from confirm(), on purpose, because the balance is the opposite.
+// confirm() guards a write to the user's own files, where a wrong yes costs somebody's
+// work. Here a wrong yes costs a tool on the machine that can be uninstalled, and a
+// wrong no costs a whole session running degraded — so the cheap mistake is the one to
+// default to. A question that also writes to a file the user owns has to say so in its
+// own text; there is no third default for that.
+//
+// End of input is not an answer and never installs: --yes is how an unattended run
+// says yes, and the callers reach this only when a human is present.
+func confirmInstall(in io.Reader, question string) bool {
+	render.Ask(question + " [n/Y]: ")
+	scanner := bufio.NewScanner(in)
+	if !scanner.Scan() {
+		fmt.Println()
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+	case "n", "no", "nao", "não":
+		return false
+	}
+	return true
+}
+
 func confirm(in io.Reader, question string) bool {
 	render.Ask(question + " [y/N]: ")
 	scanner := bufio.NewScanner(in)

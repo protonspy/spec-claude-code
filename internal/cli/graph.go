@@ -253,7 +253,7 @@ func ensureCodeGraph(opts graphInstall) (string, bool) {
 	if ask && !opts.yes {
 		render.Warn(fmt.Sprintf("%s is not on PATH — it is what builds and answers the graph", codegraph.Bin))
 		render.Detail("  " + codegraph.Repo)
-		ask = confirm(promptIn, fmt.Sprintf("Install it now with `%s`?", installer.Cmd))
+		ask = confirmInstall(promptIn, fmt.Sprintf("Install it now with `%s`?", installer.Cmd))
 	}
 	if !ask {
 		render.Err(codegraph.Bin + " is not on PATH")
