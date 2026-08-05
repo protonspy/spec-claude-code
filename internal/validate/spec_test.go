@@ -3,9 +3,11 @@ package validate
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 )
 
@@ -288,6 +290,49 @@ func TestKickoffAnswers(t *testing.T) {
 	writeSpec(t, root, "billing", noFrontmatter, goodDesign, goodTasks)
 	if got := specFindings(t, root, "billing"); len(got) != 0 {
 		t.Errorf("an artifact with no frontmatter produced findings: %v", got)
+	}
+}
+
+// lang is the third kickoff answer, on the same terms as the other two: absent is
+// the behavior that predates the question, present is checked. The values are the
+// two the rules offer — a language name nobody documented is a typo, and the run it
+// would silently change the register for is the whole run.
+func TestKickoffLanguage(t *testing.T) {
+	root := t.TempDir()
+	with := func(value string) string {
+		return strings.Replace(goodRequirements, "ci: wait\n", "ci: wait\nlang: "+value+"\n", 1)
+	}
+
+	for _, value := range []string{"en", "wenyan"} {
+		root = t.TempDir()
+		writeSpec(t, root, "billing", with(value), goodDesign, goodTasks)
+		if got := specFindings(t, root, "billing"); len(got) != 0 {
+			t.Errorf("lang: %s reported %v", value, got)
+		}
+	}
+
+	root = t.TempDir()
+	writeSpec(t, root, "billing", with("classical-chinese"), goodDesign, goodTasks)
+	if got := specFindings(t, root, "billing"); !contains(got, "spec.kickoff-invalid") {
+		t.Errorf("rules = %v, want spec.kickoff-invalid", got)
+	}
+}
+
+// The kickoff answers are asked by a rule and graded here, and the two have to name
+// the same values. A value this validator accepts that autonomy.md never offers is one
+// no agent will ever write; a value the rule offers under another name is a rollback on
+// the command the rule tells the agent to type.
+func TestTheRuleOffersEveryKickoffAnswerThisAccepts(t *testing.T) {
+	rule, err := assets.Content("rules/autonomy.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, values := range kickoffValues {
+		for value := range values {
+			if !regexp.MustCompile(`\b` + regexp.QuoteMeta(value) + `\b`).MatchString(rule) {
+				t.Errorf("autonomy.md never offers `%s: %s`", key, value)
+			}
+		}
 	}
 }
 

@@ -13,7 +13,7 @@ Nothing loads these for you. Open the file whose moment has arrived, and open it
 in a new session: a rule you read yesterday is not a rule you have read.
 {{- end}}
 
-Triggered by where you are in the work:
+`caveman.md` is always on: the register you answer in. The rest, by where you are:
 
 - `autonomy.md` — at kickoff, before writing anything
 - `routing.md` — work arrives and needs a vehicle: a spec, or a plan
@@ -39,7 +39,7 @@ Read the source when you are about to change it, not to find it.
 
 **Plans and specs** — `scc map` · `map <artifact>` · `map tasks <artifact> --next` ·
 `map find "<terms>"` · `map show <artifact> <address>` · `map trace`. An address is a
-name — `1.2` `R1.2` `#notes` `notes:7` `specs/<feature>/` — never a line number.
+name — `1.2` `R1.2` `#risks` `risks:2` `specs/<feature>/` — never a line number.
 
 **Changing one** — `scc patch check <artifact> 1.2`, plus `task` `add` `append` `fm`. Not
 an editor: it resolves the address, re-validates, and rolls back an edit that adds a

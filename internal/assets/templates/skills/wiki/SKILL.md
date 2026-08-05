@@ -23,8 +23,23 @@ This skill is the procedure.
 3. **Check `docs/glossary.md` first.** If the source names something the project
    already has a canonical term for, use the canonical term. If it coins a term
    worth keeping, that is the `glossary` skill's job — do it, then come back.
-4. **Write the page** at `docs/wiki/<slug>.md`. The filename is the slug, so
-   `order-total.md` is what `[[order-total]]` resolves to.
+4. **Write the page** at `docs/wiki/pages/<slug>.md`. The filename is the slug, so
+   `order-total.md` is what `[[order-total]]` resolves to — the slug never carries the
+   directory. `index.md` and `changelog.md` stay one level up, in `docs/wiki/`: they
+   are the wiki's fixed documents rather than pages, and keeping them out of `pages/`
+   is what lets the validator tell content from structure without matching filenames.
+
+   **Name it for the concept, as something that stands on its own.** A `[[wikilink]]`
+   shows the reader the slug and nothing else, so the slug carries the whole signal:
+   it has to answer "what is this page about?" with no other context on screen.
+   `order-total.md`, `retry-policy.md`, `sprite-atlas.md` do. A slug lifted out of a
+   sentence does not — `into-an-engine.md` is the tail of somebody's heading, and a
+   year later nobody can tell what page that was without opening it. Test it by
+   reading the filename alone: if it is not a thing this project has, rename it.
+
+   No validator catches this. Every wiki check is about the graph — whether the link
+   resolves, whether the page is reachable — and a badly named page passes all of
+   them, which is exactly why it is on you here.
 5. **Link it in.** Add a `[[wikilink]]` from `index.md`, or from a page already
    reachable from it. A page nobody links is a page nobody finds again.
 6. **Record it in `changelog.md`** — what changed, naming the pages with wikilinks.
@@ -54,6 +69,8 @@ someone reconstructs the same thing is the signal, not the first.
 | `wiki.orphan-page` | The page exists and nothing reaches it. | Link it from `index.md` or from a reachable page. Or delete it — an unreachable page nobody has missed is a candidate. |
 | `wiki.missing-changelog` | The wiki has pages and no log of how it got that way. | Write `changelog.md`. |
 | `wiki.changelog-desync` | The log names a page that no longer exists. | The page was renamed or removed; the log is a record, so correct the entry rather than rewriting history around it. |
+| `wiki.legacy-page` | A page sits directly in `docs/wiki/`, from before `pages/`. | `git mv` it into `docs/wiki/pages/`. The slug does not change, so no wikilink moves with it. |
+| `wiki.duplicate-page` | Two files claim one slug, so `[[it]]` is ambiguous. | Usually half a migration: keep the copy in `pages/`, delete the other once you have merged anything only it has. |
 | `wiki.unprocessed-source` | A file is still in `docs/raw/`. | Ingest it, above. |
 
 **`index.md` is a map, not a dump.** When it grows into a flat list of every page,

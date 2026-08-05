@@ -37,6 +37,10 @@ var deltaMarkers = map[string]bool{"ADDED": true, "MODIFIED": true, "REMOVED": t
 var kickoffValues = map[string]map[string]bool{
 	"autonomy": {"auto": true, "gated": true},
 	"ci":       {"wait": true, "no-wait": true},
+	// lang is the register's output language, asked at kickoff with the other two and
+	// read by caveman.md. Absent means the agent answers in whatever language it is
+	// addressed in, which is the behavior that predates the question.
+	"lang": {"en": true, "wenyan": true},
 }
 
 // requirement is one parsed requirement line.

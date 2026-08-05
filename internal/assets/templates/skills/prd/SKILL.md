@@ -63,8 +63,8 @@ Then fill it in. The rules the file must hold to:
 - **Each spec-sized leaf is one coherent feature** — something a person could
   describe in a sentence and verify on its own. If a leaf needs three sentences and
   an "and", it is two leaves.
-- **Say what order they go in, and what depends on what**, under `## Notes`. This is
-  the part only you know right now, and the part the next session most needs.
+- **Put them in the order they have to happen.** The order is the list — a plan does
+  not carry prose restating it, so a leaf that must come first is written first.
 - **A plan is work, not knowledge.** It lives in `plans/`, never in `docs/`.
 
 Referenced specs must exist, or `scc validate` reports `plan.unknown-spec`. Create
@@ -81,5 +81,5 @@ placeholder; a reference to nothing is a broken plan.
 - **Check the vocabulary.** Every term the plan coins is a term three specs will
   inherit. If any of them is contested or new, use the `glossary` skill now, while
   it costs one edit.
-- **A choice made here that is hard to reverse is an ADR**, not a line in the plan's
-  notes. Use the `adr` skill.
+- **A choice made here that is hard to reverse is an ADR**, not prose in the plan.
+  Use the `adr` skill, and cite the record from the item it governs.

@@ -112,6 +112,20 @@ func TestPlanKickoffAnswers(t *testing.T) {
 	if got := planFindings(t, root, "sweep"); !contains(got, "plan.kickoff-invalid") {
 		t.Errorf("rules = %v, want plan.kickoff-invalid", got)
 	}
+
+	// A plan is the vehicle a whole run is driven from, so it carries the language
+	// answer on the same terms a spec does — one key, checked when present.
+	root = t.TempDir()
+	writePlan(t, root, "wide", "---\nautonomy: auto\nci: wait\nlang: wenyan\n---\n\n# Wide\n\n- [ ] 1.1 (Unit) Do it\n")
+	if got := planFindings(t, root, "wide"); len(got) != 0 {
+		t.Errorf("a plan carrying every kickoff answer reported %v", got)
+	}
+
+	root = t.TempDir()
+	writePlan(t, root, "narrow", "---\nlang: pt-BR\n---\n\n# Narrow\n\n- [ ] 1.1 (Unit) Do it\n")
+	if got := planFindings(t, root, "narrow"); !contains(got, "plan.kickoff-invalid") {
+		t.Errorf("rules = %v, want plan.kickoff-invalid for an undocumented language", got)
+	}
 }
 
 // The answers `plan-run` writes back before it starts a loop. A wrong value is worth

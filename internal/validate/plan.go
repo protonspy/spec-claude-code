@@ -136,7 +136,7 @@ func checkLoopAnswers(set *finding.Set, file string, fm mdscan.Frontmatter) {
 // checkKickoffAs is checkKickoff with the rule slug the caller's subject uses, so a
 // plan's finding reads `plan.` and a spec's reads `spec.` for the same defect.
 func checkKickoffAs(set *finding.Set, file string, fm mdscan.Frontmatter, rule string) {
-	for _, key := range []string{"autonomy", "ci"} {
+	for _, key := range []string{"autonomy", "ci", "lang"} {
 		value, ok := fm.Get(key)
 		if !ok {
 			continue

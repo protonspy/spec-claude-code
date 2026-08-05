@@ -77,7 +77,24 @@ import (
 // 12: the entry file's layout block is one column across all three harnesses. The
 // padding is computed from the profile rather than written into the template,
 // because a run of spaces that lines up for `.codex/` is ragged for `.opencode/`.
-const Version = "12"
+// 13: caveman.md — the output budget belongs to the code, and narration is the part of
+// a long run that can be cut without losing a fact. A rule rather than a skill because
+// it is on by default, and a default the model has to choose to load is not one. One
+// level (ultra) rather than three, because a dial nobody turns is three descriptions of
+// the register to keep true instead of one. The language it answers in is the third
+// kickoff question in autonomy.md, recorded as `lang:` beside the two that were already
+// there — the register is a decision about the whole run, so it belongs where the run's
+// other two decisions are and not in a preference asked again every session. In the
+// same pass, three places a real workspace showed scc stating a mechanism exactly and
+// leaving the judgment unsaid — where an agent fills the gap with the cheapest
+// reading. The plan-run command said "read the plan" where the skill it invokes says
+// map it; the review agents asked for surrounding code without ever saying the diff
+// already held it; and the wiki skill explained how a slug resolves at the moment the
+// page is being named, without saying the name has to name the concept.
+// Also: the wiki's pages move to docs/wiki/pages/, so index.md and changelog.md are
+// told apart from content by where they sit rather than by their names — which is what
+// stopped any other .md dropped into wiki/ from becoming a page, and then an orphan.
+const Version = "13"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -141,6 +158,7 @@ func Workspace(h paths.Harness) []File {
 	// The methodology. Every one of these is scc's own content: an upgrade should
 	// deliver improvements to them, so none is Owned.
 	for _, rule := range []string{
+		"caveman.md",
 		"routing.md",
 		"autonomy.md",
 		"methodology.md",
@@ -282,6 +300,11 @@ var WorkflowSkills = []string{"plan-run"}
 // slash command are derived from this one list, so the two cannot drift apart, and a
 // skill added to either half above reaches workspaces that already exist through
 // `scc update` on the same terms as any other managed file.
+//
+// The register the agent answers in was briefly a skill here and is now caveman.md,
+// because it is on by default: a skill nobody invokes does nothing, and one the model
+// must decide to load is not a default. What it costs is what every rule costs — it is
+// preloaded where the harness reads rules/ — and that is the price of it being on.
 func Skills() []string {
 	return append(append([]string{}, KnowledgeSkills...), WorkflowSkills...)
 }
@@ -306,6 +329,7 @@ func Dirs(h paths.Harness) []string {
 		paths.PlansSeg,
 		paths.DocsSeg,
 		path.Join(paths.DocsSeg, paths.WikiSeg),
+		path.Join(paths.DocsSeg, paths.WikiSeg, paths.WikiPagesSeg),
 		path.Join(paths.DocsSeg, paths.RawSeg),
 		path.Join(paths.DocsSeg, paths.ADRSeg),
 		path.Join(paths.DocsSeg, paths.CodewikiSeg),

@@ -12,15 +12,20 @@ import (
 
 // Wiki validates docs/wiki/ and the drop box beside it.
 //
-// All four checks are graph facts over Markdown — no code is read, and none of them is
-// a judgment call:
+// Every check is a graph fact over Markdown — no code is read, and none of them is a
+// judgment call:
 //
 //   - a [[wikilink]] resolves to a page
 //   - every page is reachable from index.md, because an orphan is a page nobody will
 //     find again
 //   - the changelog exists and names only pages that exist
+//   - no two files claim one slug, since [[order-total]] must mean one thing
+//   - the pages are under wiki/pages/
 //   - docs/raw/ is empty, because a file still sitting there was collected and never
 //     processed
+//
+// What this cannot check is whether a page's name names anything — `into-an-engine.md`
+// resolves, links, and is reachable. That one is on the wiki skill.
 func Wiki(root string) (*finding.Set, error) {
 	set := &finding.Set{}
 	if err := checkRaw(set, root); err != nil {
@@ -28,7 +33,7 @@ func Wiki(root string) (*finding.Set, error) {
 	}
 
 	dir := paths.Wiki(root)
-	pages, err := markdownFiles(dir)
+	pages, err := wikiPages(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -36,48 +41,74 @@ func Wiki(root string) (*finding.Set, error) {
 		return set, nil
 	}
 
-	// A page's name is its slug: [[order-total]] resolves to order-total.md.
+	// A page's name is its slug: [[order-total]] resolves to order-total.md. Pages
+	// arrive canonical-first, so a slug claimed in both layouts reports the loose copy
+	// as the duplicate rather than the one already in the right place.
 	slugs := map[string]bool{}
-	for _, p := range pages {
-		slugs[strings.TrimSuffix(filepath.Base(p), ".md")] = true
+	claimed := map[string]string{}
+	for _, pg := range pages {
+		if first, dup := claimed[pg.slug]; dup {
+			set.Addf(rel(root, pg.path), 0, "wiki.duplicate-page",
+				"[[%s]] already resolves to %s; one slug cannot name two files",
+				pg.slug, rel(root, first))
+			continue
+		}
+		claimed[pg.slug] = pg.path
+		slugs[pg.slug] = true
+		if pg.legacy {
+			set.Addf(rel(root, pg.path), 0, "wiki.legacy-page",
+				"pages live in %s/%s/ now; move it there so the wiki's fixed documents stay distinguishable from its content",
+				paths.WikiSeg, paths.WikiPagesSeg)
+		}
 	}
 
-	indexSlug := strings.TrimSuffix(paths.WikiIndex, ".md")
-	if !slugs[indexSlug] {
-		set.Addf(rel(root, filepath.Join(dir, paths.WikiIndex)), 0, "wiki.missing-index",
+	indexPath := filepath.Join(dir, paths.WikiIndex)
+	if !isFile(indexPath) {
+		set.Addf(rel(root, indexPath), 0, "wiki.missing-index",
 			"the wiki has %d pages and no %s; without an entry point every page is an orphan",
 			len(pages), paths.WikiIndex)
 	}
 
 	// links[from] = the pages it points at, collected once and used for both the
-	// broken-link check and the reachability walk.
+	// broken-link check and the reachability walk. The index is a node in that graph
+	// without being a page, so it is keyed by something no filename can produce.
+	const indexNode = "\x00index"
 	links := map[string][]string{}
-	for _, p := range pages {
-		slug := strings.TrimSuffix(filepath.Base(p), ".md")
+	collect := func(node, p string) error {
 		doc, err := read(root, p)
 		if err != nil {
 			if doc == nil {
-				return nil, err
+				return err
 			}
 			set.Addf(rel(root, p), 1, "wiki.frontmatter-unreadable", "%v", err)
-			continue
+			return nil
 		}
 		for _, link := range doc.Wikilinks {
 			target := strings.TrimSuffix(link.Target, ".md")
 			if !slugs[target] {
 				set.Addf(rel(root, p), link.Line, "wiki.broken-link",
-					"[[%s]] resolves to no page under %s/", link.Target, paths.WikiSeg)
+					"[[%s]] resolves to no page under %s/%s/", link.Target, paths.WikiSeg, paths.WikiPagesSeg)
 				continue
 			}
-			links[slug] = append(links[slug], target)
+			links[node] = append(links[node], target)
+		}
+		return nil
+	}
+	if isFile(indexPath) {
+		if err := collect(indexNode, indexPath); err != nil {
+			return nil, err
+		}
+	}
+	for _, pg := range pages {
+		if err := collect(pg.slug, pg.path); err != nil {
+			return nil, err
 		}
 	}
 
 	// Reachability from the index. The changelog is a log rather than a page, so it is
-	// not expected to be linked and is not an orphan when it is not.
-	logSlug := strings.TrimSuffix(paths.WikiLog, ".md")
-	reachable := map[string]bool{indexSlug: true, logSlug: true}
-	walk := []string{indexSlug}
+	// never walked and is never an orphan.
+	reachable := map[string]bool{}
+	walk := []string{indexNode}
 	for len(walk) > 0 {
 		cur := walk[len(walk)-1]
 		walk = walk[:len(walk)-1]
@@ -89,20 +120,60 @@ func Wiki(root string) (*finding.Set, error) {
 		}
 	}
 	orphans := make([]string, 0)
-	for slug := range slugs {
-		if !reachable[slug] {
-			orphans = append(orphans, slug)
+	for _, pg := range pages {
+		if !reachable[pg.slug] {
+			orphans = append(orphans, pg.path)
 		}
 	}
 	sort.Strings(orphans)
-	for _, slug := range orphans {
-		set.Addf(rel(root, filepath.Join(dir, slug+".md")), 0, "wiki.orphan-page",
+	for _, p := range orphans {
+		set.Addf(rel(root, p), 0, "wiki.orphan-page",
 			"not reachable from %s; link it from the index or from a page that is", paths.WikiIndex)
 	}
 
 	checkChangelog(set, root, dir, slugs)
 	return set, nil
 }
+
+// page is one wiki page: where it sits, what [[slug]] resolves to it, and whether it
+// is still in the layout that predates wiki/pages/.
+type page struct {
+	path   string
+	slug   string
+	legacy bool
+}
+
+// wikiPages lists the pages, the canonical ones first.
+//
+// A .md file directly in wiki/ that is not one of the two fixed documents is still
+// read as a page, and only then reported. Refusing to see it would turn every existing
+// wiki into a wall of wiki.broken-link the moment scc was upgraded — pages that are
+// really there, reported as missing. A finding that names the layout is an answer the
+// author can act on; a finding that says a page does not exist when it does is the
+// kind that teaches people to stop believing the validator.
+func wikiPages(dir string) ([]page, error) {
+	canonical, err := markdownFiles(filepath.Join(dir, paths.WikiPagesSeg))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]page, 0, len(canonical))
+	for _, p := range canonical {
+		out = append(out, page{path: p, slug: pageSlug(p)})
+	}
+	loose, err := markdownFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range loose {
+		if base := filepath.Base(p); base == paths.WikiIndex || base == paths.WikiLog {
+			continue
+		}
+		out = append(out, page{path: p, slug: pageSlug(p), legacy: true})
+	}
+	return out, nil
+}
+
+func pageSlug(p string) string { return strings.TrimSuffix(filepath.Base(p), ".md") }
 
 // checkChangelog is the index/log desync check, in the form that is actually
 // structural: the log exists, and every page it names still exists. Comparing the log
