@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/protonspy/spec-claude-code/internal/mdblock"
 )
 
 // Repo is where CodeGraph is developed, for the error that has to send somebody
@@ -38,6 +40,20 @@ const Pkg = "@colbymchenry/codegraph"
 // what is inside, because the contents are a SQLite database on CodeGraph's
 // schedule, not a format scc has any business knowing.
 const Dir = ".codegraph"
+
+// Markers delimit the usage block scc keeps current in the entry file — the one
+// that tells the agent to ask the graph before it starts reading files.
+//
+// Namespaced as scc's own, which is deliberately the opposite of the RTK decision.
+// There, sharing RTK's markers is what makes `rtk init` and `scc rtk` converge on
+// one copy of a block they both write. CodeGraph writes nothing into the entry file,
+// and the block is scc's account of `scc graph` rather than CodeGraph's account of
+// itself — so a marker of scc's own is what leaves a future CodeGraph release free
+// to add its own without either tool clobbering the other.
+var Markers = mdblock.Markers{
+	Open:  "<!-- scc:codegraph-instructions",
+	Close: "<!-- /scc:codegraph-instructions -->",
+}
 
 // Indexed reports whether root has a graph.
 func Indexed(root string) bool {

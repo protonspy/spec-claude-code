@@ -16,7 +16,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/protonspy/spec-claude-code/internal/textutil"
+	"github.com/protonspy/spec-claude-code/internal/mdblock"
 )
 
 // Repo is where the binary is built from. RTK is a Rust program distributed as
@@ -27,9 +27,9 @@ const Repo = "https://github.com/rtk-ai/rtk"
 // command in the block.
 const Bin = "rtk"
 
-// The markers RTK itself writes. The opening one carries a version, so it is
-// matched by prefix: a block stamped v1 or v9 is still the block, and replacing it
-// with the one this build ships is exactly what an update means.
+// Markers are the ones RTK itself writes. The opening one carries a version, so it
+// is matched by prefix: a block stamped v1 or v9 is still the block, and replacing
+// it with the one this build ships is exactly what an update means.
 //
 // Sharing RTK's markers rather than namespacing scc's own is the load-bearing
 // choice here, and it is worth naming what it buys: `rtk init` writes this exact
@@ -37,10 +37,10 @@ const Bin = "rtk"
 // what makes `rtk init` and `scc rtk` converge on one copy. A marker of scc's own
 // — `scc:rtk-instructions`, say — would make each tool blind to the other's block
 // and leave the file carrying both.
-const (
-	openPrefix = "<!-- rtk-instructions"
-	closeTag   = "<!-- /rtk-instructions -->"
-)
+var Markers = mdblock.Markers{
+	Open:  "<!-- rtk-instructions",
+	Close: "<!-- /rtk-instructions -->",
+}
 
 // Foreign is a marker some other tool writes for the same guidance.
 //
@@ -81,29 +81,27 @@ func ForeignBlock(doc string) (Foreign, bool) {
 }
 
 // Action is what splicing the block did to a document.
-type Action string
+type Action = mdblock.Action
 
+// The three outcomes, re-exported so a caller working in RTK's vocabulary does not
+// have to reach past it.
+//
+// Replaced is the default here, and the reason is size. `rtk init` and scc both
+// stamp v2 and give the agent the same instruction, but RTK's own block spends
+// roughly five times the bytes doing it — and the entry file is preloaded into every
+// request of the session, so the difference is paid continuously rather than once.
+// Between two blocks of the same version, the condensed one is simply better, and
+// leaving the larger one in place because it got there first is not deference, it is
+// a standing cost.
+//
+// What that does give up is version ordering: a future `rtk init` writing v3 would
+// be overwritten by scc's v2. Splice therefore keeps the replaced block's version
+// visible so the caller can say so, and keep is the standing answer for anyone who
+// has deliberately curated their own.
 const (
-	// Added: the document carried no block, so one was appended.
-	Added Action = "added"
-	// Present: the block in the document is already the one scc ships, byte for
-	// byte, or the caller asked for an existing block to be kept.
-	Present Action = "present"
-	// Replaced: the document carried a different block, and scc's replaced it.
-	//
-	// This is the default, and the reason is size. `rtk init` and scc both stamp
-	// v2 and give the agent the same instruction, but RTK's own block spends
-	// roughly five times the bytes doing it — and the entry file is preloaded into
-	// every request of the session, so the difference is paid continuously rather
-	// than once. Between two blocks of the same version, the condensed one is
-	// simply better, and leaving the larger one in place because it got there first
-	// is not deference, it is a standing cost.
-	//
-	// What that does give up is version ordering: a future `rtk init` writing v3
-	// would be overwritten by scc's v2. Splice therefore keeps the replaced block's
-	// version visible so the caller can say so, and Keep is the standing answer for
-	// anyone who has deliberately curated their own.
-	Replaced Action = "replaced"
+	Added    = mdblock.Added
+	Present  = mdblock.Present
+	Replaced = mdblock.Replaced
 )
 
 // InstallCmd is the command Install runs, as a string, so the CLI can name it
@@ -140,35 +138,7 @@ func Available() bool {
 // than blockless, and it is an error: appending a second block there would leave
 // the file with two openings and one close, which no tool could then update.
 func Splice(doc, block string, keep bool) (string, Action, error) {
-	block = strings.TrimRight(textutil.NormalizeNewlines(block), "\n")
-	eol := "\n"
-	if strings.Contains(doc, "\r\n") {
-		eol = "\r\n"
-		block = strings.ReplaceAll(block, "\n", "\r\n")
-	}
-
-	start := strings.Index(doc, openPrefix)
-	if start < 0 {
-		if strings.Contains(doc, closeTag) {
-			return "", "", fmt.Errorf("found %s with no opening marker", closeTag)
-		}
-		trimmed := strings.TrimRight(doc, " \t\r\n")
-		if trimmed == "" {
-			return block + eol, Added, nil
-		}
-		return trimmed + eol + eol + block + eol, Added, nil
-	}
-
-	rest := doc[start:]
-	end := strings.Index(rest, closeTag)
-	if end < 0 {
-		return "", "", fmt.Errorf("found %s with no closing %s", openPrefix+" …", closeTag)
-	}
-	end += len(closeTag)
-	if keep || rest[:end] == block {
-		return doc, Present, nil
-	}
-	return doc[:start] + block + doc[start+end:], Replaced, nil
+	return Markers.Splice(doc, block, keep)
 }
 
 // Block returns the marker-delimited block in doc, markers included, or "" when
@@ -179,36 +149,14 @@ func Splice(doc, block string, keep bool) (string, Action, error) {
 // both stamp v2 and say the same thing, but RTK's own block spends roughly five
 // times the bytes doing it, and the entry file is preloaded into every request of
 // the session. Version ordering cannot separate those two — only size can.
-func Block(doc string) string {
-	start := strings.Index(doc, openPrefix)
-	if start < 0 {
-		return ""
-	}
-	rest := doc[start:]
-	end := strings.Index(rest, closeTag)
-	if end < 0 {
-		return ""
-	}
-	return rest[:end+len(closeTag)]
-}
+func Block(doc string) string { return Markers.Block(doc) }
 
 // BlockVersion reports what the opening marker in doc claims — "v2" for
 // `<!-- rtk-instructions v2 -->` — or "" when doc carries no block.
 //
 // Advisory: it is printed so a run that left a block alone says which one it left,
 // and never compared. Version ordering is RTK's to define, not scc's to guess.
-func BlockVersion(doc string) string {
-	start := strings.Index(doc, openPrefix)
-	if start < 0 {
-		return ""
-	}
-	rest := doc[start+len(openPrefix):]
-	end := strings.Index(rest, "-->")
-	if end < 0 {
-		return ""
-	}
-	return strings.TrimSpace(rest[:end])
-}
+func BlockVersion(doc string) string { return Markers.Version(doc) }
 
 // Path reports where the rtk binary is, and whether it is on PATH at all.
 func Path() (string, bool) {

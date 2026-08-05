@@ -10,7 +10,6 @@ import (
 	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/render"
 	"github.com/protonspy/spec-claude-code/internal/rtk"
-	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
 
 // runRTK wires RTK into this workspace: the binary on PATH, and its usage block in
@@ -72,34 +71,13 @@ type rtkOptions struct {
 // rtkReport is the frozen JSON shape of a run, and the same values the human lines
 // are printed from, so the two cannot describe different outcomes.
 type rtkReport struct {
-	Installed bool      `json:"installed"`
-	Path      string    `json:"path,omitempty"`
-	Version   string    `json:"version,omitempty"`
-	Install   string    `json:"install"` // present | installed | skipped | failed
-	Files     []rtkFile `json:"files"`
-	Changed   int       `json:"changed"`
-	Error     string    `json:"error,omitempty"`
-}
-
-type rtkFile struct {
-	Path   string `json:"path"`
-	Action string `json:"action"` // added | present | replaced | missing
-	// Block is the version the opening marker claims, for a file that had one.
-	Block string `json:"block,omitempty"`
-	// Was is the version of the block that got replaced, when it differed from the
-	// one scc ships. This is the honest half of preferring scc's block by default:
-	// between two v2 blocks the smaller one simply wins, but a v3 replaced by a v2
-	// is a downgrade and has to be visible rather than inferred.
-	Was string `json:"was,omitempty"`
-	// Bytes and WasBytes size the block now in the file against the one it
-	// replaced — the whole argument for replacing it, stated in the unit that
-	// matters.
-	Bytes    int `json:"bytes,omitempty"`
-	WasBytes int `json:"was_bytes,omitempty"`
-	// Foreign names another tool's RTK block found in the same file — Headroom
-	// writes one behind its own markers. Reported and never touched: scc does not
-	// own that block, and the file would carry the same instructions twice.
-	Foreign string `json:"foreign,omitempty"`
+	Installed bool        `json:"installed"`
+	Path      string      `json:"path,omitempty"`
+	Version   string      `json:"version,omitempty"`
+	Install   string      `json:"install"` // present | installed | skipped | failed
+	Files     []blockFile `json:"files"`
+	Changed   int         `json:"changed"`
+	Error     string      `json:"error,omitempty"`
 }
 
 // The values rtkReport.Install takes. Not rtk.Action: these describe the binary,
@@ -112,16 +90,10 @@ const (
 	installFailed    = "failed"
 )
 
-// rtkMissing is the action for an entry file that is not on disk. scc writes the
-// block into a document it does not own, so it declines to bring that document into
-// existence: an entry file holding nothing but RTK's block would be a workspace
-// missing its methodology while looking configured.
-const rtkMissing = "missing"
-
 // applyRTK does the work and returns the report plus the exit code, so `init --rtk`
 // gets the same behavior without re-deriving any of it.
 func applyRTK(root string, opts rtkOptions) (*rtkReport, int) {
-	report := &rtkReport{Files: []rtkFile{}}
+	report := &rtkReport{Files: []blockFile{}}
 	code := ExitOK
 
 	if err := ensureBinary(report, opts); err != nil {
@@ -154,7 +126,7 @@ func applyRTK(root string, opts rtkOptions) (*rtkReport, int) {
 			if !opts.quiet {
 				render.Info(strings.TrimSpace(fmt.Sprintf("%s — RTK block already there %s", entry, file.Block)))
 			}
-		case rtkMissing:
+		case blockMissing:
 			// An initialized workspace whose entry file is gone: --check calls it a
 			// finding, and a run that was asked to write the block reports that it
 			// could not, rather than exiting 0 having done nothing.
@@ -198,7 +170,7 @@ func applyRTK(root string, opts rtkOptions) (*rtkReport, int) {
 // sizeNote is the whole argument for replacing a block, in the unit that makes it:
 // bytes the entry file no longer spends in every request of the session. Silent
 // when nothing was replaced, and when the replacement was not actually smaller.
-func sizeNote(file rtkFile) string {
+func sizeNote(file blockFile) string {
 	if file.WasBytes <= file.Bytes {
 		return ""
 	}
@@ -245,64 +217,27 @@ func ensureBinary(report *rtkReport, opts rtkOptions) error {
 	return nil
 }
 
-// entryFiles lists the entry file of every harness this workspace was scaffolded
-// for, deduplicated: Codex and opencode both read AGENTS.md, and splicing the same
-// block into one file twice would append a second copy on the second pass.
-func entryFiles(root string) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, h := range workspace.Harnesses(root) {
-		if seen[h.EntryFile] {
-			continue
-		}
-		seen[h.EntryFile] = true
-		out = append(out, h.EntryFile)
+// spliceEntry keeps RTK's block current in one entry file, and says so when another
+// tool has written the same guidance behind its own markers.
+//
+// The foreign check is the half that is RTK's alone. Headroom's context-tool setup
+// appends RTK instructions to this same file behind `<!-- headroom:rtk-instructions -->`;
+// neither marker is a substring of the other, so both tools' idempotency checks pass
+// and the file ends up telling the agent the same thing twice in every request.
+// Detected, named, and left exactly where it is — that block belongs to Headroom.
+func spliceEntry(root, entry, block string, opts rtkOptions) (blockFile, error) {
+	raw, err := os.ReadFile(filepath.Join(root, entry))
+	if err != nil && !os.IsNotExist(err) {
+		return blockFile{}, err
 	}
-	return out
-}
-
-func spliceEntry(root, entry, block string, opts rtkOptions) (rtkFile, error) {
-	path := filepath.Join(root, entry)
-	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return rtkFile{Path: entry, Action: rtkMissing}, nil
-	}
+	file, err := spliceEntryBlock(root, entry, rtk.Markers, block, opts.keep, opts.check)
 	if err != nil {
-		return rtkFile{}, err
-	}
-	next, action, err := rtk.Splice(string(raw), block, opts.keep)
-	if err != nil {
-		return rtkFile{}, err
-	}
-	// The version reported is the one that ends up in the file: what was already
-	// there when the block was left alone, what scc wrote when it did the writing.
-	found := rtk.BlockVersion(string(raw))
-	if action != rtk.Present {
-		found = rtk.BlockVersion(block)
-	}
-	file := rtkFile{Path: entry, Action: string(action), Block: found, Bytes: len(block)}
-	if action == rtk.Present {
-		file.Bytes = len(rtk.Block(string(raw)))
-	}
-	if action == rtk.Replaced {
-		was := rtk.Block(string(raw))
-		file.WasBytes = len(was)
-		// Only when it differs: naming the version on every replacement would bury
-		// the one case that actually needs reading.
-		if v := rtk.BlockVersion(was); v != found {
-			file.Was = v
-		}
+		return blockFile{}, err
 	}
 	if foreign, ok := rtk.ForeignBlock(string(raw)); ok {
 		file.Foreign = foreign.Tool
 		render.Warn(fmt.Sprintf("%s also carries %s's RTK block; the agent will read these instructions twice", entry, foreign.Tool))
 		render.Detail("  remove that one with: " + foreign.Fix)
-	}
-	if action == rtk.Present || opts.check {
-		return file, nil
-	}
-	if err := workspace.AtomicWrite(path, []byte(next), 0o644); err != nil {
-		return rtkFile{}, err
 	}
 	return file, nil
 }

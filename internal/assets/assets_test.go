@@ -92,6 +92,10 @@ func TestWorkspaceSetAndTreeAgree(t *testing.T) {
 		t.Errorf("RTKBlock(): %v", err)
 	}
 	referenced[RTKTemplate] = true
+	if _, err := CodeGraphBlock(); err != nil {
+		t.Errorf("CodeGraphBlock(): %v", err)
+	}
+	referenced[CodeGraphTemplate] = true
 	for name := range inTree {
 		if !referenced[name] {
 			t.Errorf("embedded template %q is in no harness's Workspace(), Seeds(), and is neither an artifact template nor a fragment", name)

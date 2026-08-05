@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 )
 
@@ -307,6 +308,86 @@ func TestLaunchBuildsTheGraphAndThenRefreshesIt(t *testing.T) {
 	}
 	if strings.Contains(got, "init") {
 		t.Errorf("codegraph re-initialized a workspace that already had a graph: %q", got)
+	}
+}
+
+// An index nobody knows how to query is an index nobody queries. Launch writes the
+// CodeGraph usage block into the entry file for the same reason it runs the index
+// there: the session is about to read that file, and the binary has just been proven
+// to exist.
+func TestLaunchWritesTheCodeGraphBlockIntoTheEntryFile(t *testing.T) {
+	root := initWorkspace(t)
+	dir := isolatedPath(t, "claude")
+	recordingStub(t, dir, "codegraph")
+	withLaunchExec(t, 0)
+
+	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	entry := filepath.Join(root, paths.Claude.EntryFile)
+	first, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(first), "scc graph explore") {
+		t.Errorf("the entry file does not carry the CodeGraph block:\n%s", first)
+	}
+
+	// And it is a splice, not an append: a second launch leaves one copy.
+	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+		t.Fatalf("second launch: exit = %d (stderr: %s)", code, stderr)
+	}
+	second, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if n := strings.Count(string(second), codegraph.Markers.Open); n != 1 {
+		t.Errorf("the entry file carries %d CodeGraph blocks, want 1", n)
+	}
+	if string(second) != string(first) {
+		t.Error("the second launch rewrote a block that was already current")
+	}
+}
+
+// Guidance naming a command the machine cannot run is worse than no guidance: the
+// agent tries `scc graph explore`, it fails, and the whole file loses its
+// credibility. So the block goes in only once the binary is there.
+func TestLaunchWritesNoCodeGraphBlockWithoutTheBinary(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "claude")
+	withoutTerminal(t)
+	withLaunchExec(t, 0)
+
+	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	entry, err := os.ReadFile(filepath.Join(root, paths.Claude.EntryFile))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(entry), codegraph.Markers.Open) {
+		t.Error("the entry file was told to use a binary this machine does not have")
+	}
+}
+
+// --dry-run and --json report what a launch would do. A flag nobody expects to
+// change anything must not edit a file the user owns.
+func TestLaunchPlanOnlyWritesNoCodeGraphBlock(t *testing.T) {
+	root := initWorkspace(t)
+	dir := isolatedPath(t, "claude")
+	recordingStub(t, dir, "codegraph")
+
+	for _, flag := range []string{"--json", "--dry-run"} {
+		if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom", flag); code != ExitOK {
+			t.Fatalf("%s: exit = %d (stderr: %s)", flag, code, stderr)
+		}
+		entry, err := os.ReadFile(filepath.Join(root, paths.Claude.EntryFile))
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		if strings.Contains(string(entry), codegraph.Markers.Open) {
+			t.Errorf("%s edited the entry file", flag)
+		}
 	}
 }
 
