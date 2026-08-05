@@ -1,6 +1,6 @@
 ---
 name: plan-run
-description: Drive a whole plan under plans/ to completion — map the plan, report the groups, take whatever the invocation already decided and ask only for the rest, then implement group by group and deliver either one PR per group or one at the end, settling CI before calling the plan delivered. Resumes from the repository rather than from memory. Use it when someone asks to implement an entire plan, to keep going until the plan is finished, or runs /scc-plan-run. Not for a single spec or a one-off change, which delivery.md already carries end to end on its own.
+description: Drive a whole plan under plans/ to completion — brief the plan once, report the groups, take whatever the invocation already decided and ask only for the rest, then implement group by group, asking scc for the next task rather than opening the file, and deliver either one PR per group or one at the end, settling CI before calling the plan delivered. Resumes from the repository rather than from memory. Use it when someone asks to implement an entire plan, to keep going until the plan is finished, or runs /scc-plan-run. Not for a single spec or a one-off change, which delivery.md already carries end to end on its own.
 ---
 
 You run a plan to the end.
@@ -26,28 +26,29 @@ say the PR is open, say where, and say what CI is doing.
 
 ## What a group is
 
-A **group** is the smallest part of the plan that can merge on its own.
+A **group** is one family of task numbers sharing a major number — `1.1`, `1.2` → group
+1 — and it is the smallest part of the plan that can merge on its own. Implementing it
+means those tasks, in order.
 
-| In the plan | One group is | What implementing it means |
-|---|---|---|
-| `## Decomposition` | one leaf, `specs/<feature>/` | an ordinary spec — the whole cycle, by the ordinary rules |
-| `## Tasks` | one family of task numbers sharing a major number (`1.1`, `1.2` → group 1) | those tasks, in order |
+A task that names a spec under `## References` is that spec: run the ordinary cycle for
+it, and tick the task when the spec closes. The reference itself is never ticked —
+its state lives in that spec and is read from there.
 
-**The order is the order they are written in.** There is no prose anywhere overriding
-it, and you do not go looking for any: a plan that wanted a different order would have
-been reordered. `scc map <plan>` gives you that sequence without the file.
+**You do not decide the order and you do not look for prose that overrides it.**
+`scc map tasks <plan> --next` is the order: eligible first, then priority, then number.
+A task that names a dependency waits for it; `--blocked` says what an impasse is on.
 
 A plan with a flat, unnumbered checklist has exactly one group. Say so and run it
 once, rather than inventing a decomposition the author did not write.
 
-## Before the first group — read, report, then ask what is still open
+## Before the first group — brief, report, then ask what is still open
 
-1. **Map the plan and work out the groups.** `scc map <plan>` gives you the sections,
-   the leaves, the task counts and the open numbers — the whole shape, without the
-   prose. Read the plan itself only where the map is not enough; a plan that
-   decomposes into thirty specs is tens of kilobytes you would otherwise carry for the
-   rest of the loop. Ask nothing yet: the questions below are only answerable by
-   someone who can see what they are agreeing to.
+1. **Brief the plan.** `scc map brief <plan>` gives you the title, why it exists, the
+   paths, the references and what "done" means — the header and nothing else. Then
+   `scc map <plan>` for the group counts. **Never open the plan file**: `brief` reads
+   the header, `tasks` reads the checklist, and there is nothing else in it. Ask
+   nothing yet — the questions below are only answerable by someone who can see what
+   they are agreeing to.
 2. **Name the groups back, numbered, in order.** Order is the one thing a person can
    correct cheaply now and expensively after three merges.
 3. **Take every answer the invocation already gave, and ask only for what is left.**
@@ -131,15 +132,16 @@ you stop to deliver.
    mechanics are `{{.Rules}}/delivery.md`'s; `in-place` means the same
    branch without the worktree, and it means you must leave the checkout on `main`
    and clean when the group ends.
-3. **Implement the group.** A leaf is a spec and gets the spec cycle. A task family
-   is its tasks, sequential, each verified before the next.
+3. **Implement the group, one `--next` at a time.** `scc map tasks <plan> --next
+   --group N --json` gives you the one task to do; do it, verify it, tick it, ask
+   again. That loop — one call per task — is why the plan never has to be in context.
+   A task naming a spec gets the spec cycle.
 4. **Deliver**, following delivery.md's sequence in full — suite and lint, `scc
    validate`, both review subagents, commit, push, open the PR.
-5. **Record the group's state in that same PR.** A task group's checkboxes are ticked
-   in the plan file, in the branch that does the work, so `main` and the plan agree
-   the moment the merge lands — `scc patch check <plan> 1.1 1.2 …`, which addresses
-   each task by number and re-validates the file. A leaf is never ticked: its state
-   lives in the spec and is read from there.
+5. **Record the group's state in that same PR.** The checkboxes are ticked in the plan
+   file, in the branch that does the work, so `main` and the plan agree the moment the
+   merge lands — `scc patch check <plan> 1.1 1.2 …`, which addresses each task by
+   number and re-validates the file.
 6. **CI and merge, exactly as answered.** `ci: wait` means watch the checks until they
    settle and fix what is red before merging. `merge: auto` means you merge once that
    answer is satisfied; `merge: manual` means you open the PR, say where it is, and
@@ -152,8 +154,8 @@ you stop to deliver.
 
 Branch once from a green `main`, then for each group in order:
 
-1. **Implement the group**, exactly as above — a leaf gets the spec cycle, a task
-   family its tasks in order.
+1. **Implement the group**, exactly as above — one `--next` at a time, each verified
+   before the next.
 2. **Run the suite, the lint, and `scc validate` before moving on.** These stay per
    group and are not deferred with the rest. They are cheap, and they are what makes a
    later failure attributable: a break caught at group 3 is group 3's, while the same
@@ -185,6 +187,18 @@ Stopping part-way is a legitimate outcome, and continuing past any of these is n
   that the plan did not account for.
 - The group turns out to need a decision the plan never made. Bring the decision back;
   do not make it silently in the middle of a loop nobody is watching.
+- `--next` reports nothing eligible while open tasks remain. `--blocked` names what
+  each is waiting on; a cycle or a dependency on a struck-out task is a defect in the
+  plan and exits `2`.
+- The plan reports **drift** — it was edited outside `scc` after being approved. Say
+  so and stop: something changed the work the developer signed off on, and `git diff`
+  is the answer, not `plan reseal`.
+
+**Work that turns up mid-loop is discovery, not an edit.** In an approved plan,
+`scc patch add <plan> --group N --text "…" --reason "…"` allocates the next number
+and records why it was not in the plan; `scc patch rm <plan> 2.3 --reason "…"` strikes
+a task out where it stands. Neither touches the prose, and neither is a reason to open
+the file.
 
 Under `autonomy: gated`, stop at every group boundary and wait, having reported what
 merged.
@@ -203,19 +217,19 @@ developer's call once; asking a second time because your context died makes them
 for your problem.
 
 Resuming is a question about state, not about prose, so read it as state: `scc map
-<plan>` for the shape and `scc map tasks <plan> --open` for what is left. Re-reading a
+<plan>` for the counts and `scc map tasks <plan> --next` for what to do. Re-reading a
 whole plan to find one unticked box is the cost this loop would otherwise pay every
-time a session dies.
+time a session dies. `brief` again only if you have lost what the plan is for.
 
 Which checkout you read that from depends on the shape:
 
 - **`pr: per-group` — read `main`.** Pull it and map the plan there; the copy in an
-  old worktree is stale by construction. A task group whose boxes are ticked on `main`
-  is done, as is a leaf whose spec's `tasks.md` is fully ticked there — `scc map trace
-  specs/<feature>/` answers that in one call, without opening either file. An open PR
-  means that group is mid-flight; under `merge: manual` that is the expected resting
-  state. Finish it before starting another — two open groups is the fan-out this loop
-  exists to avoid.
+  old worktree is stale by construction. A group whose boxes are ticked on `main` is
+  done, as is a task naming a spec whose `tasks.md` is fully ticked there — `scc map
+  trace specs/<feature>/` answers that in one call, without opening either file. An
+  open PR means that group is mid-flight; under `merge: manual` that is the expected
+  resting state. Finish it before starting another — two open groups is the fan-out
+  this loop exists to avoid.
 - **`pr: per-plan` — read the plan's branch.** Nothing reaches `main` until the end, so
   `main` will say no group is done and it will be wrong. Find the branch, read its log
   for the per-group commits, and map the plan **there**. If every group is committed
@@ -243,3 +257,7 @@ run over. Ask what the invocation did not already answer.
   most tempts you to reach for the file instead. The group list from step 2 is a
   report, not a contract, and a group appended after you started is still part of the
   plan.
+- **The plan is still a draft.** `scc plan approve <plan>` before the first group: it
+  validates, fixes the content, and seals it, so a later edit made outside `scc` is
+  visible rather than silent. A plan that will not approve has findings — report them
+  and stop, rather than running a plan whose own validator rejects it.

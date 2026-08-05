@@ -94,7 +94,16 @@ import (
 // Also: the wiki's pages move to docs/wiki/pages/, so index.md and changelog.md are
 // told apart from content by where they sit rather than by their names — which is what
 // stopped any other .md dropped into wiki/ from becoming a page, and then an orphan.
-const Version = "13"
+// 14: the plan is a contract rather than a document. Its sections are closed — a
+// header and a checklist, and nowhere for prose to grow, which is the only thing that
+// ever capped a plan's size; `## Decomposition` becomes `## References`, since the
+// parser recognizes a leaf by the citation and never by the heading above it. A task
+// gains four flags and no more (`_Depends_`, `_Priority_`, `_Status removed_`,
+// `_Reason_`), so "what do I work on next" has a determined answer instead of a
+// file-order one. And the rules stop offering to read the plan at all: `map brief`
+// once plus `map tasks --next` per task is the whole reading surface, which is what
+// gives "never read the plan" the authority to be a rule.
+const Version = "14"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.

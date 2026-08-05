@@ -56,10 +56,11 @@ func runPatch(args []string) int {
 // patchFlags is the set every patch subcommand shares, so the safety valves are
 // spelled and behave identically across the surface.
 type patchFlags struct {
-	root    *string
-	dry     *bool
-	force   *bool
-	jsonOut *bool
+	root     *string
+	dry      *bool
+	force    *bool
+	noVerify *bool
+	jsonOut  *bool
 }
 
 func addPatchFlags(fs *flag.FlagSet) patchFlags {
@@ -68,7 +69,42 @@ func addPatchFlags(fs *flag.FlagSet) patchFlags {
 		dry:  fs.Bool("dry-run", false, "show the change and write nothing"),
 		force: fs.Bool("force", false,
 			"write even when the change introduces a validation finding"),
-		jsonOut: addJSON(fs),
+		noVerify: addNoVerify(fs),
+		jsonOut:  addJSON(fs),
+	}
+}
+
+// patchOp is what a subcommand does to an artifact, which is the only thing the
+// approved-plan guard needs to know.
+//
+// Approval is where authorship ends and execution begins. Before it, a plan is a
+// draft and everything is editable; after it, the *work* is fixed and only the
+// checklist's state moves — ticked, struck out with a reason, or added with one.
+// What discovery can never touch is guaranteed structurally rather than by
+// instruction: Why, Out of scope, Done when and the title are reachable only through
+// append/prepend/replace, and those three are the ones refused.
+type patchOp string
+
+const (
+	opState   patchOp = "state"   // check, uncheck, fm — the checklist's state
+	opContent patchOp = "content" // append, prepend, replace — authorship
+	opTask    patchOp = "task"    // rewriting a task, which is authorship of one item
+	opAdd     patchOp = "add"
+	opRemove  patchOp = "rm"
+)
+
+// guardApproved refuses the operations that would rewrite work somebody approved.
+func guardApproved(a *artifact.Artifact, op patchOp) error {
+	if !a.Approved() {
+		return nil
+	}
+	switch op {
+	case opContent:
+		return fmt.Errorf("%s is approved: its prose is fixed, and this would rewrite it\n"+
+			"  discovery adds and strikes tasks; it never edits Why, Out of scope, or Done when.\n"+
+			"  → `%s plan reseal %s --force` after an edit you made deliberately", a.Path, prog(), a.Name)
+	default:
+		return nil
 	}
 }
 
@@ -88,7 +124,7 @@ func runPatchCheck(args []string, done bool) int {
 		render.Err(name + " needs an artifact and at least one task number")
 		return ExitError
 	}
-	return withEditor(pf, rest[0], func(e *artifact.Editor) {
+	return withEditor(pf, rest[0], opState, func(_ *artifact.Artifact, e *artifact.Editor) {
 		for _, number := range rest[1:] {
 			e.Check(number, done)
 		}
@@ -104,6 +140,8 @@ func runPatchTask(args []string) int {
 	req := fs.String("req", "", "replace the citations: a comma-separated `list` of ids")
 	number := fs.String("number", "", "renumber the task")
 	state := fs.String("state", "", "set the box: `open` or done")
+	depends := fs.String("depends", "", "replace the dependencies: a comma-separated `list` of task numbers")
+	priority := fs.Int("priority", 0, "set the priority: a whole `number` 1 or greater; 0 clears it")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
 		return ExitError
@@ -113,6 +151,21 @@ func runPatchTask(args []string) int {
 		return ExitError
 	}
 	edit := artifact.TaskEdit{}
+	if isSet(fs, "depends") {
+		ids := splitList(*depends)
+		edit.Depends = &ids
+	}
+	if isSet(fs, "priority") {
+		switch {
+		case *priority == 0:
+			edit.ClearPriority = true
+		case *priority < 0:
+			render.Err("a priority is a whole number 1 or greater; lower is more urgent")
+			return ExitError
+		default:
+			edit.Priority = priority
+		}
+	}
 	if isSet(fs, "text") {
 		edit.Text = text
 	}
@@ -143,22 +196,48 @@ func runPatchTask(args []string) int {
 		}
 	}
 	if edit.Text == nil && edit.Methodology == nil && edit.Requirements == nil &&
-		edit.Number == nil && edit.Checked == nil {
-		render.Err("patch task changes nothing: pass --text, --method, --req, --number, or --state")
+		edit.Number == nil && edit.Checked == nil && edit.Depends == nil &&
+		edit.Priority == nil && !edit.ClearPriority {
+		render.Err("patch task changes nothing: pass --text, --method, --req, --number, --state, --depends or --priority")
 		return ExitError
 	}
-	return withEditor(pf, rest[0], func(e *artifact.Editor) { e.SetTask(rest[1], edit) })
+	// Which of these an approved plan still accepts is decided by what they change.
+	// --depends and --priority reorder work that is already agreed; --text, --method
+	// and --number change what the work *is*, and that is what approval fixed.
+	rewrites := edit.Text != nil || edit.Methodology != nil || edit.Number != nil || edit.Requirements != nil
+	return withEditor(pf, rest[0], opTask, func(a *artifact.Artifact, e *artifact.Editor) {
+		if a.Approved() && rewrites {
+			e.Fail("%s is approved: --text, --method, --req and --number rewrite the work itself.\n"+
+				"  a task that turned out wrong is struck out with `%s patch rm %s %s --reason \"…\"` "+
+				"and replaced by a new one.", a.Path, prog(), a.Name, rest[1])
+			return
+		}
+		e.SetTask(rest[1], edit)
+	})
 }
 
+// runPatchAdd writes a new task — authorship while a plan is a draft, discovery once
+// it is approved.
+//
+// Under approval it stops taking `--number` and starts allocating one, because a
+// number is an address: every commit, every branch name and every earlier report used
+// it, so reusing one would make two different pieces of work share a name. The next
+// slot is `max(item) + 1` in the group, counting the tasks discovery struck out —
+// which is derivable from the file itself, so nothing anywhere has to remember it.
 func runPatchAdd(args []string) int {
 	fs := flag.NewFlagSet("patch add", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	pf := addPatchFlags(fs)
-	section := fs.String("section", "", "the `section` slug whose task list this joins")
-	number := fs.String("number", "", "the task's `number`")
+	section := fs.String("section", "tasks", "the `section` slug whose task list this joins")
+	number := fs.String("number", "", "the task's `number` — a draft only; an approved plan allocates it")
+	group := fs.String("group", "", "allocate the next number in this `group`")
+	newGroup := fs.Bool("new-group", false, "allocate the first number of a new group")
 	method := fs.String("method", "Unit", "`Unit` or TDD")
 	text := fs.String("text", "", "the description")
 	req := fs.String("req", "", "the requirements it satisfies, comma-separated")
+	depends := fs.String("depends", "", "the tasks that have to be done first, comma-separated")
+	priority := fs.Int("priority", 0, "a whole `number` 1 or greater; lower is more urgent")
+	reason := fs.String("reason", "", "why this turned up after the plan was approved")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
 		return ExitError
@@ -167,24 +246,74 @@ func runPatchAdd(args []string) int {
 		render.Err("patch add needs an artifact")
 		return ExitError
 	}
-	if *section == "" || *number == "" || strings.TrimSpace(*text) == "" {
-		render.Err("patch add needs --section, --number and --text")
+	if strings.TrimSpace(*text) == "" {
+		render.Err("patch add needs --text: a task nobody described is not one")
+		return ExitError
+	}
+	if *group != "" && *newGroup {
+		render.Err("--group names a group and --new-group makes one; ask for one of them")
 		return ExitError
 	}
 	if !validMethod(*method) {
 		return ExitError
 	}
-	t := artifact.NewTask{
-		Section: *section, Number: *number, Methodology: *method,
-		Text: *text, Requirements: splitList(*req),
+	if *priority < 0 {
+		render.Err("a priority is a whole number 1 or greater; lower is more urgent")
+		return ExitError
 	}
-	return withEditor(pf, rest[0], func(e *artifact.Editor) { e.AddTask(t) })
+
+	return withEditor(pf, rest[0], opAdd, func(a *artifact.Artifact, e *artifact.Editor) {
+		id := *number
+		if a.Approved() {
+			if id != "" {
+				e.Fail("%s is approved, so it allocates the number: pass --group N or --new-group.\n"+
+					"  a number is an address, and reusing one makes two pieces of work share a name.", a.Path)
+				return
+			}
+			if strings.TrimSpace(*reason) == "" {
+				e.Fail("%s is approved: a task added now needs --reason, which is the record of "+
+					"why it was not in the plan somebody agreed to.", a.Path)
+				return
+			}
+			if *group == "" && !*newGroup {
+				e.Fail("%s is approved: say where this lands with --group N or --new-group.", a.Path)
+				return
+			}
+		}
+		if id == "" {
+			switch {
+			case *newGroup:
+				id = fmt.Sprintf("%d.1", a.HighGroup()+1)
+			case *group != "":
+				id = fmt.Sprintf("%s.%d", *group, a.HighWater(*group)+1)
+			default:
+				e.Fail("patch add needs --number, --group N, or --new-group")
+				return
+			}
+		}
+		t := artifact.NewTask{
+			Section: *section, Number: id, Methodology: *method,
+			Text: *text, Requirements: splitList(*req), Depends: splitList(*depends),
+			Reason: strings.TrimSpace(*reason),
+		}
+		if *priority > 0 {
+			t.Priority = priority
+		}
+		e.AddTask(t)
+	})
 }
 
+// runPatchRemove takes a task out of the running.
+//
+// In a draft that means deleting it. In an approved plan it means striking it out:
+// the line stays, carrying `_Status removed_` and the reason, because the plan
+// somebody agreed to is a record and a record that silently shrank is only in git.
+// It is also what keeps the number from being handed out again.
 func runPatchRemove(args []string) int {
 	fs := flag.NewFlagSet("patch rm", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	pf := addPatchFlags(fs)
+	reason := fs.String("reason", "", "why the work went away — required once the plan is approved")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
 		return ExitError
@@ -193,7 +322,18 @@ func runPatchRemove(args []string) int {
 		render.Err("patch rm needs an artifact and one task number")
 		return ExitError
 	}
-	return withEditor(pf, rest[0], func(e *artifact.Editor) { e.RemoveTask(rest[1]) })
+	return withEditor(pf, rest[0], opRemove, func(a *artifact.Artifact, e *artifact.Editor) {
+		if !a.Approved() && strings.TrimSpace(*reason) == "" {
+			e.RemoveTask(rest[1])
+			return
+		}
+		if strings.TrimSpace(*reason) == "" {
+			e.Fail("%s is approved: removing task %s needs --reason, and the task keeps its line so "+
+				"the reason survives and the number is never reused.", a.Path, rest[1])
+			return
+		}
+		e.StrikeTask(rest[1], *reason)
+	})
 }
 
 func runPatchText(op string, args []string) int {
@@ -218,7 +358,7 @@ func runPatchText(op string, args []string) int {
 		render.Err("nothing to write: pass --text, --text - to read stdin, or --file")
 		return ExitError
 	}
-	return withEditor(pf, rest[0], func(e *artifact.Editor) {
+	return withEditor(pf, rest[0], opContent, func(_ *artifact.Artifact, e *artifact.Editor) {
 		switch op {
 		case "append":
 			e.Append(rest[1], body)
@@ -251,8 +391,15 @@ func runPatchFrontmatter(args []string) int {
 		}
 		pairs = append(pairs, [2]string{strings.TrimSpace(k), strings.TrimSpace(v)})
 	}
-	return withEditor(pf, rest[0], func(e *artifact.Editor) {
+	return withEditor(pf, rest[0], opState, func(_ *artifact.Artifact, e *artifact.Editor) {
 		for _, p := range pairs {
+			// The seal is scc's to write. Letting `patch fm` set it would make the
+			// checksum a value anyone can type, which is the same as not having one.
+			if p[0] == artifact.KeyChecksum {
+				e.Fail("`%s` is written by `%s plan approve` and `%s plan reseal`, not by hand",
+					artifact.KeyChecksum, prog(), prog())
+				return
+			}
 			e.SetFrontmatter(p[0], p[1])
 		}
 	})
@@ -266,7 +413,7 @@ func runPatchFrontmatter(args []string) int {
 // than left on disk. An artifact scc has no validator for — a wiki page — is written
 // and said to be unverified, because claiming a check that did not happen is worse
 // than not checking.
-func withEditor(pf patchFlags, target string, apply func(*artifact.Editor)) int {
+func withEditor(pf patchFlags, target string, op patchOp, apply func(*artifact.Artifact, *artifact.Editor)) int {
 	root, ok := resolveRoot(*pf.root)
 	if !ok || !requireWorkspace(root) {
 		return ExitError
@@ -275,9 +422,19 @@ func withEditor(pf patchFlags, target string, apply func(*artifact.Editor)) int 
 	if !ok {
 		return ExitError
 	}
+	// The seal is checked before the edit is applied, and that order is the whole
+	// value of it: a harness that edited the file by hand and then ran `patch check`
+	// would otherwise have its edit resealed by the same command that should have
+	// reported it.
+	if code := sealGuard([]*artifact.Artifact{a}, *pf.noVerify); code != ExitOK {
+		return code
+	}
 
 	e := a.Edit()
-	apply(e)
+	if err := guardApproved(a, op); err != nil {
+		e.Fail("%v", err)
+	}
+	apply(a, e)
 	content, err := e.Content()
 	if err != nil {
 		render.Err(err.Error())
@@ -348,6 +505,17 @@ func withEditor(pf patchFlags, target string, apply func(*artifact.Editor)) int 
 		}
 	}
 
+	// Re-seal last, and only over what actually landed. A rollback restored the file
+	// the seal already describes, so there is nothing to recompute.
+	if report.Written && a.Approved() {
+		sealed := withTrailingNewline(artifact.Reseal(content))
+		if err := workspace.AtomicWrite(a.Abs, []byte(sealed), 0o644); err != nil {
+			render.Err(err.Error())
+			return ExitError
+		}
+		report.Checksum = artifact.Seal(sealed)
+	}
+
 	if *pf.jsonOut {
 		code := ExitOK
 		if len(report.Introduced) > 0 {
@@ -367,6 +535,7 @@ type patchReport struct {
 	Changes    []artifact.Change `json:"changes"`
 	Written    bool              `json:"written"`
 	Verified   string            `json:"verified"` // clean | rolled-back | forced | refused | no-validator | not-run | unchanged
+	Checksum   string            `json:"checksum,omitempty"`
 	Introduced []finding.Finding `json:"introduced,omitempty"`
 }
 
@@ -556,8 +725,10 @@ func patchUsage() {
   %s patch check   <artifact> <number>…        mark tasks done
   %s patch uncheck <artifact> <number>…        mark tasks not done
   %s patch task    <artifact> <number> [--text|--method|--req|--number|--state]
-  %s patch add     <artifact> --section <slug> --number N --text "…" [--method|--req]
-  %s patch rm      <artifact> <number>
+                                              [--depends 1.1,1.2|--priority N]
+  %s patch add     <artifact> --text "…" [--number N|--group N|--new-group]
+                                              [--method|--req|--depends|--priority|--reason]
+  %s patch rm      <artifact> <number> [--reason "…"]
   %s patch append  <artifact> <address> --text "…"|--text -|--file <path>
   %s patch prepend <artifact> <address> …
   %s patch replace <artifact> <address> …
@@ -570,6 +741,11 @@ error and never a write to the wrong place.
 After writing, the file is re-validated. A change that introduces a finding is rolled
 back and reported; --force writes it anyway. --dry-run shows the lines and writes
 nothing.
+
+Once a plan is approved its work is fixed, and only discovery moves: check and uncheck,
+fm, add with a --reason and an allocated number, and rm — which strikes the task out
+where it stands rather than deleting it, so the reason survives and the number is never
+handed out twice. Rewriting a task or its prose is refused.
 
 Exit codes: 0 written · 1 usage or runtime error · 2 rolled back, or forced with findings.
 `, prog(), prog(), prog(), prog(), prog(), prog(), prog(), prog(), prog(), prog())

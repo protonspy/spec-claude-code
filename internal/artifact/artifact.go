@@ -97,6 +97,8 @@ type Section struct {
 	Words   int    `json:"words"`
 	Tasks   int    `json:"tasks,omitempty"`
 	Done    int    `json:"done,omitempty"`
+	Blocked int    `json:"blocked,omitempty"`
+	Removed int    `json:"removed,omitempty"`
 	Leaves  int    `json:"leaves,omitempty"`
 }
 
@@ -135,6 +137,7 @@ func Load(root, abs string) (*Artifact, error) {
 	a.Tasks = parseTasks(doc)
 	a.Requirements = parseRequirements(doc)
 	a.Leaves = parseLeaves(doc)
+	a.resolveTaskStates()
 	a.attribute()
 	return a, nil
 }
@@ -227,11 +230,19 @@ func (a *Artifact) attribute() {
 	for i := range a.Sections {
 		s := &a.Sections[i]
 		for _, t := range a.Tasks {
-			if t.Line >= s.Line && t.Line <= s.End {
-				s.Tasks++
-				if t.Checked {
-					s.Done++
-				}
+			if t.Line < s.Line || t.Line > s.End {
+				continue
+			}
+			if t.Removed() {
+				s.Removed++
+				continue
+			}
+			s.Tasks++
+			switch {
+			case t.Checked:
+				s.Done++
+			case t.Blocked:
+				s.Blocked++
 			}
 		}
 		for _, l := range a.Leaves {
@@ -301,14 +312,83 @@ func (a *Artifact) Leaf(ref string) (Leaf, bool) {
 	return Leaf{}, false
 }
 
-// Done reports how many tasks are checked.
+// Done reports how many tasks are checked, out of the tasks that are still work.
+//
+// A removed task is in neither number. It stays in the file so its number is never
+// reused and its reason survives, but counting it would make a plan that dropped
+// three items report as permanently unfinished.
 func (a *Artifact) Done() (done, total int) {
 	for _, t := range a.Tasks {
+		if t.Removed() {
+			continue
+		}
+		total++
 		if t.Checked {
 			done++
 		}
 	}
-	return done, len(a.Tasks)
+	return done, total
+}
+
+// Counts is the state of a plan's checklist in one shape: what is finished, what can
+// be started, what is waiting, and what was struck out.
+type Counts struct {
+	Total    int `json:"total"`
+	Done     int `json:"done"`
+	Ready    int `json:"ready"`
+	Blocked  int `json:"blocked"`
+	Removed  int `json:"removed"`
+	Priority int `json:"-"`
+}
+
+// Counts totals the checklist.
+func (a *Artifact) Counts() Counts {
+	var c Counts
+	for _, t := range a.Tasks {
+		switch {
+		case t.Removed():
+			c.Removed++
+		case t.Checked:
+			c.Total++
+			c.Done++
+		case t.Eligible:
+			c.Total++
+			c.Ready++
+		default:
+			c.Total++
+			c.Blocked++
+		}
+	}
+	return c
+}
+
+// HighWater is the largest item number used in a group, removed tasks included.
+//
+// Counting the removed is the whole point: a number is never reused, and because the
+// removed task stays in the file the mark is derivable from the file itself — no
+// counter, no state, and nothing extra for `scc update` to keep current.
+func (a *Artifact) HighWater(group string) int {
+	high := 0
+	for _, t := range a.Tasks {
+		if t.Group() != group {
+			continue
+		}
+		if n := itemOf(t.Number); n > high {
+			high = n
+		}
+	}
+	return high
+}
+
+// HighGroup is the largest group number the plan has used.
+func (a *Artifact) HighGroup() int {
+	high := 0
+	for _, t := range a.Tasks {
+		if n := itemOf(t.Group()); n > high {
+			high = n
+		}
+	}
+	return high
 }
 
 // Text returns lines [from, to] inclusive, 1-based and clamped, as they appear in
@@ -324,6 +404,44 @@ func (a *Artifact) Text(from, to int) string {
 		return ""
 	}
 	return strings.Join(a.Lines[from-1:to], "\n")
+}
+
+// Prose returns lines [from, to] as prose: the lines mdscan does not count as
+// content — HTML comments and fenced blocks — dropped, and runs of blank lines
+// collapsed to one.
+//
+// It is what a summary prints, and Text is what an editor prints. The difference
+// matters most on a freshly scaffolded artifact, where the instructions to the author
+// are HTML comments and outweigh everything the author has written so far: a brief
+// that echoed them would spend its whole budget on text addressed to somebody else.
+// The cost is that a fenced example inside a section does not survive a summary,
+// which is the right trade for a summary and the wrong one for an edit.
+func (a *Artifact) Prose(from, to int) string {
+	if from < 1 {
+		from = 1
+	}
+	if to > len(a.Lines) {
+		to = len(a.Lines)
+	}
+	var out []string
+	for n := from; n <= to; n++ {
+		raw := a.Lines[n-1]
+		if n <= len(a.doc.Body) && strings.TrimSpace(a.doc.Body[n-1]) == "" {
+			if strings.TrimSpace(raw) != "" {
+				continue // a comment or a fence: not content
+			}
+			if len(out) == 0 || out[len(out)-1] == "" {
+				continue
+			}
+			out = append(out, "")
+			continue
+		}
+		out = append(out, raw)
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return strings.Join(out, "\n")
 }
 
 // Resolve turns whatever the caller typed into the artifact files it names.

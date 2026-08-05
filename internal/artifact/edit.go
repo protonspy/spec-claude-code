@@ -74,6 +74,11 @@ func (e *Editor) fail(format string, args ...any) {
 	}
 }
 
+// Fail records a refusal from the caller's own policy — the approved-plan guards,
+// which depend on what the file says and so cannot be decided before it is loaded.
+// It reads back as an editor error so one path reports every reason a patch stopped.
+func (e *Editor) Fail(format string, args ...any) { e.fail(format, args...) }
+
 // Empty reports whether nothing would change.
 func (e *Editor) Empty() bool { return len(e.splices) == 0 }
 
@@ -175,6 +180,15 @@ type TaskEdit struct {
 	Requirements *[]string
 	Number       *string
 	Checked      *bool
+
+	// The flags. Priority is two fields rather than one **int: "set it to 3" and
+	// "it has none" are different edits, and a pointer to a pointer expresses that
+	// at the cost of every caller having to read it twice.
+	Depends       *[]string
+	Priority      *int
+	ClearPriority bool
+	Status        *string
+	Reason        *string
 }
 
 // SetTask rewrites one task in place, re-rendering it from its parts.
@@ -208,8 +222,54 @@ func (e *Editor) SetTask(number string, edit TaskEdit) {
 	if edit.Text != nil {
 		next.Text = strings.TrimSpace(*edit.Text)
 		next.Detail = ""
+		next.detail = nil
+	}
+	if edit.Depends != nil {
+		next.Depends = *edit.Depends
+	}
+	if edit.ClearPriority {
+		next.Priority, next.BadPriority = nil, ""
+	}
+	if edit.Priority != nil {
+		p := *edit.Priority
+		next.Priority, next.BadPriority = &p, ""
+	}
+	if edit.Status != nil {
+		next.Status, next.BadStatus = *edit.Status, ""
+	}
+	if edit.Reason != nil {
+		next.Reason = strings.TrimSpace(*edit.Reason)
 	}
 	e.add("set", number, t.Line, t.End-t.Line+1, renderTask(next))
+}
+
+// StrikeTask is discovery's removal: the task stays where it is, carrying the reason
+// it stopped being work.
+//
+// A logical removal rather than a deletion, because the number is the address every
+// other artifact and every earlier commit used, and because a plan that silently
+// shrank would be a plan whose history is only in git. The high-water mark that
+// stops the number being reused is derived from this line staying put.
+func (e *Editor) StrikeTask(number, reason string) {
+	if e.err != nil {
+		return
+	}
+	t, ok := e.a.Task(number)
+	if !ok {
+		e.fail("%v", e.a.unknown("task", number))
+		return
+	}
+	if strings.TrimSpace(reason) == "" {
+		e.fail("removing task %s needs a reason: it is the whole record of why the work went away", number)
+		return
+	}
+	if t.Removed() {
+		return
+	}
+	next := t
+	next.Status, next.BadStatus = StatusRemoved, ""
+	next.Reason = strings.TrimSpace(reason)
+	e.add("strike", number, t.Line, t.End-t.Line+1, renderTask(next))
 }
 
 // NewTask is a task about to be written. Section is where it lands: the slug of the
@@ -221,6 +281,12 @@ type NewTask struct {
 	Text         string
 	Requirements []string
 	Checked      bool
+	Depends      []string
+	Priority     *int
+	// Reason is why this task turned up after the plan was approved. It is the same
+	// flag a removal carries, because it answers the same question — why this line is
+	// not what the plan somebody agreed to said.
+	Reason string
 }
 
 // AddTask appends a task to a section's list.
@@ -259,6 +325,7 @@ func (e *Editor) AddTask(t NewTask) {
 	lines := renderTask(Task{
 		Number: t.Number, Methodology: t.Methodology, Text: t.Text,
 		Requirements: t.Requirements, Checked: t.Checked,
+		Depends: t.Depends, Priority: t.Priority, Reason: t.Reason,
 	})
 	e.add("add", t.Number, at, 0, lines)
 }
@@ -371,6 +438,12 @@ func (e *Editor) SetFrontmatter(key, value string) {
 // renderTask writes a task back out in the grammar, wrapped the way the artifacts
 // wrap: the continuation indented to sit under the description rather than under the
 // bullet, which is what makes a multi-line task read as one item.
+//
+// It re-emits the continuation and the flags, and both are load-bearing. A rewrite
+// that dropped them would make `patch task --method TDD` a data-loss command:
+// changing one word would silently delete a sixty-line description and every
+// dependency the task declared. The flags come last, in the canonical order, so a
+// file that has been through this twice produces no diff the second time.
 func renderTask(t Task) []string {
 	head := "- [ ] "
 	if t.Checked {
@@ -386,7 +459,9 @@ func renderTask(t Task) []string {
 	if len(t.Requirements) > 0 {
 		body += " " + CitationSeparator + " " + strings.Join(t.Requirements, ", ")
 	}
-	return wrap(head, strings.Repeat(" ", len(head)), body, LineWidth)
+	out := wrap(head, strings.Repeat(" ", len(head)), body, LineWidth)
+	out = append(out, t.detail...)
+	return append(out, renderFlags(t)...)
 }
 
 // wrap breaks text into lines that fit width, with prefix on the first and indent on
