@@ -279,6 +279,21 @@ const RTKTemplate = "rtk.md"
 // the same block has to be recognizable to a tool that is not scc.
 func RTKBlock() (string, error) { return Content(RTKTemplate) }
 
+// CodeGraphTemplate is the embedded name of the CodeGraph usage block.
+const CodeGraphTemplate = "codegraph.md"
+
+// CodeGraphBlock returns the marker-delimited CodeGraph instructions `scc launch`
+// splices into the entry file.
+//
+// A fragment like the RTK one, and delimited by markers of scc's own — which is the
+// opposite of that decision, for the opposite reason. `rtk init` writes an RTK block
+// into this same file, so sharing its markers is what makes the two tools converge
+// on one copy. CodeGraph writes nothing into the entry file at all: this block is
+// scc's account of `scc graph`, not CodeGraph's account of itself, so namespacing it
+// leaves a future CodeGraph release free to add its own without either clobbering
+// the other.
+func CodeGraphBlock() (string, error) { return Content(CodeGraphTemplate) }
+
 // ReviewAgents names the two subagents scc ships. Both read and neither writes:
 // review is where a cold context is worth paying for, and authorship is not.
 var ReviewAgents = []string{"code-review", "security-review"}

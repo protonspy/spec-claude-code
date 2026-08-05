@@ -8,8 +8,10 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/headroom"
+	"github.com/protonspy/spec-claude-code/internal/mdblock"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 	"github.com/protonspy/spec-claude-code/internal/render"
 	"github.com/protonspy/spec-claude-code/internal/rtk"
@@ -119,9 +121,12 @@ func runLaunch(args []string) int {
 		plan:      plan,
 		quiet:     *jsonOut,
 	})
-	// RTK last of the three, because it is the only one that writes to a file the
-	// user owns: a run the user aborts at the Headroom or CodeGraph prompt should not
-	// already have edited their entry file.
+	// RTK last of the three, because it is the only one whose *install* is a
+	// decision — a Rust toolchain and a build that takes minutes — and a run the user
+	// aborts at the Headroom or CodeGraph prompt should not already have edited their
+	// entry file. Both it and CodeGraph write a usage block there, and both do so only
+	// once their binary is known to be present: guidance naming a command the machine
+	// cannot run is worse than no guidance, because it costs the file its credibility.
 	cmd.RTK = resolveRTK(target, rtkLaunchOptions{
 		disabled:  *noRTK,
 		noInstall: *noInstall,
@@ -427,6 +432,12 @@ type graphReport struct {
 	Indexed bool   `json:"indexed"`
 	Path    string `json:"path,omitempty"`
 	Version string `json:"version,omitempty"`
+	// Blocks is what happened to the CodeGraph usage block in each entry file:
+	// added | present | replaced | missing. Empty when nothing was written, which
+	// is every run where the binary is not there — a block telling the agent to run
+	// `scc graph explore` in a workspace with no CodeGraph is guidance that fails on
+	// first use, and an agent that has been lied to once discounts the whole file.
+	Blocks []blockFile `json:"blocks,omitempty"`
 	// Reason names why nothing was built, for the run where that is a surprise.
 	Reason string `json:"reason,omitempty"`
 }
@@ -508,12 +519,18 @@ func resolveGraph(root string, opts graphOptions) *graphReport {
 	report.Path, report.Version = bin, codegraph.Version(bin)
 
 	// A plan-only run reports what it would do and indexes nothing: --json has to
-	// leave stdout clean for the document, and --dry-run means what it says.
+	// leave stdout clean for the document, and --dry-run means what it says. It
+	// writes no block either — --dry-run that edited the entry file would be the one
+	// flag nobody expects to change anything doing exactly that.
 	if opts.plan {
 		report.Action = graphSkipped
 		report.Reason = "plan-only run"
 		return report
 	}
+
+	// The block before the index rather than after it, so a failed index still
+	// leaves the agent knowing the command that rebuilds one.
+	report.Blocks = spliceGraphBlock(root, opts)
 
 	args, action, doing := codegraph.InitArgs(), graphBuilt, "building the symbol graph — the first index takes a while"
 	if report.Indexed {
@@ -541,6 +558,50 @@ func resolveGraph(root string, opts graphOptions) *graphReport {
 	}
 	warnNoGraph(report, opts)
 	return report
+}
+
+// spliceGraphBlock keeps the CodeGraph usage block current in every entry file this
+// workspace has, and returns what that took.
+//
+// It runs at launch and nowhere else, which is the same reasoning that puts the
+// index here: this is the moment the guidance is about to be read, and the binary
+// has just been proven to exist. `scc init` cannot write it — CodeGraph may not be
+// installed then, and often is not — and a block promising `scc graph explore` in a
+// workspace where that command fails teaches the agent to distrust the whole file.
+//
+// A write failure is not fatal. The agent is about to start either way, and the
+// block is an enhancement exactly as the graph is; refusing to launch over a
+// Markdown splice would be scc putting its own tidiness above what was asked for.
+func spliceGraphBlock(root string, opts graphOptions) []blockFile {
+	block, err := assets.CodeGraphBlock()
+	if err != nil {
+		if !opts.quiet {
+			render.Warn("could not read the CodeGraph usage block: " + err.Error())
+		}
+		return nil
+	}
+	var out []blockFile
+	for _, entry := range entryFiles(root) {
+		// keep=false: scc owns this block behind its own markers, so replacing it is
+		// how a workspace picks up a newer one. There is no other author to defer to.
+		file, err := spliceEntryBlock(root, entry, codegraph.Markers, block, false, false)
+		if err != nil {
+			if !opts.quiet {
+				render.Warn(fmt.Sprintf("%s: %v", entry, err))
+			}
+			continue
+		}
+		out = append(out, file)
+		if opts.quiet || file.Action == string(mdblock.Present) {
+			continue
+		}
+		if file.Action == blockMissing {
+			render.Warn(fmt.Sprintf("%s does not exist; run `%s init` first", entry, prog()))
+			continue
+		}
+		render.OK(fmt.Sprintf("%s — CodeGraph block %s", entry, file.Action))
+	}
+	return out
 }
 
 // warnNoGraph says, once, why the agent is starting without a fresh graph.

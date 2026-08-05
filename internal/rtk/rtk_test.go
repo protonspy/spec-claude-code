@@ -16,15 +16,15 @@ func block(t *testing.T) string {
 	return b
 }
 
-// The block scc ships has to carry both markers, or nothing — not scc and not RTK
-// itself — can ever replace it in place.
+// The block scc ships has to carry both markers, or nothing â€” not scc and not RTK
+// itself â€” can ever replace it in place.
 func TestShippedBlockIsMarkerDelimited(t *testing.T) {
 	b := block(t)
-	if !strings.HasPrefix(b, openPrefix) {
-		t.Errorf("the block does not open with %q: %q", openPrefix, firstLine(b))
+	if !strings.HasPrefix(b, Markers.Open) {
+		t.Errorf("the block does not open with %q: %q", Markers.Open, firstLine(b))
 	}
-	if !strings.Contains(b, closeTag) {
-		t.Errorf("the block does not carry %q", closeTag)
+	if !strings.Contains(b, Markers.Close) {
+		t.Errorf("the block does not carry %q", Markers.Close)
 	}
 	if !strings.Contains(b, "Prefix EVERY command with `rtk`") {
 		t.Error("the block lost the instruction it exists for")
@@ -36,8 +36,8 @@ func TestShippedBlockIsMarkerDelimited(t *testing.T) {
 // exact pair into the project's entry file. A marker of scc's own would make each
 // tool blind to the other's block and leave the file carrying both.
 func TestTheMarkersAreRTKsOwn(t *testing.T) {
-	if openPrefix != "<!-- rtk-instructions" || closeTag != "<!-- /rtk-instructions -->" {
-		t.Errorf("markers are %q / %q, which is not what `rtk init` writes", openPrefix, closeTag)
+	if Markers.Open != "<!-- rtk-instructions" || Markers.Close != "<!-- /rtk-instructions -->" {
+		t.Errorf("markers are %q / %q, which is not what `rtk init` writes", Markers.Open, Markers.Close)
 	}
 	// And the namespaced variant somebody will eventually propose must not match,
 	// or scc would claim a block it does not own.
@@ -47,7 +47,7 @@ func TestTheMarkersAreRTKsOwn(t *testing.T) {
 }
 
 // Headroom writes the same guidance behind its own marker pair, into the same
-// entry file. scc cannot address that block — it is Headroom's — but a file
+// entry file. scc cannot address that block â€” it is Headroom's â€” but a file
 // carrying both tells the agent the same thing twice in every request, so the one
 // thing scc must not do is fail to notice.
 func TestForeignBlockFindsHeadroomsCopy(t *testing.T) {
@@ -71,7 +71,7 @@ func TestForeignBlockFindsHeadroomsCopy(t *testing.T) {
 
 // Neither marker is a substring of the other, which is why both tools' idempotency
 // checks pass and both append. Splice must leave Headroom's block exactly where it
-// is and add scc's alongside — anything else would be scc editing a document it
+// is and add scc's alongside â€” anything else would be scc editing a document it
 // does not own.
 func TestSpliceLeavesAForeignBlockAlone(t *testing.T) {
 	foreign := "<!-- headroom:rtk-instructions -->\nuse rtk\n<!-- /headroom:rtk-instructions -->"
@@ -87,7 +87,7 @@ func TestSpliceLeavesAForeignBlockAlone(t *testing.T) {
 	if !strings.Contains(got, foreign) {
 		t.Error("Splice modified Headroom's block")
 	}
-	if !strings.Contains(got, openPrefix) {
+	if !strings.Contains(got, Markers.Open) {
 		t.Error("Splice did not add scc's own block")
 	}
 }
@@ -107,7 +107,7 @@ func TestSpliceAppendsToADocumentWithoutABlock(t *testing.T) {
 	if !strings.Contains(got, "## RTK") {
 		t.Error("the block was not appended")
 	}
-	if !strings.HasSuffix(got, closeTag+"\n") {
+	if !strings.HasSuffix(got, Markers.Close+"\n") {
 		t.Errorf("the result does not end with the closing marker and one newline: %q", tail(got))
 	}
 }
@@ -134,7 +134,7 @@ func TestSpliceIsIdempotent(t *testing.T) {
 }
 
 // The block scc ships wins by default, replacing whatever is between the markers
-// — in place, between the markers and nowhere else.
+// â€” in place, between the markers and nowhere else.
 func TestSpliceReplacesAnExistingBlockInPlace(t *testing.T) {
 	doc := "# CLAUDE.md\n\nAbove.\n\n<!-- rtk-instructions v1 -->\n## RTK\nold text\n<!-- /rtk-instructions -->\n\nBelow.\n"
 	got, action, err := Splice(doc, block(t), false)
@@ -150,13 +150,13 @@ func TestSpliceReplacesAnExistingBlockInPlace(t *testing.T) {
 	if !strings.Contains(got, "# CLAUDE.md\n\nAbove.\n") || !strings.HasSuffix(got, "\nBelow.\n") {
 		t.Errorf("the user's own prose did not survive: %q", got)
 	}
-	if strings.Count(got, openPrefix) != 1 {
-		t.Errorf("the document carries %d opening markers, want 1", strings.Count(got, openPrefix))
+	if strings.Count(got, Markers.Open) != 1 {
+		t.Errorf("the document carries %d opening markers, want 1", strings.Count(got, Markers.Open))
 	}
 }
 
 // keep is the standing "leave whatever is already there", for a block somebody
-// curated on purpose — or one whose version is ahead of what this build ships.
+// curated on purpose â€” or one whose version is ahead of what this build ships.
 func TestSpliceKeepsAnExistingBlockWhenAsked(t *testing.T) {
 	doc := "# CLAUDE.md\n\n<!-- rtk-instructions v9 -->\n## RTK\nnewer text\n<!-- /rtk-instructions -->\n"
 	got, action, err := Splice(doc, block(t), true)
@@ -224,7 +224,7 @@ func TestSpliceIntoAnEmptyDocument(t *testing.T) {
 	if action != Added {
 		t.Errorf("action = %q, want %q", action, Added)
 	}
-	if !strings.HasPrefix(got, openPrefix) {
+	if !strings.HasPrefix(got, Markers.Open) {
 		t.Errorf("an empty document got leading blank lines: %q", firstLine(got))
 	}
 }
