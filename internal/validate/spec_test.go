@@ -298,20 +298,19 @@ func TestKickoffAnswers(t *testing.T) {
 // two the rules offer — a language name nobody documented is a typo, and the run it
 // would silently change the register for is the whole run.
 func TestKickoffLanguage(t *testing.T) {
-	root := t.TempDir()
 	with := func(value string) string {
 		return strings.Replace(goodRequirements, "ci: wait\n", "ci: wait\nlang: "+value+"\n", 1)
 	}
 
 	for _, value := range []string{"en", "wenyan"} {
-		root = t.TempDir()
+		root := t.TempDir()
 		writeSpec(t, root, "billing", with(value), goodDesign, goodTasks)
 		if got := specFindings(t, root, "billing"); len(got) != 0 {
 			t.Errorf("lang: %s reported %v", value, got)
 		}
 	}
 
-	root = t.TempDir()
+	root := t.TempDir()
 	writeSpec(t, root, "billing", with("classical-chinese"), goodDesign, goodTasks)
 	if got := specFindings(t, root, "billing"); !contains(got, "spec.kickoff-invalid") {
 		t.Errorf("rules = %v, want spec.kickoff-invalid", got)
