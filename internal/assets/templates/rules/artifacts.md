@@ -21,13 +21,13 @@ without loading it either.
 a line number**, so it survives an edit above it:
 
 ```
-1.2          a task           #notes     a section, by anchor slug
-R1.2         a requirement    notes:7    the 7th paragraph of that section
+1.2          a task           #risks     a section, by anchor slug
+R1.2         a requirement    risks:2    the 2nd paragraph of that section
 specs/foo/   a leaf           L120-160   an explicit range, the escape hatch
 ```
 
 `find` returns addresses, which is what makes the pair work: search, then `show` only
-the hit. A long `## Notes` with no headings inside it is still navigable — `scc map
+the hit. A long section with no headings inside it is still navigable — `scc map
 blocks` indexes its paragraphs by their opening sentence. Read the file directly only
 when the question is about *this exact text*: prose you are about to rewrite.
 
@@ -39,7 +39,7 @@ when the question is about *this exact text*: prose you are about to rewrite.
 scc patch check  <artifact> 1.1 1.2
 scc patch task   <artifact> 1.2 --text "…" --method TDD --req R1.1,R1.2
 scc patch add    <artifact> --section tasks --number 1.3 --method Unit --text "…"
-scc patch append <artifact> '#notes' --text -     reads stdin, for paragraphs
+scc patch append <artifact> '#risks' --text -     reads stdin, for paragraphs
 scc patch fm     <artifact> pr=per-plan
 ```
 

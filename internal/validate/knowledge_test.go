@@ -49,10 +49,10 @@ func TestKnowledgeValidatorsAreSilentOnAnEmptyWorkspace(t *testing.T) {
 
 func TestWikiGraphChecks(t *testing.T) {
 	root := t.TempDir()
-	wiki := paths.Wiki(root)
+	wiki, pages := paths.Wiki(root), paths.WikiPages(root)
 	write(t, filepath.Join(wiki, paths.WikiIndex), "# Index\n\n- [[order-total]]\n- [[nowhere]]\n")
-	write(t, filepath.Join(wiki, "order-total.md"), "# Order total\n\nThe amount charged.\n")
-	write(t, filepath.Join(wiki, "unlinked.md"), "# Unlinked\n\nNobody links here.\n")
+	write(t, filepath.Join(pages, "order-total.md"), "# Order total\n\nThe amount charged.\n")
+	write(t, filepath.Join(pages, "unlinked.md"), "# Unlinked\n\nNobody links here.\n")
 	write(t, filepath.Join(wiki, paths.WikiLog), "# Changelog\n\n- added [[order-total]]\n- added [[deleted-page]]\n")
 
 	got := runValidator(t, Wiki, root)
@@ -75,11 +75,11 @@ func TestWikiGraphChecks(t *testing.T) {
 // orphan.
 func TestWikiReachabilityIsTransitive(t *testing.T) {
 	root := t.TempDir()
-	wiki := paths.Wiki(root)
+	wiki, pages := paths.Wiki(root), paths.WikiPages(root)
 	write(t, filepath.Join(wiki, paths.WikiIndex), "# Index\n\n- [[one]]\n")
-	write(t, filepath.Join(wiki, "one.md"), "# One\n\nsee [[two]]\n")
-	write(t, filepath.Join(wiki, "two.md"), "# Two\n\nsee [[three|the third]]\n")
-	write(t, filepath.Join(wiki, "three.md"), "# Three\n\nend of the chain\n")
+	write(t, filepath.Join(pages, "one.md"), "# One\n\nsee [[two]]\n")
+	write(t, filepath.Join(pages, "two.md"), "# Two\n\nsee [[three|the third]]\n")
+	write(t, filepath.Join(pages, "three.md"), "# Three\n\nend of the chain\n")
 	write(t, filepath.Join(wiki, paths.WikiLog), "# Changelog\n")
 
 	if got := runValidator(t, Wiki, root); len(got) != 0 {
@@ -87,9 +87,68 @@ func TestWikiReachabilityIsTransitive(t *testing.T) {
 	}
 }
 
+// A wiki written before pages/ existed still validates as a graph — its pages are read,
+// its links resolve, nothing is a false orphan — and each loose page is reported once so
+// the author can move it. Seeing the page and reporting the layout are separate answers;
+// refusing to see it would report every link into it as broken.
+func TestWikiReadsTheLayoutThatPredatesPages(t *testing.T) {
+	root := t.TempDir()
+	wiki := paths.Wiki(root)
+	write(t, filepath.Join(wiki, paths.WikiIndex), "# Index\n\n- [[one]]\n")
+	write(t, filepath.Join(wiki, "one.md"), "# One\n\nsee [[two]]\n")
+	write(t, filepath.Join(wiki, "two.md"), "# Two\n\nend\n")
+	write(t, filepath.Join(wiki, paths.WikiLog), "# Changelog\n")
+
+	set, err := Wiki(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy int
+	for _, f := range set.Sorted() {
+		switch f.Rule {
+		case "wiki.legacy-page":
+			legacy++
+		default:
+			t.Errorf("%s: a legacy wiki should be graph-clean, got %s", f.File, f.Rule)
+		}
+	}
+	if legacy != 2 {
+		t.Errorf("wiki.legacy-page fired %d times, want one per loose page (2)", legacy)
+	}
+}
+
+// Two files claiming one slug makes [[order-total]] ambiguous. The copy already in
+// pages/ is the one that keeps the slug, so migrating half a wiki reports the half that
+// has not moved rather than the half that has.
+func TestWikiDuplicateSlugNamesTheLooseCopy(t *testing.T) {
+	root := t.TempDir()
+	wiki, pages := paths.Wiki(root), paths.WikiPages(root)
+	write(t, filepath.Join(wiki, paths.WikiIndex), "# Index\n\n- [[order-total]]\n")
+	write(t, filepath.Join(pages, "order-total.md"), "# Order total\n\nmoved\n")
+	write(t, filepath.Join(wiki, "order-total.md"), "# Order total\n\nnot moved\n")
+	write(t, filepath.Join(wiki, paths.WikiLog), "# Changelog\n")
+
+	set, err := Wiki(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dup *finding.Finding
+	for _, f := range set.Sorted() {
+		if f.Rule == "wiki.duplicate-page" {
+			dup = &f
+		}
+	}
+	if dup == nil {
+		t.Fatalf("no wiki.duplicate-page in %v", runValidator(t, Wiki, root))
+	}
+	if strings.Contains(filepath.ToSlash(dup.File), paths.WikiSeg+"/"+paths.WikiPagesSeg+"/") {
+		t.Errorf("duplicate reported against %s, want the loose copy", dup.File)
+	}
+}
+
 func TestWikiMissingIndexAndChangelog(t *testing.T) {
 	root := t.TempDir()
-	write(t, filepath.Join(paths.Wiki(root), "lonely.md"), "# Lonely\n")
+	write(t, filepath.Join(paths.WikiPages(root), "lonely.md"), "# Lonely\n")
 	got := runValidator(t, Wiki, root)
 	for _, want := range []string{"wiki.missing-index", "wiki.missing-changelog"} {
 		if !contains(got, want) {

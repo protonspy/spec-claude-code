@@ -6,7 +6,7 @@ what lets a spec stay anchored to one feature.
 
 ```
 docs/
-  wiki/          index.md, changelog.md, and one page per concept
+  wiki/          index.md and changelog.md, with pages/ — one page per concept
   raw/           sources dropped in to be processed — a file here is unfinished work
   adr/           numbered decision records
   codewiki/      narrated code, citing exact line ranges
@@ -21,9 +21,9 @@ synonyms used where a canonical term belongs, and dependencies missing from
 
 ## wiki/
 
-One page per concept, linked with `[[wikilinks]]`, every page reachable from
-`index.md` — an orphan is a page nobody will ever find again. Record what changed in
-`changelog.md`.
+One page per concept in `wiki/pages/`, linked with `[[wikilinks]]` — the slug is the
+filename, never the path — and reachable from `index.md`, which stays a level up with
+`changelog.md`. An orphan is a page nobody will find again. Log what you change.
 
 **`raw/` is a drop box, not storage.** Outside material goes there to be read,
 distilled into a wiki page, and removed. A file still sitting there is a finding: it

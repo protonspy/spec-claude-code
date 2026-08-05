@@ -33,14 +33,9 @@ A **group** is the smallest part of the plan that can merge on its own.
 | `## Decomposition` | one leaf, `specs/<feature>/` | an ordinary spec — the whole cycle, by the ordinary rules |
 | `## Tasks` | one family of task numbers sharing a major number (`1.1`, `1.2` → group 1) | those tasks, in order |
 
-The order is the order they are written in, unless `## Notes` says otherwise. Notes
-wins — that heading exists precisely to say what must not be merged out of sequence.
-
-**Do not read `## Notes` end to end to find that out.** It is the longest section of
-any real plan and most of it decides nothing about order. `scc map blocks <plan>
-notes` lists every paragraph by its opening sentence, with an address; `scc map show
-<plan> notes:7` returns the one or two that actually constrain the sequence. On a
-measured plan that is ~1.3k tokens instead of ~7.3k, for the same answer.
+**The order is the order they are written in.** There is no prose anywhere overriding
+it, and you do not go looking for any: a plan that wanted a different order would have
+been reordered. `scc map <plan>` gives you that sequence without the file.
 
 A plan with a flat, unnumbered checklist has exactly one group. Say so and run it
 once, rather than inventing a decomposition the author did not write.

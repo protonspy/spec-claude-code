@@ -251,8 +251,9 @@ func TestApplyUpdateDropsUnmanagedFiles(t *testing.T) {
 // This is the path a new skill actually ships on, and it is the one with something
 // to get wrong: the destination is a directory that does not exist yet, so a create
 // that only wrote files would fail on precisely the workspaces the update is for.
-// Nothing here is specific to plan-run — it is read out of assets.WorkflowSkills, so
-// the next workflow skill is covered the day it is added.
+// Nothing here is specific to any one skill — it is read out of assets.Skills(), which
+// is every list scc ships, so the next skill added to any of them is covered the day it
+// lands. Reading one list would have left the other two shipping on an untested path.
 func TestApplyUpdateAddsASkillTheWorkspacePredates(t *testing.T) {
 	for _, h := range paths.Harnesses() {
 		root := t.TempDir()
@@ -261,7 +262,7 @@ func TestApplyUpdateAddsASkillTheWorkspacePredates(t *testing.T) {
 		// Roll the workspace back to before the skill existed: the files gone, and
 		// no manifest entry claiming scc ever wrote them.
 		var rels []string
-		for _, skill := range assets.WorkflowSkills {
+		for _, skill := range assets.Skills() {
 			rels = append(rels, path.Join(h.Dir, h.SkillsSeg, skill, "SKILL.md"))
 			if h.CommandsSeg != "" {
 				rels = append(rels, path.Join(h.Dir, h.CommandsSeg, "scc-"+skill+".md"))
@@ -272,7 +273,16 @@ func TestApplyUpdateAddsASkillTheWorkspacePredates(t *testing.T) {
 			t.Fatalf("%s: Load: %v", h.ID, err)
 		}
 		for _, rel := range rels {
-			if err := os.RemoveAll(filepath.Dir(filepath.Join(root, filepath.FromSlash(rel)))); err != nil {
+			p := filepath.Join(root, filepath.FromSlash(rel))
+			// A skill is a whole directory that has to be recreated — which is the case
+			// this test exists for. A command is one file in a directory that stays, so
+			// removing its parent would take every other command with it and test
+			// something else.
+			target := p
+			if filepath.Base(p) == "SKILL.md" {
+				target = filepath.Dir(p)
+			}
+			if err := os.RemoveAll(target); err != nil {
 				t.Fatalf("%s: %v", h.ID, err)
 			}
 			m.Remove(rel)

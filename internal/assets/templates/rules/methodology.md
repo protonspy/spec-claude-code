@@ -37,8 +37,9 @@ of writing code first, and `scc` can check neither — you are accountable for t
 
 Write the failing test first, **watch it fail**, then make it pass, then refactor.
 Skipping RED is not TDD: a test that has never failed has not been shown to test
-anything. Say, in the task's notes, that you observed the red. RED/GREEN belongs to
-TDD and only to TDD — Unit is not a lazier TDD, and TDD is not a stricter Unit.
+anything. The commit that adds the failing test *is* the record that you watched it
+fail — do not also write it down. RED/GREEN belongs to TDD and only to TDD: Unit is
+not a lazier TDD, and TDD is not a stricter Unit.
 
 **Mandatory when the cost of being wrong is high:** money, in any calculation,
 rounding, split, or conversion involving currency · complex algorithms, whose

@@ -3,23 +3,29 @@
 The spec phases are **autonomous by default**: write requirements, design, and
 tasks, then start implementing. Do not stop for approval at each phase.
 
-But autonomy is the user's call, so **ask, once, before writing anything** — two
+But autonomy is the user's call, so **ask, once, before writing anything** — three
 questions, together, in the same breath:
 
 1. **Run automatically, or gate each phase for review?**
 2. **When the PR is open, wait for CI, or finish there?**
+3. **Answer in English, or in 文言文?** Classical Chinese at maximum terseness —
+   particles (之/乃/為/其), verb before object, subject dropped. Say the cost: its
+   "80-90% reduction" counts **characters, not tokens**, and CJK spends more tokens per
+   character, so the real saving is smaller and unmeasured. Governs speech, not artifacts.
 
-Record both answers in the artifact's frontmatter, then never ask again for this
-piece of work:
+Record the answers in the artifact's frontmatter (`requirements.md` for a spec),
+then never ask again for this piece of work:
 
 ```yaml
 ---
 autonomy: auto      # or: gated
 ci: wait            # or: no-wait
+lang: en            # or: wenyan — omit to mirror the user
 ---
 ```
 
-`scc spec new <feature> --autonomy=auto --ci=wait` writes them for you.
+`scc spec new <feature> --autonomy=auto --ci=wait` writes the first two;
+`scc patch fm <artifact> lang=wenyan` writes the third without opening the file.
 
 Recording them is what makes the run reproducible from the file and what stops a
 second session from re-asking. Ask in conversation rather than reading a flag,

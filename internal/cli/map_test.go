@@ -324,6 +324,29 @@ func TestPatchCheckIsIdempotent(t *testing.T) {
 	}
 }
 
+// The kickoff language is the one answer `spec new` and `plan new` take no flag for,
+// so `patch fm` is the whole path to it — and the path is only useful if it is the one
+// autonomy.md tells the agent to type. A wrong value takes the same road as any other
+// bad edit: the validator that owns the file fires, the write is undone, exit 2.
+func TestPatchFrontmatterWritesTheKickoffLanguage(t *testing.T) {
+	root := mapWorkspace(t)
+	if _, stderr, code := run(t, "patch", "fm", "sample", "lang=wenyan", "--root", root); code != ExitOK {
+		t.Fatalf("exit = %d, want %d (%s)", code, ExitOK, stderr)
+	}
+	if !strings.Contains(planText(t, root), "lang: wenyan") {
+		t.Errorf("the answer was not recorded:\n%s", planText(t, root))
+	}
+
+	before := planText(t, root)
+	_, stderr, code := run(t, "patch", "fm", "sample", "lang=pt-BR", "--root", root)
+	if code != ExitFindings {
+		t.Errorf("exit = %d, want %d for an undocumented language (%s)", code, ExitFindings, stderr)
+	}
+	if got := planText(t, root); got != before {
+		t.Errorf("the rejected language was left on disk:\n%s", got)
+	}
+}
+
 // A requirement id is scoped to its own spec. Tracing an unscoped one across a
 // workspace where several specs number theirs the same way is the same mistake as
 // reading all of them.

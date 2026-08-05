@@ -731,8 +731,8 @@ Addresses, none of which is a line number — which is why one survives an edit 
   1.2            a task, by its number
   R1.2           a requirement, by its id
   specs/foo/     a decomposition leaf
-  #notes         a section, by anchor slug (or by its title as written)
-  notes:7        the 7th paragraph of that section
+  #risks         a section, by anchor slug (or by its title as written)
+  risks:2        the 2nd paragraph of that section
   L120-160       an explicit line range, the escape hatch
 
 Use "%s patch" to change what "%s map" found, without reading the file first.

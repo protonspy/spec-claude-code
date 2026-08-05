@@ -7,9 +7,14 @@ Use the `plan-run` skill.
 
 Plan, and how to run it: $ARGUMENTS
 
-Read the plan and name the groups back, numbered and in order, before writing any
-code. The order is the one thing the user can correct cheaply now and expensively
-after three merges.
+Map the plan — `scc map <plan>` — and name the groups back, numbered and in order,
+before writing any code. The order is the one thing the user can correct cheaply now
+and expensively after three merges.
+
+**Map it; do not open it.** A real plan runs to tens of kilobytes, and opening one as
+the first act of a run puts all of it in context for every turn of a loop that lasts
+hours. `map` answers the question you actually have here — the sections, the leaves,
+the task counts, what is still open — and `map show` fetches the one part it did not.
 
 Then take every answer the line above already gave and ask only for what is left.
 "Implement the whole plan, one PR at the end, delivered when CI is green" has settled

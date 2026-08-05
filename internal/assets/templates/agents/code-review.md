@@ -20,10 +20,16 @@ git diff main...HEAD          # or the base branch the work targets
 git diff --stat main...HEAD
 ```
 
-Then read what the work was supposed to be: `specs/<feature>/requirements.md`,
-`design.md`, `tasks.md`, or the checklist in `plans/<name>.md`. **The artifact is the
-standard the code is held to** — not the implementation's apparent intent. Build, test
-and lint commands are in `{{.Rules}}/project.md`.
+**The diff is your source; the repository is not.** It already carries every changed
+line, so re-reading a file to look at them buys nothing. Open a file only when the diff
+is genuinely not enough to judge a change, only if the diff touches it, and only once —
+a review that fetches the same source three times spent its context on what it was
+handed. When the work is in a worktree, read that path, never the main checkout's copy.
+
+Then read what the work was supposed to be, on the same terms: `scc map <artifact>` for
+its shape and `scc map show <artifact> <address>` for the part you need. **The artifact
+is the standard the code is held to** — not the implementation's apparent intent. Build,
+test and lint commands are in `{{.Rules}}/project.md`.
 
 ## The five gates — run every one, in this order
 

@@ -49,8 +49,8 @@ var (
 //	1.2            a task, by its number
 //	R1.2           a requirement, by its id
 //	specs/foo/     a decomposition leaf, by the spec it names
-//	#notes | Notes a section, by anchor slug or by the title as written
-//	notes:7        the 7th paragraph of that section
+//	#risks | Risks a section, by anchor slug or by the title as written
+//	risks:2        the 2nd paragraph of that section
 //	L120-160       an explicit line range, the escape hatch
 //
 // None of them is a line number except the last, which is why an address survives an

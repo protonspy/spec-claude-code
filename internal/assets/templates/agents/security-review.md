@@ -27,6 +27,10 @@ git diff --stat main...HEAD
 Judge what the change makes *possible*, not what the codebase already was. Pre-existing
 issues in untouched code are worth one line at the end, not the body of the review.
 
+That scope is also your read budget. The diff carries the changed lines already: open a
+file only to follow reachability the diff cannot show you, only if the diff touches it,
+and once. In a worktree, read that path rather than the main checkout's copy.
+
 ## The method — four passes, in this order
 
 **1 · Map what the change adds to the attack surface.** Before judging anything, list

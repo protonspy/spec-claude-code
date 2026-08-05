@@ -13,6 +13,9 @@ ci: {{.CI}}
      is read from there). Never both — two records of one fact disagree, and the copy
      is the one that goes stale.
 
+     The same rule decides order: the order is the order things are written in, and
+     nothing restates it in prose. A group that must come first is moved up the list.
+
      Delete this comment. -->
 
 ## Why
@@ -36,7 +39,10 @@ ci: {{.CI}}
 - [ ] 1.1 (Unit) <description>
 - [ ] 1.2 (TDD) <description>
 
-## Notes
+<!-- There is no notes section, and that is deliberate. Order is the list above.
+     What was decided and why is an ADR under docs/adr/, cited from the item it
+     governs. What changed and what shipped is git, which is a record nobody has to
+     maintain and nobody can contradict.
 
-<!-- Order, dependencies between leaves, anything a reader needs to not merge these
-     in the wrong sequence. -->
+     A constraint that is none of those — "cannot merge before the migration window" —
+     goes on the item's own line, where whoever reads that item will see it. -->

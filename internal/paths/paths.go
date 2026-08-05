@@ -228,14 +228,20 @@ const (
 // decisions, the material read from outside — while a spec answers what one
 // feature does now. Neither replaces the other.
 const (
-	WikiSeg     = "wiki"         // the graph of durable knowledge
-	ADRSeg      = "adr"          // architecture decision records, numbered
-	RawSeg      = "raw"          // sources dropped in to be processed into the wiki
-	CodewikiSeg = "codewiki"     // narrated code, citing [path:start-end]()
-	GlossarySeg = "glossary.md"  // one canonical term per concept
-	StackSeg    = "stack.md"     // adopted technology; unlisted means undecided
-	WikiIndex   = "index.md"     // the wiki's entry point; an unreachable page is an orphan
-	WikiLog     = "changelog.md" // what changed in the wiki, and when
+	WikiSeg     = "wiki"     // the graph of durable knowledge
+	ADRSeg      = "adr"      // architecture decision records, numbered
+	RawSeg      = "raw"      // sources dropped in to be processed into the wiki
+	CodewikiSeg = "codewiki" // narrated code, citing [path:start-end]()
+	GlossarySeg = "glossary.md"
+	StackSeg    = "stack.md" // adopted technology; unlisted means undecided
+	// WikiPagesSeg holds the pages themselves, so the wiki's two fixed documents are
+	// distinguished from its content by where they sit rather than by their names.
+	// The validator used to exclude index.md and changelog.md from the page set by
+	// matching those names, which made any other file dropped into wiki/ a page —
+	// and usually then an orphan finding for a file nobody meant as a page.
+	WikiPagesSeg = "pages"
+	WikiIndex    = "index.md"     // the wiki's entry point; an unreachable page is an orphan
+	WikiLog      = "changelog.md" // what changed in the wiki, and when
 )
 
 // Config returns the harness's configuration directory under root.
@@ -325,6 +331,9 @@ func Docs(root string) string { return filepath.Join(root, DocsSeg) }
 
 // Wiki returns docs/wiki/.
 func Wiki(root string) string { return filepath.Join(root, DocsSeg, WikiSeg) }
+
+// WikiPages returns docs/wiki/pages/, where the pages live.
+func WikiPages(root string) string { return filepath.Join(Wiki(root), WikiPagesSeg) }
 
 // ADR returns docs/adr/.
 func ADR(root string) string { return filepath.Join(root, DocsSeg, ADRSeg) }
