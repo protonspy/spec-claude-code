@@ -61,9 +61,29 @@ type Task struct {
 	Indent       int      `json:"-"`
 	Section      string   `json:"section,omitempty"`
 
+	// The flags, read from the annotation lines under the checkbox. See flags.go
+	// for why the vocabulary is closed.
+	Depends  []string `json:"depends,omitempty"`
+	Priority *int     `json:"priority,omitempty"`
+	Status   string   `json:"status,omitempty"`
+	Reason   string   `json:"reason,omitempty"`
+
+	// Derived, and in the JSON on purpose: the consumer is an agent, and an agent
+	// that recomputed eligibility would be a second implementation of `--next`.
+	Blocked  bool `json:"blocked"`
+	Eligible bool `json:"eligible"`
+
 	Methodologies int    `json:"-"` // how many annotations the line carried
 	Loose         string `json:"-"` // a near-miss annotation, when there is no valid one
 	HasCitation   bool   `json:"-"` // the line carried the em dash that opens citations
+	Flags         []Flag `json:"-"` // every flag line, in file order, duplicates included
+	UnknownFlags  []Flag `json:"-"` // italic one-liners in flag position that are not vocabulary
+	BadPriority   string `json:"-"` // a `_Priority_` value that is not a positive integer
+	BadStatus     string `json:"-"` // a `_Status_` value that is not `removed`
+
+	// detail is the continuation verbatim, flag lines excluded, so a rewrite that
+	// was not asked to change the description does not destroy it.
+	detail []string
 }
 
 // Group is the task's number with its last component removed — the heading it
@@ -143,7 +163,9 @@ func parseTasks(doc *mdscan.Document) []Task {
 		t.HasCitation = hasTail
 
 		t.End = blockEnd(doc, box.Line, box.Indent)
-		t.Detail = joinLines(doc, box.Line+1, t.End)
+		claimed := parseTaskFlags(doc, &t)
+		t.Detail = joinLinesExcept(doc, box.Line+1, t.End, claimed)
+		t.detail = rawLinesExcept(doc, box.Line+1, t.End, claimed)
 		tasks = append(tasks, t)
 	}
 	return tasks
@@ -324,16 +346,44 @@ func indentOf(s string) int {
 
 // joinLines collapses a line range into one whitespace-normalized string.
 func joinLines(doc *mdscan.Document, from, to int) string {
+	return joinLinesExcept(doc, from, to, nil)
+}
+
+// joinLinesExcept is joinLines with a set of lines held back — a task's flags, which
+// belong to its region but not to its description. Keeping `_Priority 2_` out of
+// Detail is what stops the searcher from indexing it as prose and keeps `--width`
+// honest about how much of the description it clipped.
+func joinLinesExcept(doc *mdscan.Document, from, to int, skip map[int]bool) string {
 	if from > to {
 		return ""
 	}
 	var parts []string
 	for n := from; n <= to && n <= len(doc.Body); n++ {
+		if skip[n] {
+			continue
+		}
 		if f := strings.Fields(doc.Body[n-1]); len(f) > 0 {
 			parts = append(parts, strings.Join(f, " "))
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// rawLinesExcept is the same range as it sits in the file, flags removed and
+// trailing blanks trimmed. It is what a rewrite puts back when it was not asked to
+// change the description.
+func rawLinesExcept(doc *mdscan.Document, from, to int, skip map[int]bool) []string {
+	var out []string
+	for n := from; n <= to && n <= len(doc.Lines); n++ {
+		if skip[n] {
+			continue
+		}
+		out = append(out, doc.Lines[n-1])
+	}
+	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+		out = out[:len(out)-1]
+	}
+	return out
 }
 
 // clip shortens s to n runes, marking that it was shortened. It counts runes rather

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/protonspy/spec-claude-code/internal/artifact"
 	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/mdscan"
@@ -39,6 +40,12 @@ func runPlan(args []string) int {
 		return runPlanDelete(args[1:])
 	case "validate":
 		return runPlanValidate(args[1:])
+	case "approve":
+		return runPlanApprove(args[1:])
+	case "reseal":
+		return runPlanReseal(args[1:])
+	case "migrate":
+		return runPlanMigrate(args[1:])
 	case "help", "-h", "--help":
 		planUsage()
 		return ExitOK
@@ -124,6 +131,161 @@ func runPlanValidate(args []string) int {
 			return nil, errUsage
 		}
 	})
+}
+
+// runPlanApprove closes authorship and opens execution.
+//
+// It refuses a plan with findings, and that refusal is the point of the command: an
+// approved plan is one nothing may rewrite, so approving one that is already wrong
+// would freeze the defect and make fixing it require `--force`. Everything after this
+// is `patch check`, `patch fm`, and discovery.
+func runPlanApprove(args []string) int {
+	fs := flag.NewFlagSet("plan approve", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	root := addRoot(fs)
+	jsonOut := addJSON(fs)
+	rest, err := parseFlags(fs, args)
+	if err != nil {
+		return ExitError
+	}
+	name, ok := artifactName(rest, "plan")
+	if !ok {
+		return ExitError
+	}
+	target, ok := resolveRoot(*root)
+	if !ok || !requireWorkspace(target) {
+		return ExitError
+	}
+	path := paths.Plan(target, name)
+	if !isFile(path) {
+		render.Err(fmt.Sprintf("no plan %q under %s", name, paths.PlansSeg))
+		return ExitError
+	}
+
+	set, err := validate.Plan(target, name)
+	if err != nil {
+		render.Err(err.Error())
+		return ExitError
+	}
+	if !set.Empty() {
+		if *jsonOut {
+			emitJSON(set.Document())
+			return ExitFindings
+		}
+		set.Report(relPath(target, path))
+		render.Detail("  an approved plan is one nothing may rewrite; fix these first")
+		return ExitFindings
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		render.Err(err.Error())
+		return ExitError
+	}
+	sealed := withTrailingNewline(artifact.Approve(string(content)))
+	if err := workspace.AtomicWrite(path, []byte(sealed), 0o644); err != nil {
+		render.Err(err.Error())
+		return ExitError
+	}
+	sum := artifact.Seal(sealed)
+	if *jsonOut {
+		return emitJSON(struct {
+			Plan     string `json:"plan"`
+			Path     string `json:"path"`
+			Status   string `json:"status"`
+			Checksum string `json:"checksum"`
+		}{name, relPath(target, path), artifact.StatusApproved, sum})
+	}
+	render.OK(fmt.Sprintf("%s — approved", relPath(target, path)))
+	render.Info("seal: " + sum)
+	render.Info("its content is fixed now: tick boxes with `" + prog() + " patch check`, and discover with `" +
+		prog() + " patch add|rm --reason`")
+	return ExitOK
+}
+
+// runPlanReseal records a legitimate edit made outside the cycle — a merge conflict
+// resolved by hand is the case it was written for.
+//
+// It demands --force and names both hashes, because the honest description of what it
+// does is "erase the evidence that this file was edited outside scc". A command that
+// did that quietly would make the seal worth nothing.
+func runPlanReseal(args []string) int {
+	fs := flag.NewFlagSet("plan reseal", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	root := addRoot(fs)
+	force := fs.Bool("force", false, "required: reselling accepts an edit made outside scc as intended")
+	jsonOut := addJSON(fs)
+	rest, err := parseFlags(fs, args)
+	if err != nil {
+		return ExitError
+	}
+	name, ok := artifactName(rest, "plan")
+	if !ok {
+		return ExitError
+	}
+	target, ok := resolveRoot(*root)
+	if !ok || !requireWorkspace(target) {
+		return ExitError
+	}
+	path := paths.Plan(target, name)
+	if !isFile(path) {
+		render.Err(fmt.Sprintf("no plan %q under %s", name, paths.PlansSeg))
+		return ExitError
+	}
+	a, err := artifact.Load(target, path)
+	if err != nil {
+		render.Err(err.Error())
+		return ExitError
+	}
+	if !a.Approved() {
+		render.Err(fmt.Sprintf("%s is not approved, so it carries no seal to recompute", relPath(target, path)))
+		render.Detail(fmt.Sprintf("  `%s plan approve %s` is what seals it", prog(), name))
+		return ExitError
+	}
+	recorded, actual, drifted := a.Drift()
+	if !drifted {
+		if *jsonOut {
+			return emitJSON(struct {
+				Plan     string `json:"plan"`
+				Checksum string `json:"checksum"`
+				Changed  bool   `json:"changed"`
+			}{name, recorded, false})
+		}
+		render.OK(relPath(target, path) + " — the seal already matches; nothing to do")
+		return ExitOK
+	}
+	if !*force {
+		render.Err(fmt.Sprintf("%s has drifted; reselling accepts that edit as intended", relPath(target, path)))
+		render.Detail("  seal:    " + recorded)
+		render.Detail("  actual:  " + actual)
+		render.Detail("  → `git diff " + relPath(target, path) + "` is the change you are about to bless")
+		render.Detail("  → pass --force once you have read it, or revert it with git")
+		return ExitError
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		render.Err(err.Error())
+		return ExitError
+	}
+	sealed := withTrailingNewline(artifact.Reseal(string(content)))
+	if err := workspace.AtomicWrite(path, []byte(sealed), 0o644); err != nil {
+		render.Err(err.Error())
+		return ExitError
+	}
+	if *jsonOut {
+		return emitJSON(struct {
+			Plan     string `json:"plan"`
+			Path     string `json:"path"`
+			Was      string `json:"was"`
+			Checksum string `json:"checksum"`
+			Changed  bool   `json:"changed"`
+		}{name, relPath(target, path), recorded, artifact.Seal(sealed), true})
+	}
+	render.OK(relPath(target, path) + " — resealed")
+	render.Info("was:  " + recorded)
+	render.Info("now:  " + artifact.Seal(sealed))
+	return ExitOK
 }
 
 type planEntry struct {
@@ -229,14 +391,28 @@ func runPlanDelete(args []string) int {
 	return ExitOK
 }
 
+// withTrailingNewline is how every file scc writes ends. A sealed plan that lost its
+// final newline would hash differently from the same plan a text editor saved.
+func withTrailingNewline(s string) string {
+	return strings.TrimRight(s, "\n") + "\n"
+}
+
 func planUsage() {
 	fmt.Fprintf(os.Stderr, `Usage:
   %s plan new <name> [--autonomy=auto|gated] [--ci=wait|no-wait] [--force]
   %s plan list
   %s plan delete <name> --force
   %s plan validate [<name>]
+  %s plan approve <name>          validate, then fix the content and seal it
+  %s plan reseal <name> --force   accept an edit made outside scc, and re-seal
+  %s plan migrate <name>          move a plan onto the closed-section contract
 
-A plan is everything that is not worth a spec: plans/<name>.md, holding a checklist
-of tasks, references to the specs it decomposes into, or both.
-`, prog(), prog(), prog(), prog())
+A plan is everything that is not worth a spec: plans/<name>.md, holding a short
+header and a checklist. Its sections are closed — Why, Paths, References, Out of
+scope, Tasks, Done when — which is the only thing that caps its size.
+
+Approving it makes the content fixed: after that, `+"`%s patch check`"+` moves the boxes and
+discovery adds or strikes tasks with a reason, and anything that would rewrite the
+work is refused.
+`, prog(), prog(), prog(), prog(), prog(), prog(), prog(), prog())
 }

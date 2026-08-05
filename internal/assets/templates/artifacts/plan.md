@@ -5,44 +5,68 @@ ci: {{.CI}}
 
 # {{.Title}}
 
-<!-- A plan is one file. It is either a decomposition into specs, a bare checklist
-     of work, or both at once.
+<one to three sentences: what this work is>
 
-     One source of truth per item: an item either carries a checkbox (it is a task,
-     and the box is its state) or references a spec (the state lives in that spec and
-     is read from there). Never both — two records of one fact disagree, and the copy
-     is the one that goes stale.
+<!-- A plan is a short header and a checklist, and the sections below are all the
+     sections there are. That is the only thing holding a plan's size down: every
+     session that runs this file carries it, so there is deliberately nowhere for
+     prose to grow. `scc validate` reports any other heading.
 
-     The same rule decides order: the order is the order things are written in, and
-     nothing restates it in prose. A group that must come first is moved up the list.
+     What was decided and why is an ADR under docs/adr/, cited from the item it
+     governs. What changed and what shipped is git. A constraint on one item goes on
+     that item's own line, where whoever works it will see it.
 
-     Delete this comment. -->
+     Delete the sections you do not need — Paths, References and Out of scope are
+     optional — and delete this comment. -->
 
 ## Why
 
-<!-- One paragraph. What this plan is for, and what "done" means for the whole of it. -->
+<!-- One paragraph. Why this exists, and what "done" means for the whole of it. -->
 
-## Decomposition
+## Paths
 
-<!-- The leaves that are big enough to be specs. A leaf is an ordinary spec: not
-     nested under this plan, built by exactly the same rules. No checkboxes here —
-     their state is derived from the spec. Delete the heading if this plan has none. -->
+<!-- The files and directories this work touches. Optional, and a hint rather than a
+     contract: it is what stops the first session hunting for where the code lives. -->
+
+- `path/to/the/thing`
+
+## References
+
+<!-- The specs this decomposes into, plus the ADRs and documents that decide it. A
+     reference carries no checkbox — a spec's state lives in that spec and is read
+     from there, and two records of one fact disagree. -->
 
 - `specs/<feature>/` — <what it covers>
 
+## Out of scope
+
+<!-- What someone could reasonably think this covers and it does not. -->
+
+- <the thing this is not>
+
 ## Tasks
 
-<!-- The items this plan just does itself. Same grammar as a spec's tasks.md, minus
-     the requirement citations: a plan has no requirements to cite. Delete the
-     heading if every item is a spec. -->
+<!-- Same grammar as a spec's tasks.md, minus the requirement citations: a plan has
+     no requirements to cite. The number is `<group>.<item>`, it is never reused, and
+     `(Unit)`/`(TDD)` is how this gets built.
 
-- [ ] 1.1 (Unit) <description>
+     Under a task, at most one of each, and there are no others:
+
+       _Depends 1.1, 1.2_   every one of them has to be ticked before this can start
+       _Priority 2_         a whole number, 1 or greater; lower is more urgent
+       _Status removed_     struck out by discovery; the line stays, the number stays
+       _Reason …_           required with _Status removed_
+
+     There is no `_Blocked_` — that is derived from _Depends_ — and nothing restates
+     the box. Order is `scc map tasks <plan> --next`, not the order they are written. -->
+
+- [ ] 1.1 (Unit) <description, in the imperative>
 - [ ] 1.2 (TDD) <description>
+  _Depends 1.1_
 
-<!-- There is no notes section, and that is deliberate. Order is the list above.
-     What was decided and why is an ADR under docs/adr/, cited from the item it
-     governs. What changed and what shipped is git, which is a record nobody has to
-     maintain and nobody can contradict.
+## Done when
 
-     A constraint that is none of those — "cannot merge before the migration window" —
-     goes on the item's own line, where whoever reads that item will see it. -->
+<!-- Verifiable criteria for the whole plan, not per task. If a line cannot be
+     checked by running something or reading something, it is not one of these. -->
+
+- <the check that says this is finished>

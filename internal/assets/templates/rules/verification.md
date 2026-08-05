@@ -16,7 +16,7 @@ Per-task feedback has to be fast and attributable. The failure a full run catche
 and a scoped run misses is breakage *between* tasks, and that is worth looking for
 once the work is integrated — not N times along the way.
 
-The full suite runs at the end of the spec, or of each of a plan's leaves. See
+The full suite runs at the end of the spec, or of each of a plan's groups. See
 [delivery.md](delivery.md).
 
 ## Tests and lint both, because they answer different questions

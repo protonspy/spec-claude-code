@@ -29,6 +29,8 @@ func runMap(args []string) int {
 		return runMapOutline(args[1:])
 	case "tasks":
 		return runMapTasks(args[1:])
+	case "brief":
+		return runMapBrief(args[1:])
 	case "show":
 		return runMapShow(args[1:])
 	case "blocks":
@@ -119,6 +121,7 @@ func runMapIndex(args []string) int {
 	fs := flag.NewFlagSet("map index", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	root := addRoot(fs)
+	noVerify := addNoVerify(fs)
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
@@ -135,6 +138,9 @@ func runMapIndex(args []string) int {
 	if err != nil {
 		render.Err(err.Error())
 		return ExitError
+	}
+	if code := sealGuard(arts, *noVerify); code != ExitOK {
+		return code
 	}
 
 	entries := make([]indexEntry, 0, len(arts))
@@ -186,6 +192,7 @@ func runMapOutline(args []string) int {
 	fs.SetOutput(os.Stderr)
 	root := addRoot(fs)
 	depth := fs.Int("depth", 6, "deepest heading level to print")
+	noVerify := addNoVerify(fs)
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
@@ -199,9 +206,9 @@ func runMapOutline(args []string) int {
 	if !ok || !requireWorkspace(target) {
 		return ExitError
 	}
-	arts, ok := loadMany(target, rest)
-	if !ok {
-		return ExitError
+	arts, code := loadVerified(target, rest, *noVerify)
+	if code != ExitOK {
+		return code
 	}
 	if *jsonOut {
 		return emitJSON(struct {
@@ -241,6 +248,12 @@ func printOutline(a *artifact.Artifact, depth int) {
 		if s.Tasks > 0 {
 			facts = append(facts, fmt.Sprintf("%d/%d tasks", s.Done, s.Tasks))
 		}
+		if s.Blocked > 0 {
+			facts = append(facts, fmt.Sprintf("%d blocked", s.Blocked))
+		}
+		if s.Removed > 0 {
+			facts = append(facts, fmt.Sprintf("%d removed", s.Removed))
+		}
 		if s.Leaves > 0 {
 			facts = append(facts, fmt.Sprintf("%d leaves", s.Leaves))
 		}
@@ -250,17 +263,20 @@ func printOutline(a *artifact.Artifact, depth int) {
 		facts = append(facts, fmt.Sprintf("L%d-%d", s.Line, s.End))
 		render.Info(fmt.Sprintf("%s%-32s %s", indent, s.Title, strings.Join(facts, " · ")))
 	}
-	if done, total := a.Done(); total > 0 {
-		render.Info(fmt.Sprintf("tasks: %d/%d done · open: %s", done, total, openNumbers(a)))
+	c := a.Counts()
+	if c.Total > 0 || c.Removed > 0 {
+		render.Info(fmt.Sprintf("tasks: %d/%d done · %d ready · %d blocked · %d removed · ready: %s",
+			c.Done, c.Total, c.Ready, c.Blocked, c.Removed, openNumbers(a)))
 	}
 }
 
+// openNumbers is what could be started now, in the order --next would take it. It
+// used to be every open task in file order, which answered a question one dependency
+// makes wrong.
 func openNumbers(a *artifact.Artifact) string {
 	var open []string
-	for _, t := range a.Tasks {
-		if !t.Checked {
-			open = append(open, t.Number)
-		}
+	for _, t := range a.Ready() {
+		open = append(open, t.Number)
 	}
 	if len(open) == 0 {
 		return "none"
@@ -271,14 +287,23 @@ func openNumbers(a *artifact.Artifact) string {
 	return strings.Join(open, " ")
 }
 
-func frontmatterLine(a *artifact.Artifact) string {
+func frontmatterLine(a *artifact.Artifact) string { return frontmatterOf(a.Frontmatter) }
+
+func frontmatterOf(fm map[string]string) string {
 	var parts []string
-	for _, k := range []string{"autonomy", "ci", "pr", "worktree", "merge"} {
-		if v, ok := a.Frontmatter[k]; ok {
+	for _, k := range []string{"status", "autonomy", "ci", "lang", "pr", "worktree", "merge"} {
+		if v, ok := fm[k]; ok {
 			parts = append(parts, k+":"+v)
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// taskRow is one task with the file it came from — the shape every listing here
+// emits, so a caller that has parsed one has parsed all of them.
+type taskRow struct {
+	Path string `json:"path"`
+	artifact.Task
 }
 
 func runMapTasks(args []string) int {
@@ -290,8 +315,13 @@ func runMapTasks(args []string) int {
 	group := fs.String("group", "", "only tasks in this numbering `group` (1, or 1.2)")
 	req := fs.String("req", "", "only tasks citing this `requirement` (R1.2)")
 	method := fs.String("method", "", "only tasks annotated `Unit` or TDD")
-	next := fs.Bool("next", false, "only the first open task — what a loop asks for, and it implies --open")
+	next := fs.Bool("next", false, "the one task to work on now: eligible, most urgent, lowest number")
+	ready := fs.Bool("ready", false, "every eligible task, in the order --next would take them")
+	blocked := fs.Bool("blocked", false, "open tasks that are not eligible, each naming what it waits on")
+	deps := fs.Bool("deps", false, "the dependency edges alone, one line per task that has any")
+	removed := fs.Bool("removed", false, "the tasks discovery struck out, with their reasons")
 	width := fs.Int("width", 96, "clip each description to this many `runes`")
+	noVerify := addNoVerify(fs)
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
@@ -301,31 +331,39 @@ func runMapTasks(args []string) int {
 		render.Err("--open and --done ask for opposite things")
 		return ExitError
 	}
-	// --next means the next task to work on, which is the first one nobody has done.
-	// Without this it would mean "the first task", and answer a question nobody asked.
-	if *next {
-		if *done {
-			render.Err("--next asks for the first open task; --done asks for finished ones")
-			return ExitError
-		}
-		*open = true
+	if *next && *done {
+		render.Err("--next asks for the next task to do; --done asks for finished ones")
+		return ExitError
+	}
+	if picked := countTrue(*next, *ready, *blocked, *deps); picked > 1 {
+		render.Err("--next, --ready, --blocked and --deps are four views of the schedule; ask for one")
+		return ExitError
 	}
 	target, ok := resolveRoot(*root)
 	if !ok || !requireWorkspace(target) {
 		return ExitError
 	}
-	arts, ok := loadMany(target, rest)
-	if !ok {
-		return ExitError
+	arts, code := loadVerified(target, rest, *noVerify)
+	if code != ExitOK {
+		return code
 	}
 
-	type row struct {
-		Path string `json:"path"`
-		artifact.Task
+	switch {
+	case *next:
+		return runMapNext(arts, *jsonOut, *width)
+	case *ready, *blocked, *deps:
+		return runMapSchedule(arts, scheduleView{ready: *ready, blocked: *blocked, deps: *deps},
+			*jsonOut, *width)
 	}
-	rows := []row{}
+
+	rows := []taskRow{}
 	for _, a := range arts {
 		for _, t := range a.Tasks {
+			// A removed task is not work, so it is out of every listing unless it is the
+			// listing asked for. It stays in the file for its number and its reason.
+			if t.Removed() != *removed {
+				continue
+			}
 			switch {
 			case *open && t.Checked, *done && !t.Checked:
 				continue
@@ -337,20 +375,14 @@ func runMapTasks(args []string) int {
 			if *req != "" && !cites(t, *req) {
 				continue
 			}
-			rows = append(rows, row{a.Path, t})
-			if *next {
-				break
-			}
-		}
-		if *next && len(rows) > 0 {
-			break
+			rows = append(rows, taskRow{a.Path, t})
 		}
 	}
 
 	if *jsonOut {
 		return emitJSON(struct {
-			Tasks []row `json:"tasks"`
-			Count int   `json:"count"`
+			Tasks []taskRow `json:"tasks"`
+			Count int       `json:"count"`
 		}{rows, len(rows)})
 	}
 	if len(rows) == 0 {
@@ -358,18 +390,233 @@ func runMapTasks(args []string) int {
 		return ExitOK
 	}
 	for _, r := range rows {
-		box := "[ ]"
-		if r.Checked {
-			box = render.Green("[x]")
-		}
-		cite := ""
-		if len(r.Requirements) > 0 {
-			cite = " — " + strings.Join(r.Requirements, ", ")
-		}
-		render.Info(fmt.Sprintf("%s %-6s %-6s %s%s  %s", box, r.Number, r.Methodology,
-			r.Summary(*width), cite, render.Cyan(fmt.Sprintf("%s:%d", r.Path, r.Line))))
+		render.Info(taskLine(r, *width))
 	}
 	return ExitOK
+}
+
+// taskLine is one task as a line: the box, the number, how it gets built, what it
+// says, and the flags that decide when it may start.
+func taskLine(r taskRow, width int) string {
+	box := "[ ]"
+	switch {
+	case r.Removed():
+		box = render.Red("[-]")
+	case r.Checked:
+		box = render.Green("[x]")
+	}
+	var tail []string
+	if len(r.Requirements) > 0 {
+		tail = append(tail, "— "+strings.Join(r.Requirements, ", "))
+	}
+	if r.Priority != nil {
+		tail = append(tail, fmt.Sprintf("P%d", *r.Priority))
+	}
+	if len(r.Depends) > 0 {
+		tail = append(tail, "after "+strings.Join(r.Depends, ", "))
+	}
+	if r.Reason != "" {
+		tail = append(tail, "removed: "+r.Reason)
+	}
+	suffix := ""
+	if len(tail) > 0 {
+		suffix = "  " + strings.Join(tail, " · ")
+	}
+	return fmt.Sprintf("%s %-6s %-6s %s%s  %s", box, r.Number, r.Methodology,
+		r.Summary(width), suffix, render.Cyan(fmt.Sprintf("%s:%d", r.Path, r.Line)))
+}
+
+// blockedRow is one open task that cannot start, and what it is waiting for. An
+// impasse that could not name its blocker would stop a loop with nothing to act on.
+type blockedRow struct {
+	Path      string   `json:"path"`
+	Number    string   `json:"id"`
+	Text      string   `json:"text"`
+	WaitingOn []string `json:"waiting_on"`
+	Line      int      `json:"line"`
+}
+
+// runMapNext answers "what do I do now" — one task, or a reason there is none.
+//
+// The reason is the part that had to be designed rather than fallen into. A loop
+// that got an empty answer could not tell "the plan is finished" from "everything
+// left is waiting on something", and those call for opposite next moves.
+func runMapNext(arts []*artifact.Artifact, jsonOut bool, width int) int {
+	if code := reportUnrunnable(arts); code != ExitOK {
+		return code
+	}
+	var blocked []blockedRow
+	for _, a := range arts {
+		if t, ok := a.Next(); ok {
+			row := taskRow{a.Path, t}
+			if jsonOut {
+				return emitJSON(struct {
+					Task *taskRow `json:"task"`
+				}{&row})
+			}
+			render.Info(taskLine(row, width))
+			return ExitOK
+		}
+		blocked = append(blocked, blockedRowsFor(a)...)
+	}
+	if jsonOut {
+		return emitJSON(struct {
+			Task    *taskRow     `json:"task"`
+			Done    bool         `json:"done"`
+			Blocked []blockedRow `json:"blocked,omitempty"`
+		}{nil, len(blocked) == 0, blocked})
+	}
+	if len(blocked) == 0 {
+		render.OK("nothing open — every task is done or removed")
+		return ExitOK
+	}
+	render.Warn("nothing is eligible: every open task is waiting on another one")
+	for _, b := range blocked {
+		render.Info(fmt.Sprintf("%-6s waits on %-16s %s", b.Number, strings.Join(b.WaitingOn, ", "),
+			render.Cyan(fmt.Sprintf("%s:%d", b.Path, b.Line))))
+	}
+	return ExitOK
+}
+
+type scheduleView struct{ ready, blocked, deps bool }
+
+func runMapSchedule(arts []*artifact.Artifact, view scheduleView, jsonOut bool, width int) int {
+	if code := reportUnrunnable(arts); code != ExitOK {
+		return code
+	}
+	switch {
+	case view.blocked:
+		rows := []blockedRow{}
+		for _, a := range arts {
+			rows = append(rows, blockedRowsFor(a)...)
+		}
+		if jsonOut {
+			return emitJSON(struct {
+				Blocked []blockedRow `json:"blocked"`
+				Count   int          `json:"count"`
+			}{rows, len(rows)})
+		}
+		if len(rows) == 0 {
+			render.Info("nothing is blocked")
+			return ExitOK
+		}
+		for _, b := range rows {
+			render.Info(fmt.Sprintf("%-6s waits on %-16s %s  %s", b.Number, strings.Join(b.WaitingOn, ", "),
+				clipRunes(b.Text, width), render.Cyan(fmt.Sprintf("%s:%d", b.Path, b.Line))))
+		}
+		return ExitOK
+
+	case view.deps:
+		type edge struct {
+			Path    string   `json:"path"`
+			Number  string   `json:"id"`
+			Depends []string `json:"depends"`
+		}
+		edges := []edge{}
+		for _, a := range arts {
+			for _, t := range a.Tasks {
+				if len(t.Depends) > 0 {
+					edges = append(edges, edge{a.Path, t.Number, t.Depends})
+				}
+			}
+		}
+		if jsonOut {
+			return emitJSON(struct {
+				Deps  []edge `json:"deps"`
+				Count int    `json:"count"`
+			}{edges, len(edges)})
+		}
+		if len(edges) == 0 {
+			render.Info("no task declares a dependency — the order is the list")
+			return ExitOK
+		}
+		for _, e := range edges {
+			render.Info(fmt.Sprintf("%-6s ← %s", e.Number, strings.Join(e.Depends, ", ")))
+		}
+		return ExitOK
+	}
+
+	rows := []taskRow{}
+	for _, a := range arts {
+		for _, t := range a.Ready() {
+			rows = append(rows, taskRow{a.Path, t})
+		}
+	}
+	if jsonOut {
+		return emitJSON(struct {
+			Tasks []taskRow `json:"tasks"`
+			Count int       `json:"count"`
+		}{rows, len(rows)})
+	}
+	if len(rows) == 0 {
+		render.Info("nothing is eligible")
+		return ExitOK
+	}
+	for _, r := range rows {
+		render.Info(taskLine(r, width))
+	}
+	return ExitOK
+}
+
+func blockedRowsFor(a *artifact.Artifact) []blockedRow {
+	var out []blockedRow
+	for _, t := range a.BlockedTasks() {
+		out = append(out, blockedRow{a.Path, t.Number, t.Summary(72), a.WaitingOn(t), t.Line})
+	}
+	return out
+}
+
+// reportUnrunnable stops the schedule commands on the two defects that make the
+// schedule meaningless rather than merely wrong: a cycle, and a dependency on a task
+// that will never be ticked.
+//
+// It is exit 2 and not a silent omission because the alternative is a loop that
+// reports "nothing to do" while open work remains, and no way for its operator to
+// see why. The rules are the same ones `scc validate` reports, so fixing the finding
+// fixes both.
+func reportUnrunnable(arts []*artifact.Artifact) int {
+	var problems []string
+	for _, a := range arts {
+		for _, cycle := range a.DependencyCycles() {
+			problems = append(problems, fmt.Sprintf("%s  task.dependency-cycle  %s",
+				a.Path, strings.Join(append(append([]string{}, cycle...), cycle[0]), " → ")))
+		}
+		for _, t := range a.Tasks {
+			if t.Checked || t.Removed() {
+				continue
+			}
+			for _, d := range t.Depends {
+				dep, ok := a.Task(d)
+				switch {
+				case !ok:
+					problems = append(problems, fmt.Sprintf("%s  task.unknown-dependency  %s depends on %s, which is not in this file",
+						a.Path, t.Number, d))
+				case dep.Removed():
+					problems = append(problems, fmt.Sprintf("%s  task.depends-on-removed  %s depends on %s, which was removed",
+						a.Path, t.Number, d))
+				}
+			}
+		}
+	}
+	if len(problems) == 0 {
+		return ExitOK
+	}
+	render.Err("the schedule cannot be computed: a dependency will never be satisfied")
+	for _, p := range problems {
+		render.Detail("  " + p)
+	}
+	render.Detail(fmt.Sprintf("  fix them with `%s patch`, then ask again", prog()))
+	return ExitFindings
+}
+
+func countTrue(flags ...bool) int {
+	n := 0
+	for _, f := range flags {
+		if f {
+			n++
+		}
+	}
+	return n
 }
 
 func cites(t artifact.Task, id string) bool {
@@ -381,11 +628,162 @@ func cites(t artifact.Task, id string) bool {
 	return false
 }
 
+// briefSection is one section of the header, in full.
+type briefSection struct {
+	Slug  string `json:"slug"`
+	Title string `json:"title"`
+	Text  string `json:"text"`
+}
+
+// brief is the answer to "what is this work, and when is it done" — the whole header
+// and none of the checklist.
+type brief struct {
+	Path         string            `json:"path"`
+	Kind         string            `json:"kind"`
+	Title        string            `json:"title"`
+	Frontmatter  map[string]string `json:"frontmatter,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	Sections     []briefSection    `json:"sections,omitempty"`
+	Tasks        artifact.Counts   `json:"tasks"`
+	Requirements int               `json:"requirements,omitempty"`
+	Leaves       []string          `json:"leaves,omitempty"`
+}
+
+// runMapBrief prints an artifact's header without its items.
+//
+// It is the other half of the guarantee that makes "never read the plan" a rule
+// rather than a wish: `brief` reads the header, `tasks` reads the checklist, and no
+// command returns both. A session pays for this once and then asks `--next` per task,
+// which is what turns a per-reread cost into a per-run one.
+//
+// A section that carries items is counted rather than printed, which is the whole
+// rule — it is what keeps `brief` on a spec's requirements.md from being the file.
+func runMapBrief(args []string) int {
+	fs := flag.NewFlagSet("map brief", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	root := addRoot(fs)
+	noVerify := addNoVerify(fs)
+	jsonOut := addJSON(fs)
+	rest, err := parseFlags(fs, args)
+	if err != nil {
+		return ExitError
+	}
+	if len(rest) == 0 {
+		render.Err("map brief needs an artifact: a path, a plan name, or a feature name")
+		return ExitError
+	}
+	target, ok := resolveRoot(*root)
+	if !ok || !requireWorkspace(target) {
+		return ExitError
+	}
+	arts, code := loadVerified(target, rest, *noVerify)
+	if code != ExitOK {
+		return code
+	}
+
+	briefs := make([]brief, 0, len(arts))
+	for _, a := range arts {
+		briefs = append(briefs, briefOf(a))
+	}
+	if *jsonOut {
+		if len(briefs) == 1 {
+			return emitJSON(briefs[0])
+		}
+		return emitJSON(struct {
+			Artifacts []brief `json:"artifacts"`
+		}{briefs})
+	}
+	for i, b := range briefs {
+		if i > 0 {
+			render.Info("")
+		}
+		printBrief(b)
+	}
+	return ExitOK
+}
+
+func briefOf(a *artifact.Artifact) brief {
+	b := brief{
+		Path: a.Path, Kind: string(a.Kind), Title: a.Title,
+		Frontmatter: a.Frontmatter, Tasks: a.Counts(), Requirements: len(a.Requirements),
+	}
+	first := a.LineCount() + 1
+	for _, s := range a.Sections {
+		if s.Level > 1 {
+			first = s.Line
+			break
+		}
+	}
+	start := 1
+	for _, s := range a.Sections {
+		if s.Level == 1 {
+			start = s.Line + 1
+			break
+		}
+	}
+	b.Description = a.Prose(start, first-1)
+
+	for _, s := range a.Sections {
+		if s.Level != 2 || s.Tasks > 0 || s.Removed > 0 {
+			continue
+		}
+		if holdsRequirements(a, s) {
+			continue
+		}
+		b.Sections = append(b.Sections, briefSection{
+			Slug: s.Slug, Title: s.Title, Text: a.Prose(s.Line+1, s.End),
+		})
+	}
+	for _, l := range a.Leaves {
+		b.Leaves = append(b.Leaves, l.Ref)
+	}
+	return b
+}
+
+func holdsRequirements(a *artifact.Artifact, s artifact.Section) bool {
+	for _, r := range a.Requirements {
+		if r.Line >= s.Line && r.Line <= s.End {
+			return true
+		}
+	}
+	return false
+}
+
+func printBrief(b brief) {
+	head := render.Bold(b.Title)
+	if fm := frontmatterOf(b.Frontmatter); fm != "" {
+		head += "   " + fm
+	}
+	render.Info(head)
+	render.Info(fmt.Sprintf("%s · %s", b.Path, b.Kind))
+	if b.Description != "" {
+		fmt.Println()
+		fmt.Println(b.Description)
+	}
+	for _, s := range b.Sections {
+		if s.Text == "" {
+			continue // an empty section says nothing; printing its heading says less
+		}
+		fmt.Println()
+		render.Info(render.Bold("## " + s.Title))
+		fmt.Println(s.Text)
+	}
+	fmt.Println()
+	if c := b.Tasks; c.Total > 0 || c.Removed > 0 {
+		render.Info(fmt.Sprintf("tasks: %d done · %d ready · %d blocked · %d removed  —  `%s map tasks <artifact> --next`",
+			c.Done, c.Ready, c.Blocked, c.Removed, prog()))
+	}
+	if b.Requirements > 0 {
+		render.Info(fmt.Sprintf("requirements: %d", b.Requirements))
+	}
+}
+
 func runMapShow(args []string) int {
 	fs := flag.NewFlagSet("map show", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	root := addRoot(fs)
 	numbers := fs.Bool("numbers", false, "prefix each line with its line number")
+	noVerify := addNoVerify(fs)
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
@@ -402,6 +800,9 @@ func runMapShow(args []string) int {
 	a, ok := loadOne(target, rest[0])
 	if !ok {
 		return ExitError
+	}
+	if code := sealGuard([]*artifact.Artifact{a}, *noVerify); code != ExitOK {
+		return code
 	}
 
 	type piece struct {
@@ -717,20 +1118,25 @@ func sizeOf(b int) string {
 func mapUsage() {
 	fmt.Fprintf(os.Stderr, `Usage:
   %s map                                 every plan and spec, one line each
-  %s map <artifact>                      the shape of one file: sections, counts, open tasks
-  %s map tasks [<artifact>…] [filters]   --open --done --next --group N --req R1.2 --method TDD
+  %s map <artifact>                      the shape of one file: sections, counts, what is ready
+  %s map brief <artifact>                the header — why, paths, references, done when. No tasks.
+  %s map tasks [<artifact>…] [filters]   --next --ready --blocked --deps --open --done
+                                          --group N --req R1.2 --method TDD --removed
   %s map show <artifact> <address>…      exactly that piece, and nothing else
   %s map blocks <artifact> [<section>]   the lead sentence of every paragraph, with its address
-  %s map find <query> [--in <artifact>]  ranked search over addressable units
   %s map trace <R1.2|specs/<feature>/>   everything in the workspace that mentions it
 
 An <artifact> is a path (plans/x.md), a plan name, or a feature name.
+
+A plan is a header and a checklist. "brief" reads the header, "tasks" reads the
+checklist, and nothing returns both — one "brief" per session plus one "--next" per
+task is the whole of it, so the file never has to be opened.
 
 Addresses, none of which is a line number — which is why one survives an edit above it:
 
   1.2            a task, by its number
   R1.2           a requirement, by its id
-  specs/foo/     a decomposition leaf
+  specs/foo/     a spec this plan references
   #risks         a section, by anchor slug (or by its title as written)
   risks:2        the 2nd paragraph of that section
   L120-160       an explicit line range, the escape hatch

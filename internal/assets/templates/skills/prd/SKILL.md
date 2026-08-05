@@ -1,6 +1,6 @@
 ---
 name: prd
-description: Turn an initiative that spans more than one feature into a plan under plans/ — a decomposition where each leaf is either a task you will do here or a reference to a spec that will be built separately. Use it when someone arrives with a PRD, a roadmap item, an epic, or a rough idea too large for one spec, and the first job is to find out what it actually decomposes into. For a single feature whose shape is already clear, skip this and run `scc spec new`.
+description: Turn an initiative that spans more than one feature into a plan under plans/ — a short header, a checklist of tasks, and references to the specs that will be built separately. Use it when someone arrives with a PRD, a roadmap item, an epic, or a rough idea too large for one spec, and the first job is to find out what it actually decomposes into. For a single feature whose shape is already clear, skip this and run `scc spec new`.
 ---
 
 You take an initiative that is too big for one spec and turn it into a plan: one
@@ -50,21 +50,24 @@ decomposition, do not ask it.**
 scc plan new <name>
 ```
 
-Then fill it in. The rules the file must hold to:
+Then fill it in. **The plan's sections are closed** — the title, one to three
+sentences, then `## Why`, `## Paths`, `## References`, `## Out of scope`, `## Tasks`,
+`## Done when`, and nothing else. There is deliberately nowhere for prose to grow: the
+file is carried by every session that runs it. The rules it must hold to:
 
-- **A leaf is either a spec reference or a task with a checkbox — never both.** Where
-  an item is a task, the box is its state. Where it references a spec, the state
-  lives in that spec and is read from there. Two records of one fact disagree, and
-  the copy is the one that goes stale. `scc validate` reports this as
-  `plan.item-has-two-records`.
-- **A leaf that is a spec is an ordinary spec.** `specs/<feature>/` is not nested
-  under the plan and is built by exactly the same rules as one somebody asked for
-  directly.
-- **Each spec-sized leaf is one coherent feature** — something a person could
-  describe in a sentence and verify on its own. If a leaf needs three sentences and
-  an "and", it is two leaves.
-- **Put them in the order they have to happen.** The order is the list — a plan does
-  not carry prose restating it, so a leaf that must come first is written first.
+- **`## Tasks` holds the work; `## References` names the specs.** A task carries a
+  checkbox and the box is its state. A reference carries none — that spec's state
+  lives in that spec and is read from there. An item that does both keeps two records
+  of one fact, and `scc validate` reports it as `plan.item-has-two-records`.
+- **A referenced spec is an ordinary spec.** `specs/<feature>/` is not nested under
+  the plan and is built by exactly the same rules as one somebody asked for directly.
+  A task that consumes one is ticked when that spec closes.
+- **Each spec-sized piece is one coherent feature** — something a person could
+  describe in a sentence and verify on its own. If it needs three sentences and an
+  "and", it is two.
+- **Order is `_Depends_`, not position.** A task that cannot start until another is
+  done says so: `_Depends 1.1_`. `_Priority 2_` breaks a tie. Nothing else records
+  order, and nothing restates it in prose.
 - **A plan is work, not knowledge.** It lives in `plans/`, never in `docs/`.
 
 Referenced specs must exist, or `scc validate` reports `plan.unknown-spec`. Create
@@ -73,11 +76,13 @@ placeholder; a reference to nothing is a broken plan.
 
 ## Before you hand it over
 
-- `scc validate` — exit 0, or fix what it names.
-- **Read the leaf list back as a whole and ask what is missing.** Migration,
-  backfill, the switch-over, the thing that has to keep working while this ships,
-  and how it gets turned off if it goes wrong. Decompositions fail at the seams, not
-  in the middle of a feature.
+- `scc validate` — exit 0, or fix what it names. Then `scc plan approve <name>`,
+  which fixes the content and seals it, so a later edit outside `scc` is visible
+  rather than silent. Approving is the hand-over.
+- **Read the list back as a whole and ask what is missing.** Migration, backfill, the
+  switch-over, the thing that has to keep working while this ships, and how it gets
+  turned off if it goes wrong. Decompositions fail at the seams, not in the middle of
+  a feature.
 - **Check the vocabulary.** Every term the plan coins is a term three specs will
   inherit. If any of them is contested or new, use the `glossary` skill now, while
   it costs one edit.

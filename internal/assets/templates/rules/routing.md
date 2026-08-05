@@ -41,7 +41,7 @@ checklist item, not three ceremonial files under `specs/`.
   state. Where an item *references a spec*, the state is derived from that spec and
   never copied — an item must not do both. Two records of one fact disagree, and
   the copy is the one that goes stale.
-- **A plan's leaves are ordinary specs.** `plans/checkout-revamp.md` references
+- **A plan's referenced specs are ordinary specs.** `plans/checkout-revamp.md` names
   `specs/cart-totals/`; that spec is not nested under the plan and is built by
   exactly the same rules as one a human asked for directly.
 - **A plan is work, not knowledge**, so it lives in `plans/` — never in `docs/`,
