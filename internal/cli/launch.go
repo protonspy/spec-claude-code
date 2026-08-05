@@ -12,6 +12,7 @@ import (
 	"github.com/protonspy/spec-claude-code/internal/headroom"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 	"github.com/protonspy/spec-claude-code/internal/render"
+	"github.com/protonspy/spec-claude-code/internal/rtk"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
 
@@ -60,7 +61,8 @@ func runLaunch(args []string) int {
 	contextTool := fs.Bool("headroom-context-tool", false,
 		"let Headroom set up its own CLI context tool (RTK or lean-ctx) and append its guidance to the entry file")
 	noGraph := fs.Bool("no-graph", false, "start the agent without building or refreshing the symbol graph")
-	noInstall := fs.Bool("no-install", false, "never install anything; use Headroom and CodeGraph only if they are already on PATH")
+	noRTK := fs.Bool("no-rtk", false, "start the agent without setting up RTK's binary or its usage block")
+	noInstall := fs.Bool("no-install", false, "never install anything; use Headroom, CodeGraph and RTK only if they are already on PATH")
 	yes := fs.Bool("yes", false, "answer the install prompts with yes, for an unattended run")
 	dryRun := fs.Bool("dry-run", false, "print the command this would run, and run nothing")
 	jsonOut := addJSON(fs)
@@ -117,6 +119,16 @@ func runLaunch(args []string) int {
 		plan:      plan,
 		quiet:     *jsonOut,
 	})
+	// RTK last of the three, because it is the only one that writes to a file the
+	// user owns: a run the user aborts at the Headroom or CodeGraph prompt should not
+	// already have edited their entry file.
+	cmd.RTK = resolveRTK(target, rtkLaunchOptions{
+		disabled:  *noRTK,
+		noInstall: *noInstall,
+		yes:       *yes,
+		plan:      plan,
+		quiet:     *jsonOut,
+	})
 	if cmd.Args == nil {
 		// A JSON consumer gets [] rather than null: the field is a command line,
 		// and an empty one is still a list.
@@ -148,12 +160,13 @@ func runLaunch(args []string) int {
 // launchCommand is both the frozen JSON shape and what the human line is printed
 // from, so the two cannot describe different commands.
 type launchCommand struct {
-	Harness  string          `json:"harness"`
-	Dir      string          `json:"dir"`
-	Bin      string          `json:"bin"`
-	Args     []string        `json:"args"`
-	Headroom *headroomReport `json:"headroom,omitempty"`
-	Graph    *graphReport    `json:"graph,omitempty"`
+	Harness  string           `json:"harness"`
+	Dir      string           `json:"dir"`
+	Bin      string           `json:"bin"`
+	Args     []string         `json:"args"`
+	Headroom *headroomReport  `json:"headroom,omitempty"`
+	Graph    *graphReport     `json:"graph,omitempty"`
+	RTK      *rtkLaunchReport `json:"rtk,omitempty"`
 }
 
 // String is the command as a person would type it. Not shell-quoted, because it
@@ -246,7 +259,7 @@ func resolveHeadroom(h paths.Harness, opts headroomOptions) *headroomReport {
 	default:
 		render.Warn(fmt.Sprintf("%s is not on PATH — %s compresses the agent's context before it reaches the model", headroom.Bin, headroom.Bin))
 		render.Detail("  " + headroom.Repo)
-		if !confirm(promptIn, fmt.Sprintf("Install it now with `%s`?", installer.Cmd)) {
+		if !confirmInstall(promptIn, fmt.Sprintf("Install it now with `%s`?", installer.Cmd)) {
 			report.Reason = "install declined"
 		}
 	}
@@ -320,6 +333,91 @@ func wrapWith(report *headroomReport, opts headroomOptions) {
 	render.Detail("  `" + headroom.Bin + " wrap " + report.Agent + " --help`, and `" + headroom.Bin + " unwrap " + report.Agent + "` to undo what it registered")
 }
 
+// rtkLaunchReport says what happened to RTK on the way to starting the agent. It is
+// deliberately not cli.rtkReport: that one is `scc rtk`'s frozen shape, describing a
+// run of that command, and a launch answers a narrower question — is the binary there,
+// and does the entry file carry the block.
+type rtkLaunchReport struct {
+	// Install is what happened to the binary, in the same vocabulary the other two
+	// integrations use: present | installed | skipped | failed.
+	Install string `json:"install"`
+	Path    string `json:"path,omitempty"`
+	Version string `json:"version,omitempty"`
+	// Block is what happened to the usage block in the entry file: added | present |
+	// replaced | missing | skipped.
+	Block string `json:"block"`
+	// Reason names why RTK was not set up, for the run where that is a surprise.
+	Reason string `json:"reason,omitempty"`
+}
+
+type rtkLaunchOptions struct {
+	disabled  bool
+	noInstall bool
+	yes       bool
+	plan      bool
+	quiet     bool
+}
+
+// resolveRTK makes sure the agent about to start can actually use the prefix its entry
+// file tells it to use.
+//
+// This is the one integration whose setup writes to a file the user owns, and that is
+// why it is the one whose prompt has to name both halves. `scc rtk` exists as a
+// separate opt-in command precisely because splicing into somebody's CLAUDE.md is not
+// a thing to do on the side; offering it here is the same decision put where it is
+// actually actionable — at the moment the session that would benefit is starting.
+// Saying no is free, the block is idempotent once written, and --no-rtk is the
+// standing answer.
+//
+// It degrades the way the other two do: RTK is an enhancement, so a missing cargo, a
+// declined install, or a failed build all end in the agent starting anyway.
+func resolveRTK(root string, opts rtkLaunchOptions) *rtkLaunchReport {
+	if opts.disabled {
+		return nil
+	}
+	report := &rtkLaunchReport{Install: installSkipped, Block: "skipped"}
+
+	if _, ok := rtk.Path(); !ok {
+		switch {
+		case opts.noInstall || opts.plan:
+			report.Reason = rtk.Bin + " is not on PATH"
+		case !rtk.Available():
+			report.Reason = fmt.Sprintf("cargo is not on PATH, so %s cannot be built", rtk.Bin)
+		case opts.yes:
+			// Asked for by flag; no question to put.
+		case opts.quiet || !interactive():
+			report.Reason = fmt.Sprintf("%s is not on PATH, and nobody is here to answer the install prompt", rtk.Bin)
+		default:
+			render.Warn(fmt.Sprintf("%s is not on PATH — it filters command output before it reaches the model", rtk.Bin))
+			render.Detail("  " + rtk.Repo)
+			// The question names the file, because consenting to an install is not
+			// consenting to an edit and the user cannot see the second one coming.
+			if !confirmInstall(promptIn, fmt.Sprintf("Build it with `%s` and add its usage block to the entry file?", rtk.InstallCmd())) {
+				report.Reason = "install declined"
+			}
+		}
+		if report.Reason != "" {
+			if !opts.quiet && !opts.plan {
+				render.Warn("starting without " + rtk.Bin + ": " + report.Reason)
+			}
+			return report
+		}
+	}
+
+	// applyRTK owns both halves and is what `scc rtk` runs, so a launch cannot drift
+	// from the command. noInstall is false here only because the prompt above already
+	// settled it — this call is what actually builds the binary and writes the block.
+	sub, _ := applyRTK(root, rtkOptions{quiet: opts.quiet})
+	report.Install, report.Path, report.Version = sub.Install, sub.Path, sub.Version
+	if sub.Error != "" {
+		report.Reason = sub.Error
+	}
+	if len(sub.Files) > 0 {
+		report.Block = sub.Files[0].Action
+	}
+	return report
+}
+
 // graphReport says what happened to the symbol graph on the way to starting the
 // agent.
 type graphReport struct {
@@ -382,7 +480,7 @@ func resolveGraph(root string, opts graphOptions) *graphReport {
 		default:
 			render.Warn(fmt.Sprintf("%s is not on PATH — it gives the agent a symbol graph instead of file-by-file reading", codegraph.Bin))
 			render.Detail("  " + codegraph.Repo)
-			if !confirm(promptIn, fmt.Sprintf("Install it now with `%s`?", installer.Cmd)) {
+			if !confirmInstall(promptIn, fmt.Sprintf("Install it now with `%s`?", installer.Cmd)) {
 				report.Reason = "install declined"
 			}
 		}
