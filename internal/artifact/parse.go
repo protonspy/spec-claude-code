@@ -344,15 +344,11 @@ func indentOf(s string) int {
 	return n
 }
 
-// joinLines collapses a line range into one whitespace-normalized string.
-func joinLines(doc *mdscan.Document, from, to int) string {
-	return joinLinesExcept(doc, from, to, nil)
-}
-
-// joinLinesExcept is joinLines with a set of lines held back — a task's flags, which
-// belong to its region but not to its description. Keeping `_Priority 2_` out of
-// Detail is what stops the searcher from indexing it as prose and keeps `--width`
-// honest about how much of the description it clipped.
+// joinLinesExcept collapses a line range into one whitespace-normalized string, with
+// a set of lines held back — a task's flags, which belong to its region but not to
+// its description. Keeping `_Priority 2_` out of Detail is what stops the searcher
+// from indexing it as prose and keeps `--width` honest about how much of the
+// description it clipped. A nil set is the plain join.
 func joinLinesExcept(doc *mdscan.Document, from, to int, skip map[int]bool) string {
 	if from > to {
 		return ""
