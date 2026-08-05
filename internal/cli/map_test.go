@@ -32,6 +32,7 @@ What this is for, and what done means for the whole of it.
 - [x] 1.1 (Unit) Build the parser, and prove with a test that it reads a fenced
       block without treating the example inside it as a task
 - [ ] 1.2 (TDD) Guard the credential before the provider client lands
+      so the secret is never the thing a first run discovers is missing
 
 ## Notes
 
@@ -121,6 +122,30 @@ func TestMapTasksNextIsTheFirstOpenOne(t *testing.T) {
 	}
 	if strings.Contains(stdout, "1.1") {
 		t.Error("--next returned a task that is already done")
+	}
+}
+
+// Every task in a real plan runs past one line, and the line below the checkbox is
+// where the decision usually sits. A listing clips it because a listing is a list;
+// --next is one task, and clipping there sends the reader to the file — the exact
+// cost `map` exists to remove.
+func TestMapTasksNextPrintsTheWholeDescription(t *testing.T) {
+	root := mapWorkspace(t)
+	stdout, _, code := run(t, "map", "tasks", "sample", "--next", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(stdout, "so the secret is never the thing a first run discovers is missing") {
+		t.Errorf("--next dropped the continuation line:\n%s", stdout)
+	}
+
+	// And the listing still clips, or the reading surface has no cheap view left.
+	list, _, code := run(t, "map", "tasks", "sample", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(list, "so the secret is never") {
+		t.Errorf("the listing printed a continuation:\n%s", list)
 	}
 }
 

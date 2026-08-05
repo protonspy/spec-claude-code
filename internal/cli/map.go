@@ -320,7 +320,7 @@ func runMapTasks(args []string) int {
 	blocked := fs.Bool("blocked", false, "open tasks that are not eligible, each naming what it waits on")
 	deps := fs.Bool("deps", false, "the dependency edges alone, one line per task that has any")
 	removed := fs.Bool("removed", false, "the tasks discovery struck out, with their reasons")
-	width := fs.Int("width", 96, "clip each description to this many `runes`")
+	width := fs.Int("width", 96, "clip each description to this many `runes` (--next prints whole)")
 	noVerify := addNoVerify(fs)
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
@@ -350,7 +350,7 @@ func runMapTasks(args []string) int {
 
 	switch {
 	case *next:
-		return runMapNext(arts, *jsonOut, *width)
+		return runMapNext(arts, *jsonOut)
 	case *ready, *blocked, *deps:
 		return runMapSchedule(arts, scheduleView{ready: *ready, blocked: *blocked, deps: *deps},
 			*jsonOut, *width)
@@ -441,7 +441,7 @@ type blockedRow struct {
 // The reason is the part that had to be designed rather than fallen into. A loop
 // that got an empty answer could not tell "the plan is finished" from "everything
 // left is waiting on something", and those call for opposite next moves.
-func runMapNext(arts []*artifact.Artifact, jsonOut bool, width int) int {
+func runMapNext(arts []*artifact.Artifact, jsonOut bool) int {
 	if code := reportUnrunnable(arts); code != ExitOK {
 		return code
 	}
@@ -454,7 +454,16 @@ func runMapNext(arts []*artifact.Artifact, jsonOut bool, width int) int {
 					Task *taskRow `json:"task"`
 				}{&row})
 			}
-			render.Info(taskLine(row, width))
+			// The listings clip to one line because they are lists. This is not a
+			// list: it is the task the session is about to do, and a description
+			// that stops mid-sentence at the line break sends the reader to the
+			// file — which is the cost the whole reading surface exists to avoid.
+			// So --next ignores --width and prints the checkbox line whole, then
+			// the continuation under it as it sits in the file.
+			render.Info(taskLine(row, 0))
+			for _, line := range t.Continuation() {
+				fmt.Println("  " + line)
+			}
 			return ExitOK
 		}
 		blocked = append(blocked, blockedRowsFor(a)...)

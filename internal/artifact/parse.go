@@ -98,7 +98,24 @@ func (t Task) Group() string {
 // Summary is the task's description clipped to n runes, for a listing where one
 // task is one line. It is the first line only: a 61-line task exists, and printing
 // it in a list would defeat the point of the list.
-func (t Task) Summary(n int) string { return clip(t.Text, n) }
+//
+// A non-positive n is the whole line, for the caller that is printing one task
+// rather than a list of them.
+func (t Task) Summary(n int) string {
+	if n <= 0 {
+		return strings.TrimSpace(t.Text)
+	}
+	return clip(t.Text, n)
+}
+
+// Continuation is the rest of the description as it sits in the file, flag lines
+// excluded — the lines a listing drops and a single-task answer must not.
+//
+// It is the raw lines rather than Detail because a task's continuation carries the
+// decision, and often carries it as an indented list or a fenced example; Detail is
+// the same text collapsed to one line, which is right for a row in a table and wrong
+// for anything meant to be read.
+func (t Task) Continuation() []string { return t.detail }
 
 // Requirement is one numbered EARS requirement.
 type Requirement struct {
