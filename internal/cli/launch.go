@@ -38,9 +38,15 @@ import (
 //
 // What it does leave behind is MCP registrations in the agent's own config, which
 // outlive the session that made them. That is why the default is
-// --headroom-mcp=retrieve rather than Headroom's own defaults: the proxy needs
-// its retrieve tool to make compression markers actionable, and the code-memory
-// server it would otherwise install is a job this workspace gives CodeGraph.
+// --headroom-mcp=none rather than Headroom's own defaults: the only thing this
+// launch wants from Headroom is the compression proxy itself, so no MCP server —
+// not even Headroom's own retrieve tool — gets registered into the agent's config
+// on its behalf. The cost is that the proxy's compression markers go
+// unactionable; `--headroom-mcp retrieve` hands that back for anyone who wants
+// the markers expanded again. RTK setup and Headroom's own context-tool are
+// opt-in for the same reason: `--rtk` and `--headroom-context-tool` ask for them
+// explicitly, rather than a bare `scc launch` doing more than start the agent
+// behind the proxy.
 //
 // The agent's own exit code is passed straight through, which is the one place
 // scc's 0/1/2 contract does not apply — and it has to be. A launcher that
@@ -58,12 +64,12 @@ func runLaunch(args []string) int {
 	fs.SetOutput(os.Stderr)
 	root := addRoot(fs)
 	noHeadroom := fs.Bool("no-headroom", false, "start the agent directly, without Headroom's compression proxy")
-	mcp := fs.String("headroom-mcp", headroom.MCPRetrieve.String(),
+	mcp := fs.String("headroom-mcp", headroom.MCPNone.String(),
 		"which MCP servers Headroom may register: all | retrieve (its own only) | none")
 	contextTool := fs.Bool("headroom-context-tool", false,
 		"let Headroom set up its own CLI context tool (RTK or lean-ctx) and append its guidance to the entry file")
 	noGraph := fs.Bool("no-graph", false, "start the agent without building or refreshing the symbol graph")
-	noRTK := fs.Bool("no-rtk", false, "start the agent without setting up RTK's binary or its usage block")
+	rtkFlag := fs.Bool("rtk", false, "also set up RTK's binary and usage block before starting the agent")
 	noInstall := fs.Bool("no-install", false, "never install anything; use Headroom, CodeGraph and RTK only if they are already on PATH")
 	yes := fs.Bool("yes", false, "answer the install prompts with yes, for an unattended run")
 	dryRun := fs.Bool("dry-run", false, "print the command this would run, and run nothing")
@@ -128,7 +134,7 @@ func runLaunch(args []string) int {
 	// once their binary is known to be present: guidance naming a command the machine
 	// cannot run is worse than no guidance, because it costs the file its credibility.
 	cmd.RTK = resolveRTK(target, rtkLaunchOptions{
-		disabled:  *noRTK,
+		disabled:  !*rtkFlag,
 		noInstall: *noInstall,
 		yes:       *yes,
 		plan:      plan,
@@ -371,8 +377,8 @@ type rtkLaunchOptions struct {
 // separate opt-in command precisely because splicing into somebody's CLAUDE.md is not
 // a thing to do on the side; offering it here is the same decision put where it is
 // actually actionable — at the moment the session that would benefit is starting.
-// Saying no is free, the block is idempotent once written, and --no-rtk is the
-// standing answer.
+// It stays opt-in here too: --rtk is what asks for it, and a bare `scc launch`
+// leaves the entry file untouched.
 //
 // It degrades the way the other two do: RTK is an enhancement, so a missing cargo, a
 // declined install, or a failed build all end in the agent starting anyway.

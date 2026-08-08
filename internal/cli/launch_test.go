@@ -133,7 +133,7 @@ func TestLaunchWrapsWithHeadroomWhenItIsThere(t *testing.T) {
 	if cmd.Bin != "headroom" {
 		t.Errorf("bin = %q, want headroom", cmd.Bin)
 	}
-	if got, want := strings.Join(cmd.Args, " "), "wrap claude --code-memory none --no-context-tool"; got != want {
+	if got, want := strings.Join(cmd.Args, " "), "wrap claude --code-memory none --no-mcp --no-context-tool"; got != want {
 		t.Errorf("args = %q, want %q", got, want)
 	}
 	if cmd.Harness != paths.Claude.ID {
@@ -187,11 +187,11 @@ func TestLaunchNoHeadroomSkipsItEntirely(t *testing.T) {
 }
 
 // Headroom's wrap registers MCP servers into the user's agent config, and those
-// registrations outlive the session that made them. scc asks for its own retrieve
-// tool and nothing else, so a launch does not quietly install a code-memory
-// server the workspace has not asked for — this workspace's code intelligence is
-// CodeGraph's job.
-func TestLaunchTurnsHeadroomsCodeMemoryOffByDefault(t *testing.T) {
+// registrations outlive the session that made them. A bare `scc launch` wants
+// nothing from Headroom but the compression proxy, so by default no MCP server
+// gets registered at all — not the code-memory server (CodeGraph's job in this
+// workspace) and not even Headroom's own retrieve tool.
+func TestLaunchTurnsHeadroomsMCPOffByDefault(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "headroom", "claude")
 
@@ -199,11 +199,11 @@ func TestLaunchTurnsHeadroomsCodeMemoryOffByDefault(t *testing.T) {
 	if cmd.Headroom == nil {
 		t.Fatal("no headroom report")
 	}
-	if cmd.Headroom.MCP != "retrieve" {
-		t.Errorf("mcp = %q, want retrieve", cmd.Headroom.MCP)
+	if cmd.Headroom.MCP != "none" {
+		t.Errorf("mcp = %q, want none", cmd.Headroom.MCP)
 	}
-	if got := strings.Join(cmd.Headroom.Options, " "); !strings.Contains(got, "--code-memory none") {
-		t.Errorf("options = %q, want them to decline the code-memory server", got)
+	if got := strings.Join(cmd.Headroom.Options, " "); !strings.Contains(got, "--code-memory none") || !strings.Contains(got, "--no-mcp") {
+		t.Errorf("options = %q, want them to decline both the code-memory and retrieve servers", got)
 	}
 }
 
@@ -264,7 +264,7 @@ func TestLaunchPassesArgumentsThroughToTheAgent(t *testing.T) {
 	isolatedPath(t, "headroom", "claude")
 
 	cmd := launchJSON(t, "launch", "claude", "--json", "--root", root, "--", "--resume", "--model", "opus")
-	if got, want := strings.Join(cmd.Args, " "), "wrap claude --code-memory none --no-context-tool --resume --model opus"; got != want {
+	if got, want := strings.Join(cmd.Args, " "), "wrap claude --code-memory none --no-mcp --no-context-tool --resume --model opus"; got != want {
 		t.Errorf("args = %q, want %q", got, want)
 	}
 
@@ -728,34 +728,18 @@ func sameDir(t *testing.T, a, b string) bool {
 	return os.SameFile(fa, fb)
 }
 
-// RTK joins the preflight the other two integrations already went through, so a
-// launch reports all three. --no-rtk is the standing "not in this workspace", and it
-// has to leave the field out entirely rather than report a skip: the two are
-// different answers, and only one of them means somebody decided.
-func TestLaunchReportsRTKAndNoRTKOmitsIt(t *testing.T) {
+// RTK preflight is opt-in: a bare `scc launch` wants nothing from Headroom's
+// wrap but the compression proxy, and asking scc to also wire up RTK is a
+// separate decision, made with --rtk. The two runs have to differ in whether the
+// field is present at all, not just in what it says: a launch that never
+// considered RTK and a launch that considered it and skipped it are different
+// answers, and only one of them means somebody decided.
+func TestLaunchRTKIsOptIn(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "claude")
 
-	var with launchCommand
-	stdout, _, code := run(t, "launch", "--root", root, "--json")
-	if code != ExitOK {
-		t.Fatalf("exit = %d", code)
-	}
-	if err := json.Unmarshal([]byte(stdout), &with); err != nil {
-		t.Fatalf("unmarshal: %v\n%s", err, stdout)
-	}
-	if with.RTK == nil {
-		t.Fatal("a launch reported no rtk field at all")
-	}
-	if with.RTK.Install != installSkipped {
-		t.Errorf("install = %q, want %q with cargo absent", with.RTK.Install, installSkipped)
-	}
-	if with.RTK.Reason == "" {
-		t.Error("rtk was skipped without saying why")
-	}
-
 	var without launchCommand
-	stdout, _, code = run(t, "launch", "--root", root, "--json", "--no-rtk")
+	stdout, _, code := run(t, "launch", "--root", root, "--json")
 	if code != ExitOK {
 		t.Fatalf("exit = %d", code)
 	}
@@ -763,19 +747,38 @@ func TestLaunchReportsRTKAndNoRTKOmitsIt(t *testing.T) {
 		t.Fatalf("unmarshal: %v\n%s", err, stdout)
 	}
 	if without.RTK != nil {
-		t.Errorf("--no-rtk still reported %+v", without.RTK)
+		t.Errorf("a bare launch reported %+v, want rtk left out", without.RTK)
+	}
+
+	var with launchCommand
+	stdout, _, code = run(t, "launch", "--root", root, "--json", "--rtk")
+	if code != ExitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if err := json.Unmarshal([]byte(stdout), &with); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	}
+	if with.RTK == nil {
+		t.Fatal("--rtk reported no rtk field at all")
+	}
+	if with.RTK.Install != installSkipped {
+		t.Errorf("install = %q, want %q with cargo absent", with.RTK.Install, installSkipped)
+	}
+	if with.RTK.Reason == "" {
+		t.Error("rtk was skipped without saying why")
 	}
 }
 
 // --no-install covers RTK too. The flag says "never build anything", and a cargo
-// build that takes minutes is the most expensive thing it governs.
+// build that takes minutes is the most expensive thing it governs — but only
+// once --rtk has asked for RTK to be considered at all.
 func TestLaunchNoInstallCoversRTK(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "cargo", "claude")
 	withPrompt(t, "\n")
 	withLaunchExec(t, 0)
 
-	stdout, stderr, code := run(t, "launch", "--root", root, "--no-install")
+	stdout, stderr, code := run(t, "launch", "--root", root, "--rtk", "--no-install")
 	if code != ExitOK {
 		t.Fatalf("exit = %d", code)
 	}
