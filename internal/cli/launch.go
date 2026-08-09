@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/protonspy/spec-claude-code/internal/assets"
@@ -28,25 +29,26 @@ import (
 // word where the alternative is remembering to cd first and to spell the wrapper
 // right.
 //
-// Headroom is the default rather than a flag, which is a deliberate reversal of
-// how RTK is wired. The difference is who bears the cost of being wrong: RTK's
-// block edits a file the user owns and tells the agent to prefix every command
-// with a binary the machine may not have, so it stays opt-in. Headroom wraps one
-// process for the length of one session and degrades to starting the agent bare —
-// so defaulting to it costs nothing when it is absent and saves context when it
-// is there.
+// What a bare `scc launch` does, and does not, is settled by one question: does
+// this leave anything behind after the session ends?
 //
-// What it does leave behind is MCP registrations in the agent's own config, which
-// outlive the session that made them. That is why the default is
-// --headroom-mcp=none rather than Headroom's own defaults: the only thing this
-// launch wants from Headroom is the compression proxy itself, so no MCP server —
-// not even Headroom's own retrieve tool — gets registered into the agent's config
-// on its behalf. The cost is that the proxy's compression markers go
-// unactionable; `--headroom-mcp retrieve` hands that back for anyone who wants
-// the markers expanded again. RTK setup and Headroom's own context-tool are
-// opt-in for the same reason: `--rtk` and `--headroom-context-tool` ask for them
-// explicitly, rather than a bare `scc launch` doing more than start the agent
-// behind the proxy.
+// RTK is on by default because what it leaves behind is what the agent needs.
+// Its usage block in the entry file is the whole point — an agent that has not
+// read it does not prefix anything, so the binary alone buys nothing. And the
+// step is bounded by that block: it runs when an entry file has none and does
+// nothing when they all do, so it fires once per workspace rather than once per
+// session, and never rewrites a block somebody already has. `--no-rtk` opts out.
+//
+// Headroom is off by default because what *it* leaves behind is not: `headroom
+// wrap` registers MCP servers into the agent's own config, and those
+// registrations outlive the session that made them — which is why Headroom ships
+// `unwrap` at all. Compression for one session is not worth a config edit the
+// user did not ask for and will not see. `--headroom` asks for it, and then
+// --headroom-mcp=none is still the default so the wrap is the proxy and nothing
+// else; `--headroom-mcp retrieve` hands back the tool that makes the proxy's
+// compression markers actionable, and `--headroom-context-tool` lets Headroom
+// append its own RTK guidance to the entry file — off because `scc rtk` owns
+// that block here, behind markers Headroom's do not match.
 //
 // The agent's own exit code is passed straight through, which is the one place
 // scc's 0/1/2 contract does not apply — and it has to be. A launcher that
@@ -63,13 +65,13 @@ func runLaunch(args []string) int {
 	fs := flag.NewFlagSet("launch", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	root := addRoot(fs)
-	noHeadroom := fs.Bool("no-headroom", false, "start the agent directly, without Headroom's compression proxy")
+	headroomFlag := fs.Bool("headroom", false, "start the agent behind Headroom's compression proxy (it registers MCP servers that outlive the session)")
 	mcp := fs.String("headroom-mcp", headroom.MCPNone.String(),
 		"which MCP servers Headroom may register: all | retrieve (its own only) | none")
 	contextTool := fs.Bool("headroom-context-tool", false,
 		"let Headroom set up its own CLI context tool (RTK or lean-ctx) and append its guidance to the entry file")
 	noGraph := fs.Bool("no-graph", false, "start the agent without building or refreshing the symbol graph")
-	rtkFlag := fs.Bool("rtk", false, "also set up RTK's binary and usage block before starting the agent")
+	noRTK := fs.Bool("no-rtk", false, "start the agent without setting up RTK's binary or its usage block in the entry file")
 	noInstall := fs.Bool("no-install", false, "never install anything; use Headroom, CodeGraph and RTK only if they are already on PATH")
 	yes := fs.Bool("yes", false, "answer the install prompts with yes, for an unattended run")
 	dryRun := fs.Bool("dry-run", false, "print the command this would run, and run nothing")
@@ -83,6 +85,15 @@ func runLaunch(args []string) int {
 		render.Err(err.Error())
 		return ExitError
 	}
+	// Any --headroom-* flag is itself a request for Headroom. The alternative is
+	// accepting a flag and then ignoring it, which is how somebody spends a session
+	// believing they configured something.
+	wantHeadroom := *headroomFlag
+	fs.Visit(func(f *flag.Flag) {
+		if strings.HasPrefix(f.Name, "headroom-") {
+			wantHeadroom = true
+		}
+	})
 
 	target, ok := resolveRoot(*root)
 	if !ok {
@@ -104,7 +115,7 @@ func runLaunch(args []string) int {
 	// JSON document on stdout cannot both exist.
 	plan := *jsonOut || *dryRun
 	opts := headroomOptions{
-		disabled:    *noHeadroom,
+		disabled:    !wantHeadroom,
 		noInstall:   *noInstall || plan,
 		yes:         *yes,
 		quiet:       *jsonOut,
@@ -134,7 +145,7 @@ func runLaunch(args []string) int {
 	// once their binary is known to be present: guidance naming a command the machine
 	// cannot run is worse than no guidance, because it costs the file its credibility.
 	cmd.RTK = resolveRTK(target, rtkLaunchOptions{
-		disabled:  !*rtkFlag,
+		disabled:  *noRTK,
 		noInstall: *noInstall,
 		yes:       *yes,
 		plan:      plan,
@@ -369,16 +380,20 @@ type rtkLaunchOptions struct {
 	quiet     bool
 }
 
-// resolveRTK makes sure the agent about to start can actually use the prefix its entry
-// file tells it to use.
+// resolveRTK makes sure the entry file the agent is about to load actually tells it
+// about RTK, and that the binary that guidance names is there.
 //
-// This is the one integration whose setup writes to a file the user owns, and that is
-// why it is the one whose prompt has to name both halves. `scc rtk` exists as a
-// separate opt-in command precisely because splicing into somebody's CLAUDE.md is not
-// a thing to do on the side; offering it here is the same decision put where it is
-// actually actionable — at the moment the session that would benefit is starting.
-// It stays opt-in here too: --rtk is what asks for it, and a bare `scc launch`
-// leaves the entry file untouched.
+// The trigger is the block, not the binary: this runs when an entry file carries no
+// RTK block, and does nothing at all when every one of them already does. That
+// bound is what lets it be the default. A workspace wired on a previous launch pays
+// nothing at the top of the next session — no read of substance, no cargo prompt,
+// and above all no edit — while a fresh workspace gets the one thing that makes RTK
+// work at all, since an agent that never read the block never types the prefix.
+//
+// It also splices with keep, so a block that is already there is left exactly as it
+// is even when scc ships a different one. Replacing somebody's block is a real
+// decision with a real trade-off, and `scc rtk` is where it is made deliberately;
+// starting an agent is not the moment to make it as a side effect.
 //
 // It degrades the way the other two do: RTK is an enhancement, so a missing cargo, a
 // declined install, or a failed build all end in the agent starting anyway.
@@ -387,6 +402,24 @@ func resolveRTK(root string, opts rtkLaunchOptions) *rtkLaunchReport {
 		return nil
 	}
 	report := &rtkLaunchReport{Install: installSkipped, Block: "skipped"}
+
+	if rtkBlockPresent(root) {
+		report.Block = string(mdblock.Present)
+		p, ok := rtk.Path()
+		if ok {
+			report.Install, report.Path, report.Version = installPresent, p, rtk.Version(p)
+			return report
+		}
+		// The file tells the agent to prefix every command with a binary this machine
+		// does not have. Said once, and not acted on: the block is wired, so this is a
+		// PATH problem on the user's side rather than something for scc to fix mid-launch.
+		report.Reason = rtk.Bin + " is not on PATH, and the entry file already tells the agent to use it"
+		if !opts.quiet && !opts.plan {
+			render.Warn(report.Reason)
+			render.Detail("  install it with: " + rtk.InstallCmd())
+		}
+		return report
+	}
 
 	if _, ok := rtk.Path(); !ok {
 		switch {
@@ -418,7 +451,12 @@ func resolveRTK(root string, opts rtkLaunchOptions) *rtkLaunchReport {
 	// applyRTK owns both halves and is what `scc rtk` runs, so a launch cannot drift
 	// from the command. noInstall is false here only because the prompt above already
 	// settled it — this call is what actually builds the binary and writes the block.
-	sub, _ := applyRTK(root, rtkOptions{quiet: opts.quiet})
+	//
+	// check is how a plan-only run reports the splice without performing it: --json
+	// has to leave stdout clean for the document, and a --dry-run that edited the
+	// entry file would be the one flag nobody expects to change anything doing
+	// exactly that.
+	sub, _ := applyRTK(root, rtkOptions{check: opts.plan, keep: true, quiet: opts.quiet})
 	report.Install, report.Path, report.Version = sub.Install, sub.Path, sub.Version
 	if sub.Error != "" {
 		report.Reason = sub.Error
@@ -427,6 +465,27 @@ func resolveRTK(root string, opts rtkLaunchOptions) *rtkLaunchReport {
 		report.Block = sub.Files[0].Action
 	}
 	return report
+}
+
+// rtkBlockPresent reports whether every entry file in this workspace already carries
+// an RTK block — the question `scc launch` decides its whole RTK step on.
+//
+// Every, not any: a workspace scaffolded for two harnesses has two entry files, and
+// one of them being wired says nothing about the other. A workspace with no entry
+// file at all answers no, so the run goes down the normal path and reports the file
+// as missing rather than quietly calling an absent file done.
+func rtkBlockPresent(root string) bool {
+	entries := entryFiles(root)
+	if len(entries) == 0 {
+		return false
+	}
+	for _, entry := range entries {
+		raw, err := os.ReadFile(filepath.Join(root, entry))
+		if err != nil || rtk.Markers.Block(string(raw)) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // graphReport says what happened to the symbol graph on the way to starting the
