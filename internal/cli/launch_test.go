@@ -10,6 +10,7 @@ import (
 
 	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/paths"
+	"github.com/protonspy/spec-claude-code/internal/rtk"
 )
 
 // No test here may reach a real install: `uv tool install` would spend minutes of
@@ -123,13 +124,14 @@ func launchJSON(t *testing.T, args ...string) launchCommand {
 	return cmd
 }
 
-// Headroom on PATH is the whole point of the command: the agent starts behind the
-// compression proxy without anybody having to remember the wrapper's spelling.
+// --headroom is what asks for the compression proxy, and with Headroom on PATH it
+// is the whole point of the command: the agent starts behind the wrapper without
+// anybody having to remember its spelling.
 func TestLaunchWrapsWithHeadroomWhenItIsThere(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "headroom", "claude")
 
-	cmd := launchJSON(t, "launch", "--root", root, "--json")
+	cmd := launchJSON(t, "launch", "--root", root, "--headroom", "--json")
 	if cmd.Bin != "headroom" {
 		t.Errorf("bin = %q, want headroom", cmd.Bin)
 	}
@@ -154,7 +156,7 @@ func TestLaunchStartsBareWhenHeadroomIsMissing(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "claude")
 
-	cmd := launchJSON(t, "launch", "--root", root, "--json")
+	cmd := launchJSON(t, "launch", "--root", root, "--headroom", "--json")
 	if cmd.Bin != paths.Claude.Bin {
 		t.Errorf("bin = %q, want %q", cmd.Bin, paths.Claude.Bin)
 	}
@@ -171,13 +173,17 @@ func TestLaunchStartsBareWhenHeadroomIsMissing(t *testing.T) {
 	}
 }
 
-// --no-headroom is the explicit "just start the agent", and it must not even ask
-// the question — no PATH lookup, no report, no prompt.
-func TestLaunchNoHeadroomSkipsItEntirely(t *testing.T) {
+// A bare launch does not touch Headroom at all — not even to look for it. `headroom
+// wrap` registers MCP servers into the agent's own config and those registrations
+// outlive the session, which is a price for one session's compression that nobody
+// asked to pay. The report has to leave the field out entirely rather than say
+// "skipped": a launch that never considered Headroom and one that considered it and
+// could not use it are different answers.
+func TestLaunchLeavesHeadroomAloneByDefault(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "headroom", "claude")
 
-	cmd := launchJSON(t, "launch", "--root", root, "--no-headroom", "--json")
+	cmd := launchJSON(t, "launch", "--root", root, "--json")
 	if cmd.Bin != paths.Claude.Bin {
 		t.Errorf("bin = %q, want %q", cmd.Bin, paths.Claude.Bin)
 	}
@@ -187,15 +193,15 @@ func TestLaunchNoHeadroomSkipsItEntirely(t *testing.T) {
 }
 
 // Headroom's wrap registers MCP servers into the user's agent config, and those
-// registrations outlive the session that made them. A bare `scc launch` wants
-// nothing from Headroom but the compression proxy, so by default no MCP server
-// gets registered at all — not the code-memory server (CodeGraph's job in this
-// workspace) and not even Headroom's own retrieve tool.
+// registrations outlive the session that made them. `--headroom` asks for the
+// compression proxy and nothing else, so even then no MCP server gets registered —
+// not the code-memory server (CodeGraph's job in this workspace) and not even
+// Headroom's own retrieve tool.
 func TestLaunchTurnsHeadroomsMCPOffByDefault(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "headroom", "claude")
 
-	cmd := launchJSON(t, "launch", "--root", root, "--json")
+	cmd := launchJSON(t, "launch", "--root", root, "--headroom", "--json")
 	if cmd.Headroom == nil {
 		t.Fatal("no headroom report")
 	}
@@ -216,7 +222,7 @@ func TestLaunchDeclinesHeadroomsContextToolByDefault(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "headroom", "claude")
 
-	cmd := launchJSON(t, "launch", "--root", root, "--json")
+	cmd := launchJSON(t, "launch", "--root", root, "--headroom", "--json")
 	if cmd.Headroom.ContextTool {
 		t.Error("context_tool = true, want Headroom's own setup declined")
 	}
@@ -263,13 +269,13 @@ func TestLaunchPassesArgumentsThroughToTheAgent(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "headroom", "claude")
 
-	cmd := launchJSON(t, "launch", "claude", "--json", "--root", root, "--", "--resume", "--model", "opus")
+	cmd := launchJSON(t, "launch", "claude", "--json", "--headroom", "--root", root, "--", "--resume", "--model", "opus")
 	if got, want := strings.Join(cmd.Args, " "), "wrap claude --code-memory none --no-mcp --no-context-tool --resume --model opus"; got != want {
 		t.Errorf("args = %q, want %q", got, want)
 	}
 
 	// And with no Headroom in front, the same arguments reach the binary directly.
-	cmd = launchJSON(t, "launch", "claude", "--json", "--no-headroom", "--root", root, "--", "--resume")
+	cmd = launchJSON(t, "launch", "claude", "--json", "--root", root, "--", "--resume")
 	if got, want := strings.Join(cmd.Args, " "), "--resume"; got != want {
 		t.Errorf("bare args = %q, want %q", got, want)
 	}
@@ -285,7 +291,7 @@ func TestLaunchBuildsTheGraphAndThenRefreshesIt(t *testing.T) {
 	log := recordingStub(t, dir, "codegraph")
 	withLaunchExec(t, 0)
 
-	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+	if _, stderr, code := run(t, "launch", "--root", root); code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
 	if got := recorded(t, log); !strings.Contains(got, "init") {
@@ -299,7 +305,7 @@ func TestLaunchBuildsTheGraphAndThenRefreshesIt(t *testing.T) {
 	if err := os.Remove(log); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+	if _, stderr, code := run(t, "launch", "--root", root); code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
 	got := recorded(t, log)
@@ -321,7 +327,7 @@ func TestLaunchWritesTheCodeGraphBlockIntoTheEntryFile(t *testing.T) {
 	recordingStub(t, dir, "codegraph")
 	withLaunchExec(t, 0)
 
-	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+	if _, stderr, code := run(t, "launch", "--root", root); code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
 	entry := filepath.Join(root, paths.Claude.EntryFile)
@@ -334,7 +340,7 @@ func TestLaunchWritesTheCodeGraphBlockIntoTheEntryFile(t *testing.T) {
 	}
 
 	// And it is a splice, not an append: a second launch leaves one copy.
-	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+	if _, stderr, code := run(t, "launch", "--root", root); code != ExitOK {
 		t.Fatalf("second launch: exit = %d (stderr: %s)", code, stderr)
 	}
 	second, err := os.ReadFile(entry)
@@ -358,7 +364,7 @@ func TestLaunchWritesNoCodeGraphBlockWithoutTheBinary(t *testing.T) {
 	withoutTerminal(t)
 	withLaunchExec(t, 0)
 
-	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != ExitOK {
+	if _, stderr, code := run(t, "launch", "--root", root); code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
 	entry, err := os.ReadFile(filepath.Join(root, paths.Claude.EntryFile))
@@ -378,7 +384,7 @@ func TestLaunchPlanOnlyWritesNoCodeGraphBlock(t *testing.T) {
 	recordingStub(t, dir, "codegraph")
 
 	for _, flag := range []string{"--json", "--dry-run"} {
-		if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom", flag); code != ExitOK {
+		if _, stderr, code := run(t, "launch", "--root", root, flag); code != ExitOK {
 			t.Fatalf("%s: exit = %d (stderr: %s)", flag, code, stderr)
 		}
 		entry, err := os.ReadFile(filepath.Join(root, paths.Claude.EntryFile))
@@ -401,7 +407,7 @@ func TestLaunchStartsWithoutAGraphWhenCodeGraphIsMissing(t *testing.T) {
 	withoutTerminal(t)
 	got := withLaunchExec(t, 0)
 
-	_, stderr, code := run(t, "launch", "--root", root, "--no-headroom")
+	_, stderr, code := run(t, "launch", "--root", root)
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
@@ -420,7 +426,7 @@ func TestLaunchNoGraphSkipsItEntirely(t *testing.T) {
 	dir := isolatedPath(t, "claude")
 	log := recordingStub(t, dir, "codegraph")
 
-	cmd := launchJSON(t, "launch", "--root", root, "--no-headroom", "--no-graph", "--json")
+	cmd := launchJSON(t, "launch", "--root", root, "--no-graph", "--json")
 	if cmd.Graph != nil {
 		t.Errorf("graph = %+v, want it absent from the report", cmd.Graph)
 	}
@@ -438,14 +444,14 @@ func TestLaunchNeverIndexesOnAPlanOnlyRun(t *testing.T) {
 	log := recordingStub(t, dir, "codegraph")
 
 	for _, flag := range []string{"--json", "--dry-run"} {
-		if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom", flag); code != ExitOK {
+		if _, stderr, code := run(t, "launch", "--root", root, flag); code != ExitOK {
 			t.Fatalf("%s: exit = %d (stderr: %s)", flag, code, stderr)
 		}
 		if got := recorded(t, log); strings.Contains(got, "init") || strings.Contains(got, "sync") {
 			t.Errorf("%s indexed the workspace: %q", flag, got)
 		}
 	}
-	cmd := launchJSON(t, "launch", "--root", root, "--no-headroom", "--json")
+	cmd := launchJSON(t, "launch", "--root", root, "--json")
 	if cmd.Graph == nil || cmd.Graph.Action != graphSkipped {
 		t.Errorf("graph = %+v, want the index reported as skipped", cmd.Graph)
 	}
@@ -458,7 +464,7 @@ func TestLaunchPassesTheAgentsExitCodeThrough(t *testing.T) {
 	isolatedPath(t, "claude")
 	got := withLaunchExec(t, 42)
 
-	if _, stderr, code := run(t, "launch", "--root", root, "--no-headroom"); code != 42 {
+	if _, stderr, code := run(t, "launch", "--root", root); code != 42 {
 		t.Errorf("exit = %d, want the agent's 42 (stderr: %s)", code, stderr)
 	}
 	if got.Bin != paths.Claude.Bin {
@@ -485,7 +491,7 @@ func TestLaunchStartsAtTheWorkspaceRoot(t *testing.T) {
 	got := withLaunchExec(t, 0)
 	t.Chdir(sub)
 
-	if _, stderr, code := run(t, "launch", "--no-headroom"); code != ExitOK {
+	if _, stderr, code := run(t, "launch"); code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
 	if !sameDir(t, got.Dir, root) {
@@ -504,14 +510,14 @@ func TestLaunchDryRunAndJSONStartNothing(t *testing.T) {
 	launchExec = func(launchCommand) (int, error) { started = true; return 0, nil }
 	t.Cleanup(func() { launchExec = orig })
 
-	stdout, stderr, code := run(t, "launch", "--root", root, "--dry-run")
+	stdout, stderr, code := run(t, "launch", "--root", root, "--headroom", "--dry-run")
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
 	if !strings.Contains(stdout, "headroom wrap claude") {
 		t.Errorf("--dry-run does not name the command: %q", stdout)
 	}
-	_ = launchJSON(t, "launch", "--root", root, "--json")
+	_ = launchJSON(t, "launch", "--root", root, "--headroom", "--json")
 	if started {
 		t.Error("--dry-run or --json started the agent")
 	}
@@ -526,7 +532,7 @@ func TestLaunchNeverInstallsOnAPlanOnlyRun(t *testing.T) {
 	withPrompt(t, "y\ny\n")
 
 	for _, flag := range []string{"--json", "--dry-run"} {
-		stdout, _, code := run(t, "launch", "--root", root, flag)
+		stdout, _, code := run(t, "launch", "--root", root, "--headroom", flag)
 		if code != ExitOK {
 			t.Fatalf("%s: exit = %d", flag, code)
 		}
@@ -534,7 +540,7 @@ func TestLaunchNeverInstallsOnAPlanOnlyRun(t *testing.T) {
 			t.Errorf("%s asked to install: %q", flag, stdout)
 		}
 	}
-	cmd := launchJSON(t, "launch", "--root", root, "--json")
+	cmd := launchJSON(t, "launch", "--root", root, "--headroom", "--json")
 	if cmd.Headroom == nil || cmd.Headroom.Install != installSkipped {
 		t.Errorf("headroom = %+v, want the install reported as skipped", cmd.Headroom)
 	}
@@ -549,7 +555,7 @@ func TestLaunchDoesNotAskUnattended(t *testing.T) {
 	withoutTerminal(t)
 	got := withLaunchExec(t, 0)
 
-	stdout, stderr, code := run(t, "launch", "--root", root)
+	stdout, stderr, code := run(t, "launch", "--root", root, "--headroom")
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
@@ -572,7 +578,7 @@ func TestLaunchFallsBackWhenTheInstallIsDeclined(t *testing.T) {
 	withPrompt(t, "n\n")
 	got := withLaunchExec(t, 0)
 
-	stdout, stderr, code := run(t, "launch", "--root", root)
+	stdout, stderr, code := run(t, "launch", "--root", root, "--headroom")
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
@@ -595,7 +601,7 @@ func TestLaunchNoInstallNeverAsks(t *testing.T) {
 	withPrompt(t, "y\n")
 	got := withLaunchExec(t, 0)
 
-	stdout, _, code := run(t, "launch", "--root", root, "--no-install")
+	stdout, _, code := run(t, "launch", "--root", root, "--headroom", "--no-install")
 	if code != ExitOK {
 		t.Fatalf("exit = %d", code)
 	}
@@ -645,7 +651,7 @@ func TestLaunchResolvesAmbiguityByAskingOrNamingTheChoices(t *testing.T) {
 	isolatedPath(t, "codex", "opencode")
 
 	withoutTerminal(t)
-	_, stderr, code := run(t, "launch", "--root", root, "--no-headroom")
+	_, stderr, code := run(t, "launch", "--root", root)
 	if code != ExitError {
 		t.Errorf("exit = %d, want %d", code, ExitError)
 	}
@@ -655,7 +661,7 @@ func TestLaunchResolvesAmbiguityByAskingOrNamingTheChoices(t *testing.T) {
 
 	withPrompt(t, "2\n")
 	got := withLaunchExec(t, 0)
-	stdout, stderr, code := run(t, "launch", "--root", root, "--no-headroom")
+	stdout, stderr, code := run(t, "launch", "--root", root)
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
@@ -680,7 +686,7 @@ func TestLaunchPickerOffersOnlyTheScaffoldedHarnesses(t *testing.T) {
 	withPrompt(t, "\n")
 	withLaunchExec(t, 0)
 
-	stdout, _, _ := run(t, "launch", "--root", root, "--no-headroom")
+	stdout, _, _ := run(t, "launch", "--root", root)
 	if strings.Contains(stdout, paths.Claude.Label) {
 		t.Errorf("the picker offered a harness that is not scaffolded here:\n%s", stdout)
 	}
@@ -704,7 +710,7 @@ func TestLaunchReportsAMissingAgentBinary(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t)
 
-	_, stderr, code := run(t, "launch", "--root", root, "--no-headroom")
+	_, stderr, code := run(t, "launch", "--root", root)
 	if code != ExitError {
 		t.Errorf("exit = %d, want %d", code, ExitError)
 	}
@@ -728,57 +734,129 @@ func sameDir(t *testing.T, a, b string) bool {
 	return os.SameFile(fa, fb)
 }
 
-// RTK preflight is opt-in: a bare `scc launch` wants nothing from Headroom's
-// wrap but the compression proxy, and asking scc to also wire up RTK is a
-// separate decision, made with --rtk. The two runs have to differ in whether the
-// field is present at all, not just in what it says: a launch that never
-// considered RTK and a launch that considered it and skipped it are different
+// A workspace whose entry file says nothing about RTK gets the block on the next
+// launch, because the block is the whole integration: an agent that never read it
+// never types the prefix, so a binary on PATH alone buys nothing.
+func TestLaunchWritesTheRTKBlockWhenTheEntryFileHasNone(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "rtk", "claude")
+	withLaunchExec(t, 0)
+
+	if _, stderr, code := run(t, "launch", "--root", root); code != ExitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	entry, err := os.ReadFile(filepath.Join(root, paths.Claude.EntryFile))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(entry), rtk.Markers.Open) {
+		t.Errorf("the entry file carries no RTK block:\n%s", entry)
+	}
+}
+
+// The block is also the trigger. A workspace already carrying one is wired, so the
+// launch does nothing at all: no rewrite of a block somebody may have curated —
+// that decision belongs to `scc rtk`, not to starting an agent — and no cargo
+// prompt at the top of every session.
+func TestLaunchLeavesAnRTKBlockThatIsAlreadyThere(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "rtk", "claude")
+	withLaunchExec(t, 0)
+
+	entry := filepath.Join(root, paths.Claude.EntryFile)
+	raw, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	before := string(raw) + "\n" + rtk.Markers.Open + " v9 -->\nmine, not scc's\n" + rtk.Markers.Close + "\n"
+	if err := os.WriteFile(entry, []byte(before), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cmd := launchJSON(t, "launch", "--root", root, "--json")
+	if cmd.RTK == nil || cmd.RTK.Block != "present" {
+		t.Errorf("rtk = %+v, want the block reported as present", cmd.RTK)
+	}
+	after, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(after) != before {
+		t.Errorf("the launch rewrote a block it did not own:\n%s", after)
+	}
+}
+
+// --no-rtk is the explicit "just start the agent": no lookup, no block, no report.
+// The field has to be absent rather than say "skipped", because a launch that never
+// considered RTK and one that considered it and could not use it are different
 // answers, and only one of them means somebody decided.
-func TestLaunchRTKIsOptIn(t *testing.T) {
+func TestLaunchNoRTKSkipsItEntirely(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "rtk", "claude")
+	withLaunchExec(t, 0)
+
+	cmd := launchJSON(t, "launch", "--root", root, "--no-rtk", "--json")
+	if cmd.RTK != nil {
+		t.Errorf("rtk = %+v, want it absent from the report", cmd.RTK)
+	}
+	entry, err := os.ReadFile(filepath.Join(root, paths.Claude.EntryFile))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(entry), rtk.Markers.Open) {
+		t.Error("--no-rtk still edited the entry file")
+	}
+}
+
+// A plan-only run reports the splice without performing it. --json has to leave stdout
+// clean for the document, and a --dry-run that edited a file the user owns would be
+// the one flag nobody expects to change anything doing exactly that.
+func TestLaunchPlanOnlyWritesNoRTKBlock(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t, "rtk", "claude")
+
+	for _, flag := range []string{"--json", "--dry-run"} {
+		if _, stderr, code := run(t, "launch", "--root", root, flag); code != ExitOK {
+			t.Fatalf("%s: exit = %d (stderr: %s)", flag, code, stderr)
+		}
+		entry, err := os.ReadFile(filepath.Join(root, paths.Claude.EntryFile))
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		if strings.Contains(string(entry), rtk.Markers.Open) {
+			t.Errorf("%s edited the entry file", flag)
+		}
+	}
+}
+
+// RTK degrades the way the other two integrations do: no cargo means no binary, and
+// the agent starts anyway with a line saying so. The report distinguishes that from
+// a launch that never looked.
+func TestLaunchStartsWithoutRTKWhenItCannotBeBuilt(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "claude")
 
-	var without launchCommand
-	stdout, _, code := run(t, "launch", "--root", root, "--json")
-	if code != ExitOK {
-		t.Fatalf("exit = %d", code)
+	cmd := launchJSON(t, "launch", "--root", root, "--json")
+	if cmd.RTK == nil {
+		t.Fatal("a bare launch reported no rtk field at all")
 	}
-	if err := json.Unmarshal([]byte(stdout), &without); err != nil {
-		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	if cmd.RTK.Install != installSkipped {
+		t.Errorf("install = %q, want %q with cargo absent", cmd.RTK.Install, installSkipped)
 	}
-	if without.RTK != nil {
-		t.Errorf("a bare launch reported %+v, want rtk left out", without.RTK)
-	}
-
-	var with launchCommand
-	stdout, _, code = run(t, "launch", "--root", root, "--json", "--rtk")
-	if code != ExitOK {
-		t.Fatalf("exit = %d", code)
-	}
-	if err := json.Unmarshal([]byte(stdout), &with); err != nil {
-		t.Fatalf("unmarshal: %v\n%s", err, stdout)
-	}
-	if with.RTK == nil {
-		t.Fatal("--rtk reported no rtk field at all")
-	}
-	if with.RTK.Install != installSkipped {
-		t.Errorf("install = %q, want %q with cargo absent", with.RTK.Install, installSkipped)
-	}
-	if with.RTK.Reason == "" {
+	if cmd.RTK.Reason == "" {
 		t.Error("rtk was skipped without saying why")
 	}
 }
 
 // --no-install covers RTK too. The flag says "never build anything", and a cargo
-// build that takes minutes is the most expensive thing it governs — but only
-// once --rtk has asked for RTK to be considered at all.
+// build that takes minutes is the most expensive thing it governs.
 func TestLaunchNoInstallCoversRTK(t *testing.T) {
 	root := initWorkspace(t)
 	isolatedPath(t, "cargo", "claude")
 	withPrompt(t, "\n")
 	withLaunchExec(t, 0)
 
-	stdout, stderr, code := run(t, "launch", "--root", root, "--rtk", "--no-install")
+	stdout, stderr, code := run(t, "launch", "--root", root, "--no-install")
 	if code != ExitOK {
 		t.Fatalf("exit = %d", code)
 	}
