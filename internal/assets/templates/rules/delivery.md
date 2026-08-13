@@ -1,16 +1,15 @@
-# Delivery — branch, worktree, PR
+# Delivery — branch, PR
 
 Work does not happen on `main` and does not end with a green test run. It ends with a
-pull request. Each unit of work gets its own branch in its own worktree:
+pull request. Each unit of work gets its own branch, in the checkout you are in:
 
 ```
-git worktree add ../<repo>-<slug> -b <type>/<slug>
+git switch -c <type>/<slug>
 ```
 
-The user may run several sessions at once, one per feature, merging them as they land.
-The worktree is what makes that possible: each session gets its own directory and none
-touches the checkout the user is in. A shared tree with `git switch` cannot — two
-sessions would fight over one working directory.
+Branch from a green `main`, and leave the checkout back on `main` and clean once the
+work lands. Nothing here needs a second directory: a user running several sessions
+against one repo may give each its own `git worktree`, and that is theirs to set up.
 
 ## Implementation is sequential — you write the code
 
@@ -27,9 +26,10 @@ other way first, and rejected:
   execution cannot produce this: the later task sees the earlier task's code.
 
 Feature-level parallelism has none of that and is supported — a *human* picks the split
-and each session has full context. Worktrees isolate files, not the world: suites
-fighting over a fixed port or one test database must be namespaced or serialized, and
-two features green separately can still break together, which only CI on `main` sees.
+and each session has full context. Separate sessions isolate files, not the world:
+suites fighting over a fixed port or one test database must be namespaced or
+serialized, and two features green separately can still break together, which only CI
+on `main` sees.
 
 ## The delivery sequence
 
@@ -58,5 +58,5 @@ PR is the finish line.
 
 **No remote, or no `gh`** — commit on the branch and stop there, saying so. A branch
 the user can push themselves is a real deliverable; silently skipping the PR is not.
-**Worktrees accumulate** — remove one once its branch is merged, keep it if it holds
-unmerged work, and say which you did.
+**A checkout left dirty or off `main`** is what this shape can leave behind — say what
+is still uncommitted rather than starting the next unit of work on top of it.

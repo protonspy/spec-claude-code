@@ -289,16 +289,16 @@ func writeAt(path, content string) error {
 func TestSetFrontmatterKeepsTheOrderAsked(t *testing.T) {
 	_, content := edited(t, func(e *Editor) {
 		e.SetFrontmatter("pr", "per-plan")
-		e.SetFrontmatter("worktree", "per-group")
+		e.SetFrontmatter("lang", "en")
 		e.SetFrontmatter("merge", "auto")
 	})
 	pr := strings.Index(content, "pr: per-plan")
-	wt := strings.Index(content, "worktree: per-group")
+	lg := strings.Index(content, "lang: en")
 	mg := strings.Index(content, "merge: auto")
-	if pr < 0 || wt < 0 || mg < 0 {
+	if pr < 0 || lg < 0 || mg < 0 {
 		t.Fatalf("a key is missing:\n%s", firstLines(content, 10))
 	}
-	if !(pr < wt && wt < mg) {
+	if !(pr < lg && lg < mg) {
 		t.Errorf("keys came out reversed:\n%s", firstLines(content, 10))
 	}
 }

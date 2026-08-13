@@ -21,8 +21,7 @@ Then take every answer the line above already gave and ask only for what is left
 most of it; re-asking what someone just typed is the friction that stops people using
 this at all. Restate what you took so a wrong reading is cheap to correct, then put
 the remaining questions in one exchange — automatic or gated, one PR at the end or one
-per group, a worktree per group or the current checkout, and what happens once a PR is
-open. **These are the developer's calls.** Anything the plan's frontmatter already
+per group, and what happens once a PR is open. **These are the developer's calls.** Anything the plan's frontmatter already
 records is a proposed answer to confirm, not a decision already made.
 
 The plan is delivered when CI is green on its pull request — never on the strength of

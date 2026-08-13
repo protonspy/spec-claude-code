@@ -29,7 +29,7 @@ issues in untouched code are worth one line at the end, not the body of the revi
 
 That scope is also your read budget. The diff carries the changed lines already: open a
 file only to follow reachability the diff cannot show you, only if the diff touches it,
-and once. In a worktree, read that path rather than the main checkout's copy.
+and once.
 
 ## The method — four passes, in this order
 

@@ -53,7 +53,7 @@ once, rather than inventing a decomposition the author did not write.
    correct cheaply now and expensively after three merges.
 3. **Take every answer the invocation already gave, and ask only for what is left.**
    A prompt like *"implement the whole plan, open one PR at the end, and if CI passes
-   it is delivered"* has answered three of the four questions in one sentence.
+   it is delivered"* has answered most of the table below in one sentence.
    Re-asking what somebody just typed is the friction that stops people using this
    skill at all. Restate what you took, so a wrong reading is cheap to correct, then
    ask for the remainder in a single exchange.
@@ -62,7 +62,6 @@ once, rather than inventing a decomposition the author did not write.
 |---|---|---|
 | Run every group straight through, or stop at each group boundary for review? | automatic · gated | `autonomy: auto` · `gated` |
 | One PR at the end of the plan, or one per group? | at the end · per group | `pr: per-plan` · `per-group` |
-| A git worktree per group, or a branch in the checkout you are already in? | worktree · in place | `worktree: per-group` · `in-place` |
 | Once a PR is open — wait for CI and merge, merge without waiting, or stop and let me merge? | wait and merge · merge now · stop at the PR | `ci` + `merge`, below |
 
 The plan's frontmatter may already carry `autonomy` and `ci` from when it was written.
@@ -70,7 +69,7 @@ The plan's frontmatter may already carry `autonomy` and `ci` from when it was wr
 treat them as decided.** They were given for authoring the plan — this is a loop that
 will open and merge pull requests for hours, which is a larger thing to agree to.
 
-Say what each answer costs, in one line each, because two of them have a consequence
+Say what each answer costs, in one line each, because some of them have a consequence
 that only shows up later:
 
 - **wait and merge** (`ci: wait`, `merge: auto`) — the loop runs to the end unattended.
@@ -78,9 +77,6 @@ that only shows up later:
   branches from a base CI never checked. Say this out loud before accepting it.
 - **stop at the PR** (`merge: manual`) — the loop pauses after every group until the
   merge lands. It is no longer unattended, and that is a legitimate thing to want.
-- **in place** (`worktree: in-place`) — one directory, and this session cannot run
-  alongside another on the same repo. Right when the project's setup is expensive to
-  duplicate; wrong when the user is running several features at once.
 - **one PR at the end** (`pr: per-plan`) — the cheap shape, and measurably the fast
   one: the groups become sequential commits on a single branch, the review subagents
   run once over the whole diff instead of once per group, and CI settles once. What
@@ -93,7 +89,7 @@ that only shows up later:
 again for this plan:
 
 ```bash
-scc patch fm <plan> autonomy=auto ci=wait pr=per-plan worktree=per-group merge=auto
+scc patch fm <plan> autonomy=auto ci=wait pr=per-plan merge=auto
 ```
 
 ```yaml
@@ -101,7 +97,6 @@ scc patch fm <plan> autonomy=auto ci=wait pr=per-plan worktree=per-group merge=a
 autonomy: auto
 ci: wait
 pr: per-plan
-worktree: per-group
 merge: auto
 ---
 ```
@@ -128,9 +123,8 @@ you stop to deliver.
 1. **Start green.** In the primary checkout, `git switch main && git pull --ff-only`.
    Every group branches from the previous group's merge, which is the whole reason
    this is a loop and not a fan-out.
-2. **Branch**, in a worktree or in place, as `worktree:` was answered. The worktree
-   mechanics are `{{.Rules}}/delivery.md`'s; `in-place` means the same
-   branch without the worktree, and it means you must leave the checkout on `main`
+2. **Branch** in the checkout you are in, as `{{.Rules}}/delivery.md` has
+   it. One directory for the whole run, which means the checkout goes back to `main`
    and clean when the group ends.
 3. **Implement the group, one `--next` at a time.** `scc map tasks <plan> --next
    --group N --json` gives you the one task to do; do it, verify it, tick it, ask
@@ -146,9 +140,9 @@ you stop to deliver.
    settle and fix what is red before merging. `merge: auto` means you merge once that
    answer is satisfied; `merge: manual` means you open the PR, say where it is, and
    stop — the loop resumes when the developer's merge is on `main`.
-7. **Back to a green main** — `git switch main && git pull --ff-only`.
-8. **Remove the worktree** now that its branch has landed, if there was one.
-9. **Report the group in one line**, then start the next.
+7. **Back to a green main** — `git switch main && git pull --ff-only`, with nothing
+   uncommitted left behind. The next group branches from there.
+8. **Report the group in one line**, then start the next.
 
 ### `pr: per-plan` — one pull request at the end
 
@@ -221,11 +215,12 @@ Resuming is a question about state, not about prose, so read it as state: `scc m
 whole plan to find one unticked box is the cost this loop would otherwise pay every
 time a session dies. `brief` again only if you have lost what the plan is for.
 
-Which checkout you read that from depends on the shape:
+Which branch you read that from depends on the shape:
 
-- **`pr: per-group` — read `main`.** Pull it and map the plan there; the copy in an
-  old worktree is stale by construction. A group whose boxes are ticked on `main` is
-  done, as is a task naming a spec whose `tasks.md` is fully ticked there — `scc map
+- **`pr: per-group` — read `main`.** Switch to it, pull, and map the plan there; a
+  half-finished group branch is stale by construction. A group whose boxes are ticked
+  on `main` is done, as is a task naming a spec whose `tasks.md` is fully ticked
+  there — `scc map
   trace specs/<feature>/` answers that in one call, without opening either file. An
   open PR means that group is mid-flight; under `merge: manual` that is the expected
   resting state. Finish it before starting another — two open groups is the fan-out
@@ -236,9 +231,7 @@ Which checkout you read that from depends on the shape:
   but no PR is open, the run died between the last group and the review pass: run the
   subagents and push. If the PR is open, the run died waiting on CI.
 
-A leftover worktree whose branch is already merged is debris. Remove it.
-
-A plan whose frontmatter carries no `pr`, `worktree`, or `merge` is a plan no loop has
+A plan whose frontmatter carries no `pr` or `merge` is a plan no loop has
 run over. Ask what the invocation did not already answer.
 
 ## Degrading

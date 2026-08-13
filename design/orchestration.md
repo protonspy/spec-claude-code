@@ -481,7 +481,7 @@ rule there is *ask once, before doing anything, and record the answer*; the mist
 forbids is asking repeatedly, not asking at all. A plan's recorded `autonomy` and `ci`
 were given when the plan was **written**. Starting a loop that will open and merge pull
 requests for hours is a different and larger thing to agree to, and it raises a
-question authoring never had — worktree per group, or the checkout you are in.
+question authoring never had — one pull request per group, or one at the end.
 
 So `plan-run` asks three questions, once, **after reporting the groups**, because the
 answers are only meaningful to someone who can see what they are agreeing to. Anything
@@ -492,15 +492,21 @@ them instead of asking again:
 | Key | Values | Decides |
 |---|---|---|
 | `autonomy` | `auto` · `gated` | straight through, or stop at each group boundary |
-| `worktree` | `per-group` · `in-place` | a worktree per group, or a branch in the current checkout |
+| `pr` | `per-group` · `per-plan` | one pull request per group, or one at the end |
 | `ci` | `wait` · `no-wait` | whether the checks have to settle before the merge |
 | `merge` | `auto` · `manual` | whether the loop merges, or stops at the PR for the developer |
 
-`worktree` and `merge` are new, plan-only, and validated by `plan` on exactly the terms
+`pr` and `merge` are new, plan-only, and validated by `plan` on exactly the terms
 `autonomy` and `ci` are — **only when present**, since a plan no loop has run over is
 not a plan with a defect. They are validated at all because the skill writes them and
-every later session reads them, so `worktree: yes` would silently decide how the next
+every later session reads them, so `merge: whenever` would silently decide how the next
 ten groups get built.
+
+There was a fifth key, `worktree: per-group | in-place`, and it is gone. The worktree
+existed for one case — several sessions at once on one repo — which is the user's own
+setup, and charging every single-session run a directory to create, switch to and
+remember to remove (and a stale checkout whenever the run died before the last step)
+bought nothing back. §9 is a branch in the checkout you are already in.
 
 The tempting alternative was for the loop to **override** `ci: no-wait`, on the
 argument that the next group branches from the merge and an unverified base poisons
@@ -688,30 +694,35 @@ interference, edit conflicts, resource collisions, and cross-task breakage — a
 blind to the failure that partial context actually causes.
 
 Sequential execution has a second benefit worth naming: nothing needs isolating, so
-worktrees, per-agent resource namespacing, merge-conflict resolution, and
+separate checkouts, per-agent resource namespacing, merge-conflict resolution, and
 result attribution all stop being problems rather than being solved.
 
 None of this rules out parallelism as such — only *dispatched, task-level*
 parallelism. Feature-level parallelism is real and supported: the user runs several
-Claude Code sessions, one per feature, each in its own worktree, and merges them into
-`main`. See §9, which lays out why that version survives the objections above.
+Claude Code sessions, one per feature, and merges them into `main`. See §9, which lays
+out why that version survives the objections above.
 
-## 9 · Delivery — branch, worktree, PR
+## 9 · Delivery — branch, PR
 
 Work does not happen on `main` and does not end with a green test run. It ends with a
 pull request.
 
-### Branch in a worktree — one per session
+### Branch in the checkout you are in
 
-Each unit of work — a spec, or a plan's leaf — gets its own branch, developed in its
-own **git worktree**.
+Each unit of work — a spec, or a plan's leaf — gets its own branch, cut from a green
+`main` in the checkout the session is already sitting in, and the checkout goes back to
+`main` and clean once the work has landed. That last part is the whole discipline: the
+next unit of work starts where this one did.
 
-The reason is that **the user may run several Claude Code sessions at once**, one per
-feature, and merge them all into `main` when they land. The worktree is what makes
-that possible: session A on `feat/billing` and session B on `feat/auth` each get their
-own directory, neither disturbs the other, and neither touches the checkout the user
-is actually sitting in. A shared tree with `git switch` cannot do this at all — two
-sessions would fight over one working directory.
+**A git worktree is not part of this, and used to be.** It was there for one case —
+**the user running several Claude Code sessions at once**, one per feature, each
+needing a directory of its own, since a shared tree with `git switch` would have two
+sessions fighting over one working directory. That case is real and still supported.
+But it is the user's setup to make, once, for the runs they actually parallelize, and
+making it a step of the ordinary procedure charged every single-session run for it: a
+directory to create, one to switch into, one to remember to remove, and a stale
+checkout left behind whenever a run died before the last step. What survives is the
+line the worktree was really carrying — leave the checkout clean, on `main`.
 
 So parallelism is back, and it is worth being precise about why this version is fine
 when §8's was not. **The user drives this one; the orchestrator drove that one.** Four
@@ -732,13 +743,13 @@ within each session the accumulated context prevents it outright. The risk drops
 
 ### What running several sessions still costs
 
-Worktrees isolate files. They do not isolate the world outside them, so two of these
-concerns from §8 survive at feature granularity and should be said plainly:
+Separate checkouts isolate files. They do not isolate the world outside them, so two of
+these concerns from §8 survive at feature granularity and should be said plainly:
 
 - **Shared external resources.** Two sessions running the suite at the same time will
   fight over a fixed port, one test database, or a shared temp path. Either the suite
-  namespaces those per worktree, or the test runs have to be serialized. Nothing about
-  a worktree fixes this.
+  namespaces those per checkout, or the test runs have to be serialized. Nothing about
+  a separate directory fixes this.
 - **Cross-feature breakage.** Two features green on their own branches can be broken
   together. Only CI on `main` after the merge sees that — which is a good reason to
   care about the merge order and about `main` staying green.
@@ -783,8 +794,8 @@ stays reproducible from the file, and nobody gets asked twice.
 
 - **No remote, or no `gh`** — commit on the branch and stop there, saying so. A branch
   the user can push themselves is a real deliverable; silently skipping the PR is not.
-- **Worktrees left behind accumulate.** Remove the worktree once its branch is merged;
-  keep it if it still holds unmerged work, and say which.
+- **A checkout left dirty or off `main`** is what this shape can leave behind. Say what
+  is still uncommitted rather than starting the next unit of work on top of it.
 
 ## 10 · The three spec artifacts
 
