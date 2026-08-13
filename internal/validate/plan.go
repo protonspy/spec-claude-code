@@ -237,12 +237,11 @@ func sectionTitles() string {
 // Plan-only, and validated on exactly the terms the kickoff answers are: only when
 // present, because a plan nobody has ever run a loop over is not a plan with a defect.
 // They are checked at all for one reason — the skill writes them and every later
-// session reads them, so `worktree: yes` instead of `per-group` would silently decide
-// how the next ten groups get built.
+// session reads them, so `merge: whenever` instead of `auto` would silently decide how
+// the next ten groups get built.
 var loopValues = map[string]map[string]bool{
-	"worktree": {"per-group": true, "in-place": true},
-	"merge":    {"auto": true, "manual": true},
-	"pr":       {"per-group": true, "per-plan": true},
+	"merge": {"auto": true, "manual": true},
+	"pr":    {"per-group": true, "per-plan": true},
 }
 
 // checkSeal validates the two keys `plan approve` writes. They are checked only when
@@ -270,7 +269,7 @@ func checkSeal(set *finding.Set, file string, fm mdscan.Frontmatter) {
 }
 
 func checkLoopAnswers(set *finding.Set, file string, fm mdscan.Frontmatter) {
-	for _, key := range []string{"worktree", "merge", "pr"} {
+	for _, key := range []string{"merge", "pr"} {
 		value, ok := fm.Get(key)
 		if !ok {
 			continue

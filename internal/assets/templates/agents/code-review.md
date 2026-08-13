@@ -24,7 +24,7 @@ git diff --stat main...HEAD
 line, so re-reading a file to look at them buys nothing. Open a file only when the diff
 is genuinely not enough to judge a change, only if the diff touches it, and only once —
 a review that fetches the same source three times spent its context on what it was
-handed. When the work is in a worktree, read that path, never the main checkout's copy.
+handed.
 
 Then read what the work was supposed to be, on the same terms: `scc map <artifact>` for
 its shape and `scc map show <artifact> <address>` for the part you need. **The artifact

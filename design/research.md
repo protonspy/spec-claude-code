@@ -184,9 +184,11 @@ multi-agent workflows run ~4–7× the tokens of a single-agent session, agent t
 
 ### 3.2 Worktree-per-session is the community pattern, caveats included
 
-The published playbooks say what §9 says: one worktree per parallel session, each running
-its own tests, diffs reviewed and merged in dependency order. They also independently hit
-our §9 resource-collision caveat — recommending `.env.local` per worktree (gitignored) and
+The published playbooks agree on the shape §9 supports for *parallel* work: one worktree
+per parallel session, each running its own tests, diffs reviewed and merged in dependency
+order. (§9 has since stopped making that a step of the ordinary single-session procedure —
+the worktree is the user's setup for the runs they actually parallelize.) They also
+independently hit our §9 resource-collision caveat — recommending `.env.local` per worktree (gitignored) and
 explicit port/database isolation, because a committed shared `.env` is read by every
 worktree. Our "worktrees isolate files, not the world outside them" is the same lesson.
 

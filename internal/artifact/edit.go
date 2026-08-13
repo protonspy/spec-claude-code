@@ -406,7 +406,7 @@ func (e *Editor) Prepend(ref, text string) {
 }
 
 // SetFrontmatter writes one key in the leading block, adding the block if the file
-// has none. It is how the plan-run loop records its answers — worktree, merge, pr —
+// has none. It is how the plan-run loop records its answers — pr, merge, ci —
 // without the skill having to hold the file.
 func (e *Editor) SetFrontmatter(key, value string) {
 	if e.err != nil {

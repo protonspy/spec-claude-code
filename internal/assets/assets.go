@@ -103,7 +103,15 @@ import (
 // file-order one. And the rules stop offering to read the plan at all: `map brief`
 // once plus `map tasks --next` per task is the whole reading surface, which is what
 // gives "never read the plan" the authority to be a rule.
-const Version = "14"
+// 15: delivery is a branch in the checkout you are in, and the worktree is gone from
+// the procedure. It was there for one reason — several sessions at once on one repo —
+// and that is the user's setup to make, not a step every single-session run pays for:
+// a directory to create, one to switch to, and one to remember to remove, with a
+// checkout left behind whenever the run dies before the last step. So `plan-run` asks
+// three questions instead of four, `worktree:` stops being a frontmatter answer, and
+// what survives is the one line the worktree was really carrying — leave the checkout
+// back on `main` and clean, because that is where the next unit of work starts.
+const Version = "15"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.

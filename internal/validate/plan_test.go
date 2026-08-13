@@ -221,14 +221,14 @@ func TestPlanKickoffAnswers(t *testing.T) {
 
 // The answers `plan-run` writes back before it starts a loop. A wrong value is worth
 // a finding because the skill writes these and every later session reads them —
-// `worktree: yes` would quietly decide how the rest of the plan gets built.
+// `merge: whenever` would quietly decide how the rest of the plan gets built.
 func TestPlanLoopAnswers(t *testing.T) {
 	root := t.TempDir()
 	writePlan(t, root, "sweep",
-		plan("---\nworktree: yes\nmerge: whenever\npr: sometimes\n---\n\n", "- [ ] 1.1 (Unit) Do it\n"))
+		plan("---\nmerge: whenever\npr: sometimes\n---\n\n", "- [ ] 1.1 (Unit) Do it\n"))
 	got := planFindings(t, root, "sweep")
-	if n := count(got, "plan.loop-invalid"); n != 3 {
-		t.Errorf("rules = %v, want three plan.loop-invalid findings, got %d", got, n)
+	if n := count(got, "plan.loop-invalid"); n != 2 {
+		t.Errorf("rules = %v, want two plan.loop-invalid findings, got %d", got, n)
 	}
 }
 
@@ -256,7 +256,7 @@ func TestPlanLoopAnswersAreOptional(t *testing.T) {
 		t.Errorf("rules = %v, want no plan.loop-invalid", got)
 	}
 	writePlan(t, root, "run",
-		plan("---\nautonomy: auto\nci: wait\npr: per-plan\nworktree: per-group\nmerge: auto\n---\n\n",
+		plan("---\nautonomy: auto\nci: wait\npr: per-plan\nmerge: auto\n---\n\n",
 			"- [ ] 1.1 (Unit) Do it\n"))
 	if got := planFindings(t, root, "run"); len(got) != 0 {
 		t.Errorf("a plan carrying every valid answer reported %v", got)

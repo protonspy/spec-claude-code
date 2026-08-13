@@ -291,7 +291,7 @@ func frontmatterLine(a *artifact.Artifact) string { return frontmatterOf(a.Front
 
 func frontmatterOf(fm map[string]string) string {
 	var parts []string
-	for _, k := range []string{"status", "autonomy", "ci", "lang", "pr", "worktree", "merge"} {
+	for _, k := range []string{"status", "autonomy", "ci", "lang", "pr", "merge"} {
 		if v, ok := fm[k]; ok {
 			parts = append(parts, k+":"+v)
 		}

@@ -303,7 +303,7 @@ Em plano com `status: approved`:
 | `patch add` | exige `--reason`; **recusa `--number`** (o scc aloca, §7); exige `--group N` ou `--new-group` |
 | `patch rm` | **remoção lógica**: reescreve a task com `_Status removed_` + `_Reason`; nunca apaga linhas |
 | `patch check`/`uncheck` | permitido |
-| `patch fm` | permitido (respostas do loop: `pr`, `worktree`, `merge`) |
+| `patch fm` | permitido (respostas do loop: `pr`, `merge`) |
 | `patch task --text/--method/--number` | **recusado** — muda conteúdo funcional |
 | `patch append`/`prepend`/`replace` | **recusado em plano aprovado** |
 

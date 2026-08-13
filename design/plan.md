@@ -188,7 +188,7 @@ whole point is that a rule is read when it is relevant:
 | `methodology.md` | §3 — impact analysis first, then Unit or TDD; when TDD is mandatory. |
 | `tasks.md` | §4 — the grammar, and "independently verifiable" as the size rule. |
 | `verification.md` | §7 — build, scoped tests, lint, fix; scope not suite. |
-| `delivery.md` | §9 — branch in a worktree, review before the PR, the CI question, degrading. |
+| `delivery.md` | §9 — branch in the checkout, review before the PR, the CI question, degrading. |
 | `specs.md` | §10–§11 — EARS, deltas, design scaled by complexity, spec-anchored. |
 | `knowledge-base.md` | `docs/` — what belongs in the wiki, in an ADR, in the glossary, in the stack. |
 | `project.md` | The project's own test and lint commands. Shipped as a stub, owned by the user from first edit. This file is why scc needs no config file. |
