@@ -35,10 +35,11 @@ jobs:
           # Build/test with a current, patched toolchain. Keep this pin AHEAD of
           # go.mod's directive and do NOT switch to go-version-file: go.mod —
           # install-compat with older toolchains rides on GOTOOLCHAIN=auto.
-          # Pinned to .12 for the GO-2026-5856 crypto/tls fix; the float '1.25'
-          # still resolves to .11 on hosted runners (manifest lag). Float back
+          # Pinned to .13 for the GO-2026-6088 encoding/xml fix, which the pom
+          # reader reaches through xml.Unmarshal (.12 was the GO-2026-5856
+          # crypto/tls fix). The float '1.25' lags on hosted runners; float back
           # once runners catch up.
-          go-version: '1.25.12'
+          go-version: '1.25.13'
           cache: true
 
       - name: go vet
@@ -73,7 +74,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: '1.25.12' # GO-2026-5856 crypto/tls fix; see the test job's note
+          go-version: '1.25.13' # GO-2026-6088 encoding/xml fix; see the test job's note
           cache: true
 
       - name: gofmt
