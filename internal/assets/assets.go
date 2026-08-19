@@ -131,7 +131,13 @@ import (
 // pointed at, and what nobody can justify is reported by name instead of filled in. The
 // ADRs are last and strictest for that reason, and each says in its `## Context` that it
 // was reconstructed after the fact.
-const Version = "17"
+// 18: delivery.md stops naming a second-directory setup at all. Version 15 took it out
+// of the procedure and left the rule pointing at one anyway, which is the same cost in
+// a smaller font: a line preloaded into every request, describing a step nothing in the
+// flow performs. How a user arranges several sessions against one repo is theirs, and
+// saying so is enough — the rule keeps only what it was ever really carrying, which is
+// to leave the checkout back on `main` and clean.
+const Version = "18"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
