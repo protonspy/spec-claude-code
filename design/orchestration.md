@@ -779,15 +779,16 @@ Each unit of work — a spec, or a plan's leaf — gets its own branch, cut from
 `main` and clean once the work has landed. That last part is the whole discipline: the
 next unit of work starts where this one did.
 
-**A git worktree is not part of this, and used to be.** It was there for one case —
-**the user running several Claude Code sessions at once**, one per feature, each
-needing a directory of its own, since a shared tree with `git switch` would have two
-sessions fighting over one working directory. That case is real and still supported.
-But it is the user's setup to make, once, for the runs they actually parallelize, and
-making it a step of the ordinary procedure charged every single-session run for it: a
-directory to create, one to switch into, one to remember to remove, and a stale
-checkout left behind whenever a run died before the last step. What survives is the
-line the worktree was really carrying — leave the checkout clean, on `main`.
+**Nothing here needs a second directory, and the procedure used to make one.** It was
+there for one case — **the user running several Claude Code sessions at once**, one per
+feature, each needing a directory of its own, since a shared tree with `git switch`
+would have two sessions fighting over one working directory. That case is real and
+still supported, but arranging it is the user's own setup, made once for the runs they
+actually parallelize. Making it a step of the ordinary procedure charged every
+single-session run for it: a directory to create, one to switch into, one to remember
+to remove, and a stale checkout left behind whenever a run died before the last step.
+What survives is the line that setup was really carrying — leave the checkout clean, on
+`main`.
 
 So parallelism is back, and it is worth being precise about why this version is fine
 when §8's was not. **The user drives this one; the orchestrator drove that one.** Four
@@ -808,12 +809,12 @@ within each session the accumulated context prevents it outright. The risk drops
 
 ### What running several sessions still costs
 
-Separate checkouts isolate files. They do not isolate the world outside them, so two of
+Separate sessions isolate files. They do not isolate the world outside them, so two of
 these concerns from §8 survive at feature granularity and should be said plainly:
 
 - **Shared external resources.** Two sessions running the suite at the same time will
   fight over a fixed port, one test database, or a shared temp path. Either the suite
-  namespaces those per checkout, or the test runs have to be serialized. Nothing about
+  namespaces those per session, or the test runs have to be serialized. Nothing about
   a separate directory fixes this.
 - **Cross-feature breakage.** Two features green on their own branches can be broken
   together. Only CI on `main` after the merge sees that — which is a good reason to

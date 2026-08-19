@@ -8,8 +8,8 @@ git switch -c <type>/<slug>
 ```
 
 Branch from a green `main`, and leave the checkout back on `main` and clean once the
-work lands. Nothing here needs a second directory: a user running several sessions
-against one repo may give each its own `git worktree`, and that is theirs to set up.
+work lands. Nothing here needs a second directory: how a user runs several sessions
+against one repo at once is theirs to set up.
 
 ## Implementation is sequential — you write the code
 
