@@ -5,9 +5,8 @@ Spec-driven development, scaffolded and checked by `scc`. The methodology lives 
 ## Rules — `{{.Rules}}/<name>.md`
 
 {{if .RulesPreloaded -}}
-{{.Label}} loads `{{.Rules}}/` at session start: they are in front of you, nothing to open.
-The triggers below say *when* each governs — the failure is not a rule you never read,
-it is one you had all along and applied at the wrong moment, or not at all.
+{{.Label}} loads `{{.Rules}}/` at session start — nothing to open. The triggers say *when*
+each governs: the failure is not a rule you never read, it is one you had and misapplied.
 {{- else -}}
 Nothing loads these for you. Open the file whose moment has arrived, and open it again
 in a new session: a rule you read yesterday is not a rule you have read.
@@ -16,6 +15,7 @@ in a new session: a rule you read yesterday is not a rule you have read.
 `caveman.md` is always on: the register you answer in. The rest, by where you are:
 
 - `autonomy.md` — at kickoff, before writing anything
+- `prior-art.md` — then read what `docs/` already decides, before the first artifact
 - `routing.md` — work arrives and needs a vehicle: a spec, or a plan
 - `methodology.md` — starting a task: which cycle, what to run first
 - `verification.md` — code is written and you think it is done
