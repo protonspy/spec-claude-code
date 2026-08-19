@@ -118,6 +118,42 @@ What the two-vehicle split buys is that the *weight* of the record matches the w
 the work. A one-line change gets one checklist item in a plan, not three ceremonial
 files in `specs/`.
 
+### Before either vehicle — read the record
+
+Routing is not the first act. **Before the first artifact of a piece of work exists —
+before `scc spec new`, before `scc plan new`, before a line of code — the orchestrator
+reads what this workspace already settled.** `docs/` is not reference material for when
+someone is stuck: it is the constraint set. An ADR binds the design about to be written,
+`stack.md` says what may be built on, `glossary.md` says what to call it, and a spec
+already covering the area turns new work into a delta (§10) rather than a second
+statement of the same feature.
+
+The failure it prevents is silent, which is why it is a rule rather than a habit. A spec
+written without the pass re-decides a decision somebody already made, names a concept a
+second way, or adds a dependency for something the stack already carries — and none of
+it reads as wrong on review, because it reads as *new work* rather than as a
+contradiction. Under autonomy nobody sees the phase where the contradiction was
+available to notice.
+
+**It is its own rule (`prior-art.md`), not a paragraph in `knowledge-base.md`.** The two
+halves fire at opposite moments: that one is triggered by having learned something, this
+one by being about to write. A read-side instruction filed under the write-side rule is
+read after the spec exists, which is after it was any use.
+
+**The pass has to say what no index says.** `scc map` covers `plans/` and `specs/`, and
+the symbol graph covers code — so `docs/` is the one corpus reached by opening a file.
+That is affordable only because the seeded anchors (§6) are built for it: `glossary.md`
+and `stack.md` are lists, `wiki/index.md` and the ADR filenames are tables of contents.
+The rule says to open a page when its title bears on the work, never to survey the base.
+
+What the pass finds is then **stated and cited**: one or two lines up front naming the
+ADRs that bind and the spec that already covers the area — the material of the first
+checkpoint under `gated`, and the only trace the pass happened at all under `auto` —
+then carried into the artifact as an `adr:` citation, a delta, or a `[[wikilink]]`,
+where it outlives the session. "Nothing here governs this" is a result and is said out
+loud; an empty `docs/` is a young workspace, not a finding, so nothing is invented to
+fill it.
+
 ## 2 · Autonomy — the gate is a question, not a flag
 
 The spec phases are **autonomous by default**: the orchestrator writes
@@ -431,9 +467,9 @@ rewriting a file the user owns.
 `scc update` keeps both trees current regardless, because it works from each
 harness's own manifest rather than from the entry file.
 
-### Which skills ship — the authors of `docs/`, plus one runner
+### Which skills ship — the authors of `docs/`, plus the runners
 
-Seven, in two lists, and each list has its own rule. The first is mechanical: **a
+Eight, in two lists, and each list has its own rule. The first is mechanical: **a
 skill ships for each `docs/` artifact a validator checks, and for nothing else.**
 
 | Skill | Authors | Checked by |
@@ -455,12 +491,13 @@ delivery are rules under `.claude/rules/` (§3, §7, §9) — read when the conc
 live. csdd shipped `tdd-cycle`, `unit-cycle`, and `verify-change` as skills; here
 that would be a second copy of a rule, and the copy is the one that goes stale.
 
-**The one exception, and the line it draws — `plan-run`.** The second list holds
-skills that *run* the methodology rather than describe it, and it holds exactly one.
+**The exceptions, and the line they draw — `plan-run` and `init`.** The second list
+holds skills that *run* the methodology rather than describe it, and it holds two.
 
 | Skill | Runs | Owned by no rule |
 |---|---|---|
 | `plan-run` | a whole `plans/<name>.md`, group by group | the loop **across** units of work |
+| `init` | a repository's whole knowledge base, from the code already there | the order **across** the six authors, and the bar on reconstructed knowledge |
 
 The rule above is what makes it admissible rather than a leak. §9's delivery sequence
 ends at one merged pull request, because that is where one unit of work ends — a spec,
@@ -515,6 +552,34 @@ who gets to weigh it. Stating the cost at the moment of the question is how a to
 respects a decision it disagrees with; overriding is how it stops being trusted.
 `no-wait` therefore stays available inside a loop, and the skill says out loud what it
 buys and what it costs before accepting it.
+
+**`init` clears the same bar, one layer up.** Every knowledge skill is triggered by a
+concern going live — something was learned, a decision was made, a dependency was
+added. None of them fires when the base is *empty*, and no rule can order them, because
+a rule is read at the moment its own concern arrives and this is the moment before any
+of them has one. Bootstrapping an existing repository needs three things no rule holds:
+a survey that precedes every artifact, an order across the six (checkable first,
+interpretive last, `scc validate` between stages), and a bar that only applies here.
+
+That bar is the reason it is a skill rather than a `--bootstrap` flag on the CLI.
+**Everything written on this run is reconstructed rather than remembered**, so nothing
+goes in that cannot be pointed at — a manifest, a CI file, a commit, a migration — and
+what nobody can justify is *reported by name* instead of filled in with something
+plausible. A gap is visible and an invention is believed, and the knowledge base's whole
+value is that it can be trusted without checking. The ADRs are last and strictest for
+exactly that reason, and each says in its own `## Context` that it was written after the
+fact and from what.
+
+It shares its name with `scc init` deliberately: the CLI command lays the four anchors
+down empty, which is all a binary can do, and the skill is what fills them. So a person
+who has just scaffolded a repository and asks "now what" has one word to type, and the
+skill's first act is to check that the workspace exists at all — the harness, when it
+does not, is the user's call and not the agent's.
+
+**What it deliberately does not write is `specs/`.** Restating a working system as
+requirements is the failure mode of every documentation pass; §11 already says a spec
+meets existing code as a **delta**, so the first spec in a bootstrapped repository is
+written by the next change rather than by this run.
 
 **One slash command per skill, namespaced `scc-`.** A skill is model-invoked through
 its description; a command is the human saying *now*. Both are cheap, they are derived

@@ -111,7 +111,27 @@ import (
 // three questions instead of four, `worktree:` stops being a frontmatter answer, and
 // what survives is the one line the worktree was really carrying — leave the checkout
 // back on `main` and clean, because that is where the next unit of work starts.
-const Version = "15"
+// 16: prior-art.md — the knowledge base is read before the first artifact is written,
+// not consulted once someone is stuck. `docs/` is the constraint set: an ADR binds the
+// design, `stack.md` says what may be built on, `glossary.md` says what to call it. It
+// is a rule of its own rather than a paragraph in knowledge-base.md because the two
+// halves fire at opposite moments — that one is triggered by having learned something,
+// this one by being about to write — and a read-side instruction filed under the
+// write-side rule is read after the spec exists, which is after it was any use. It
+// also has to state the thing no index states: `scc map` covers `plans/` and `specs/`
+// and the symbol graph covers code, so `docs/` is the one corpus reached by opening a
+// file, and the anchors are what keep that cheap.
+// 17: the `init` skill and `/scc-init` — the knowledge base is bootstrapped from a
+// repository that already exists. It is the counterpart to the CLI command of the same
+// name, which lays the four anchors down empty and can do nothing else: what fills them
+// is a survey of the code, and a survey is judgment. The skill holds the order across
+// the six knowledge authors (checkable first, interpretive last, `scc validate` between
+// stages) and one bar the authors cannot state for themselves — everything written on
+// this run is reconstructed rather than remembered, so nothing goes in that cannot be
+// pointed at, and what nobody can justify is reported by name instead of filled in. The
+// ADRs are last and strictest for that reason, and each says in its `## Context` that it
+// was reconstructed after the fact.
+const Version = "17"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -178,6 +198,7 @@ func Workspace(h paths.Harness) []File {
 		"caveman.md",
 		"routing.md",
 		"autonomy.md",
+		"prior-art.md",
 		"methodology.md",
 		"tasks.md",
 		"verification.md",
@@ -326,7 +347,15 @@ var KnowledgeSkills = []string{"adr", "codewiki", "glossary", "prd", "stack", "w
 // it from the merge the last group produced, and recovering the position from `main`
 // when a session dies mid-plan. That is a procedure, and a procedure a person invokes
 // needs an entry point they can type.
-var WorkflowSkills = []string{"plan-run"}
+//
+// init clears it for the same reason, one layer up. The knowledge skills each own one
+// artifact and are triggered by a concern going live — something was learned, a
+// decision was made, a dependency was added. None of them fires when the whole base is
+// empty, and no rule can say which artifact comes first, because a rule is read at the
+// moment its own concern arrives. Bootstrapping an existing repository is the one job
+// that needs the order *across* the six, a survey before any of them, and a bar on
+// what may be written when the answer is being reconstructed rather than remembered.
+var WorkflowSkills = []string{"init", "plan-run"}
 
 // Skills is every skill scc ships, knowledge first. Both the skill directory and its
 // slash command are derived from this one list, so the two cannot drift apart, and a
