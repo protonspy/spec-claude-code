@@ -881,8 +881,86 @@ Once the last task is done:
    spending their attention on findings a subagent would have caught is the waste
    this ordering avoids. One fix-and-re-review round; a second means the finding
    wants a person.
-3. **Commit and push** — Conventional Commits, generated from the diff and the spec.
-4. **Open the PR.**
+3. **Commit and push** — Conventional Commits, generated from the diff and the spec,
+   and carrying no attribution (below).
+4. **Open the PR**, and record it on the spec: `scc spec track <feature> --pr <n>`.
+
+### The record carries no attribution
+
+A commit message and a PR body say what changed and why. They do not say what typed
+it: no `Co-Authored-By` for an assistant, no session link, no generated-with footer,
+no naming of a model, a vendor, or a harness — not in the message, not in the PR title
+or body, not in a branch name.
+
+This is not modesty and it is not about hiding the tool. **The work is the user's.** A
+trailer is a claim on authorship, and a tool that signs what it did for somebody is
+taking a share of something it was hired to produce; the honest signature is the diff,
+which is already in the record and already attributable by whoever cares to look. The
+practical half matters too: these lines outlive the session that wrote them, they end
+up in release notes, `git shortlog`, and every downstream fork, and a repository whose
+history names a product from 2026 has dated itself for nothing.
+
+Harness defaults push the other way — several of them append a footer unless told not
+to. So this is stated in the rule that owns delivery rather than left to the tool's
+own configuration, and it is why `TestNoTemplateShipsAnAttributionFooter` exists: a
+template that demonstrated a footer would teach the example, and the example is what
+gets copied.
+
+### The spec records where it is being built
+
+A branch is the one part of this methodology that left no trace in the artifacts. The
+spec said what the feature does and which boxes were ticked; git said a branch called
+`feat/user-auth` had been sitting unmerged for three weeks. Nothing joined the two, so
+*which of these actually shipped* was answerable only by somebody holding both halves —
+and under `autonomy: auto` there is nobody holding either.
+
+Three keys on `requirements.md`, beside the kickoff answers, because that file is
+already the spec's header:
+
+```yaml
+branch: feat/user-auth
+pr: 28
+delivery: in-progress | in-review | merged | abandoned
+```
+
+`scc spec track <feature> --here` writes the branch you are on, `--pr <n>` the pull
+request; `scc spec sync` reads git and the forge back into every spec, and `scc spec
+list` shows the result beside the phases. The vocabulary is closed for the same reason
+a task's flags are: an open one produces three spellings of *done* inside a month, and
+"what is still unfinished" is exactly the question a synonym destroys. Absent is the
+fifth state and needs no name — it is what every spec written before this looks like,
+and it is why the validator grades these only when they are present.
+
+**The split between the two commands is the one scc makes everywhere.** `track` records
+what the caller knows and cannot get wrong. `sync` derives what git knows and can. And
+neither one guesses: a branch that has been deleted, with no pull request to ask about,
+is reported undetermined and left exactly as it was, because a merged branch and an
+abandoned one are indistinguishable once the ref is gone.
+
+Two decisions inside `sync` are worth naming, because both were wrong in the first
+version and the failures were instructive:
+
+- **Merged is not "is an ancestor of the base".** A branch created ten seconds ago and
+  never committed to satisfies that trivially, so the first run declared a spec
+  delivered before a line of it existed. Merged is *ahead == 0 and behind > 0*:
+  everything the branch had is on the base, and the base has moved on since. The one
+  case left ambiguous is a fast-forward merge nothing has advanced past, where no ref
+  can tell "just branched" from "just landed" — resolved as **not** merged, because
+  this record exists to surface unfinished work and the error that leaves a loose end
+  visible is the one to make.
+- **A settled record stops being re-litigated.** A deleted branch on a spec already
+  marked `merged` is not an ambiguity worth reporting: it is what a merged branch is
+  supposed to look like, and warning about it would put a line on every finished spec
+  forever, which is how a report stops being read.
+
+`gh` is the only thing that can tell merged from abandoned once the branch is gone, and
+it is optional like every other binary scc talks to: without it those rows say so, once
+per run rather than once per spec.
+
+**Plans are deliberately not tracked this way yet**, and the reason is a name rather
+than a principle: `pr:` on a plan already means the delivery *shape* (`per-plan` /
+`per-group`) that plan-run asks for at kickoff, so one key would carry two meanings on
+one file. The day plan tracking is wanted, that answer gets renamed first.
 
 ### Waiting for CI is a question, not a policy
 

@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	"github.com/protonspy/spec-claude-code/internal/artifact"
 	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/mdscan"
@@ -33,6 +35,10 @@ func runSpec(args []string) int {
 		return runSpecShow(args[1:])
 	case "delete":
 		return runSpecDelete(args[1:])
+	case "track":
+		return runSpecTrack(args[1:])
+	case "sync":
+		return runSpecSync(args[1:])
 	case "validate":
 		return runSpecValidate(args[1:])
 	case "help", "-h", "--help":
@@ -156,6 +162,10 @@ type specEntry struct {
 	Tasks        bool   `json:"tasks"`
 	Autonomy     string `json:"autonomy,omitempty"`
 	CI           string `json:"ci,omitempty"`
+	// Delivery is where this spec is being built and how far that has got. It is
+	// listed beside the phases because they answer one question between them: the
+	// phases say whether the spec is written, this says whether the work shipped.
+	Delivery artifact.Delivery `json:"delivery,omitempty"`
 }
 
 func runSpecList(args []string) int {
@@ -200,9 +210,29 @@ func runSpecList(args []string) int {
 		return ExitOK
 	}
 	for _, s := range specs {
-		render.Info(fmt.Sprintf("%s  %s", s.Name, phases(s)))
+		render.Info(fmt.Sprintf("%s  %s%s", s.Name, phases(s), deliveryNote(s.Delivery)))
 	}
 	return ExitOK
+}
+
+// deliveryNote is the record on one line, or nothing at all when there is none. A
+// spec nobody has started should not have to say so on every listing — the absence is
+// already the answer, and a column of "not started" is a column nobody reads.
+func deliveryNote(d artifact.Delivery) string {
+	if !d.Tracked() {
+		return ""
+	}
+	parts := []string{}
+	if d.State != "" {
+		parts = append(parts, d.State)
+	}
+	if d.Branch != "" {
+		parts = append(parts, d.Branch)
+	}
+	if d.PR != 0 {
+		parts = append(parts, fmt.Sprintf("#%d", d.PR))
+	}
+	return "  " + strings.Join(parts, " · ")
 }
 
 func runSpecShow(args []string) int {
@@ -233,6 +263,12 @@ func runSpecShow(args []string) int {
 	}
 	render.Info(render.Bold(s.Name) + "  " + s.Path)
 	render.Info("phases: " + phases(s))
+	if s.Delivery.Tracked() {
+		render.Info("delivery:" + deliveryNote(s.Delivery))
+	} else {
+		render.Info(fmt.Sprintf("delivery: not recorded — `%s spec track %s --here` once you branch",
+			prog(), s.Name))
+	}
 	if s.Autonomy != "" || s.CI != "" {
 		render.Info(fmt.Sprintf("kickoff: autonomy=%s ci=%s", orUnset(s.Autonomy), orUnset(s.CI)))
 	} else {
@@ -300,6 +336,7 @@ func describeSpec(root, name string) specEntry {
 		if fm, err := mdscan.ParseFrontmatter(string(b)); err == nil {
 			s.Autonomy, _ = fm.Get("autonomy")
 			s.CI, _ = fm.Get("ci")
+			s.Delivery = artifact.ReadDelivery(fm.Values)
 		}
 	}
 	return s
@@ -341,9 +378,22 @@ func specUsage() {
   %s spec list
   %s spec show <feature>
   %s spec delete <feature> --force
+  %s spec track <feature> [--here|--branch <b>] [--pr <n>] [--delivery <state>]
+  %s spec sync [<feature>…] [--base <b>] [--dry-run]
   %s spec validate [<feature>]
 
 A spec is for work whose *what* and *how* need settling before code:
 specs/<feature>/requirements.md, design.md, tasks.md. Everything else is a plan.
-`, prog(), prog(), prog(), prog(), prog())
+
+The delivery record — %s: · %s: · %s: — says where a spec is being built and how far
+that has got, in requirements.md beside the kickoff answers. "track" writes what you
+know the moment you know it; "sync" asks git and the forge and writes back what they
+say, so a branch cannot go quietly unfinished. Nothing is guessed: a deleted branch
+with no PR to ask about is reported undetermined and left alone, because merged and
+abandoned look identical once a branch is gone.
+
+  %s: %s
+`, prog(), prog(), prog(), prog(), prog(), prog(), prog(),
+		artifact.KeyBranch, artifact.KeyPR, artifact.KeyDelivery,
+		artifact.KeyDelivery, strings.Join(artifact.DeliveryStates(), " · "))
 }

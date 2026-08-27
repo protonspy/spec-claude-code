@@ -110,6 +110,14 @@ These landed after phase 10, and all are documented in `design/orchestration.md`
 
   **`@path` is the stale check** — the notes half of the codewiki citation rule, since a note about code that no longer exists is read as current, which is worse than the comment it replaced: that one at least died with the file. At *write* time it is a warning and never a block, because a note about a file this branch has not created yet is the note most worth having; `notes add` otherwise writes under the same verify-and-roll-back contract as `scc patch`. The ninth validator also reports the failure this file cannot tolerate quietly: a hand-written line that missed the grammar, which no query will ever return.
 
+- **The spec records where it is being built: `scc spec track` and `scc spec sync`.** A branch was the one part of this methodology that left no trace in the artifacts — the spec said which boxes were ticked, git said a branch had been unmerged for three weeks, and nothing joined the two, so *which of these actually shipped* was answerable only by somebody holding both halves. Under `autonomy: auto` that is nobody. Three keys on `requirements.md` beside the kickoff answers — `branch:`, `pr:`, `delivery: in-progress|in-review|merged|abandoned` — with the vocabulary closed for the reason a task's flags are, and graded by the validator only when present, so every spec written before this keeps passing.
+
+  **`track` records what the caller knows; `sync` derives what git knows.** `--here` takes the branch from the checkout, `--pr <n>` the pull request, and `scc spec sync` walks every spec, asks git and (when installed) `gh`, and writes the answer back under the same verify-and-roll-back contract as `scc patch`. `scc spec list` shows the record beside the phases. **Neither guesses**: a deleted branch with no PR to ask about is reported undetermined and left alone, because merged and abandoned are indistinguishable once the ref is gone.
+
+  Two things in `sync` were wrong in the first cut and are worth keeping wrong-proof. **Merged is not "is an ancestor of the base"** — a branch created ten seconds ago satisfies that trivially, and the first run declared a spec delivered before a line of it existed; it is *ahead == 0 and behind > 0*, and the fast-forward case that no ref can resolve is called **not** merged, because this record exists to surface unfinished work. And **a settled record is not re-litigated**: a deleted branch on a spec already `merged` is what a merged branch looks like, and warning about it would put a line on every finished spec forever.
+
+  **Plans are deliberately out for now**, for a naming reason rather than a principle: `pr:` on a plan already means the delivery *shape* plan-run asks for at kickoff (`per-plan`/`per-group`), so one key would carry two meanings on one file. Plan tracking starts by renaming that answer.
+
 - **The five seeded `docs/` anchors** (`assets.Seeds`). `init` writes `glossary.md`, `stack.md`, `notes.md`, `wiki/index.md`, and `wiki/changelog.md` — the knowledge base's only fixed-name documents, each holding the format its validator checks. A seed is written once and tracked nowhere: not in the manifest, not by `scc update`.
 
 `scc` is a redesign of `csdd` (`github.com/protonspy/csdd`), narrowed to spec-driven development and deliberately leaner. When reaching for something from there, port the *decision*, not the file. Already decided against: a TUI, an embedded web dashboard, an MCP server, a devcontainer.
@@ -156,7 +164,7 @@ cmd/scc/main.go         os.Exit(cli.Run(os.Args[1:]))
    plain files on disk: <harness>/ · specs/ · plans/ · docs/ · CLAUDE.md|AGENTS.md
 ```
 
-Three packages sit off to the side of that tree — `rtk`, `headroom`, `codegraph` — reached only from `internal/cli`. They are the third-party integrations, and they are the only code that starts another process.
+Four packages sit off to the side of that tree — `rtk`, `headroom`, `codegraph`, `git` — reached only from `internal/cli`. They are the third-party integrations, and they are the only code that starts another process. `git` is the one scc never installs and never writes with: every call in it is a query.
 
 `internal/cli/cli.go` is the whole dispatcher: `Run(args)` switches on `args[0]` and hands off to `run<Resource>` in a file named for that resource. Each handler owns its own `flag.FlagSet`. Adding a subcommand means adding a case there plus one file — nothing is registered dynamically, so the command set is readable in one place.
 
@@ -178,10 +186,11 @@ Three packages sit off to the side of that tree — `rtk`, `headroom`, `codegrap
 | `internal/validate` | The nine validators, one file each, sharing `mdscan` and `finding`. The exception is `stack_manifests.go`: the seven dependency-file readers age on their own schedule, so they sit beside the rule rather than inside it. |
 | `internal/rtk` | RTK's marker pair (`rtk.Markers`, spliced by `internal/mdblock`), the foreign-block detection that names Headroom's copy, and finding or `cargo install`ing the binary. |
 | `internal/headroom` | Headroom's agent-slug table, the `wrap` argument vector, the MCP opt-out discovered from `wrap <agent> --help`, and finding or installing the binary (uv, then pip — never npm, which ships the SDK and no CLI). The slugs live here rather than on `paths.Harness` because they are Headroom's vocabulary, not scc's layout. |
+| `internal/git` | `git` and `gh`, read-only: does this branch still exist, has it landed, and what did the forge do with the pull request. Two binaries in one package because the question has two halves and no caller should have to route between them — and nothing here installs or writes, so running it over every spec in a workspace is safe by construction. |
 | `internal/codegraph` | CodeGraph's argument vectors (`init`/`sync`/`index`/`status`/`query`/`explore`), the `.codegraph/` presence test, `codegraph.Markers` for the usage block `scc launch` splices, and finding or `npm install -g`ing the binary. Composes command lines and reads nothing inside the graph — the database is CodeGraph's schema on CodeGraph's schedule. |
 | `internal/cli` | The dispatcher and every command handler. |
 
-`internal/rtk`, `internal/headroom`, and `internal/codegraph` are the only packages that shell out to another program. Keep that boundary there rather than in a command handler: a third party's binary name, install command, and argument vocabulary all age on that third party's schedule, and one package per integration is what keeps a version bump from touching the dispatcher. Headroom's renamed MCP flag is the worked example — the fix stayed inside `internal/headroom`, and nothing else in the tree knows the flag exists.
+`internal/rtk`, `internal/headroom`, `internal/codegraph`, and `internal/git` are the only packages that shell out to another program. Keep that boundary there rather than in a command handler: a third party's binary name, install command, and argument vocabulary all age on that third party's schedule, and one package per integration is what keeps a version bump from touching the dispatcher. Headroom's renamed MCP flag is the worked example — the fix stayed inside `internal/headroom`, and nothing else in the tree knows the flag exists.
 
 `go.mod` is stdlib-only. Keep it that way unless a dependency earns its place — the binary is distributed to six platforms and every dep is a supply-chain surface.
 
@@ -239,3 +248,5 @@ Tests live beside the code and lean on a few package-local helpers rather than a
 ## Commits
 
 Conventional Commits, scoped by package or surface, with a descriptive subject written as a claim about behavior — e.g. `feat(cli): return exit 2 when spec validation reports findings`. Changes land through PRs on `main`.
+
+**No attribution, in a commit message or a PR body.** No `Co-Authored-By` for an assistant, no session link, no generated-with footer, no naming of a model, vendor, or harness. This is the rule scc ships in `rules/delivery.md`, and it binds scc's own history first — a tool that told every workspace not to sign its work and then signed its own would be worth ignoring on both counts. Harness defaults append these unless told not to, so a session working here overrides that default rather than following it.
