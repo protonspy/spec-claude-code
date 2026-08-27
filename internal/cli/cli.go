@@ -117,7 +117,7 @@ Commands:
   init      Scaffold a workspace: rules, agents, skills, commands, layout, manifest
   update    Bring the managed files onto this build's templates, after showing the plan
   rtk       Install RTK if missing and put its usage block in the entry file
-  launch    Start a harness in this workspace, with its symbol graph and RTK block current
+  launch    Start a harness here, with its symbol graph and RTK block current; --jail sandboxes it
   graph     The workspace's symbol graph — build | sync | status | query | explore
   spec      Create and inspect specs — new | list | show | delete | validate
   plan      Create and inspect plans — new | list | delete | validate

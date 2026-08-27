@@ -986,6 +986,59 @@ stays reproducible from the file, and nobody gets asked twice.
 - **A checkout left dirty or off `main`** is what this shape can leave behind. Say what
   is still uncommitted rather than starting the next unit of work on top of it.
 
+### The sandbox — the one integration that refuses
+
+An agent needs filesystem access to do its job. The same access lets it run `rm -rf`,
+read `~/.aws`, or ship a private key somewhere — by accident, on an instruction
+planted in a file it was asked to read, or through a dependency it installed. §2's
+`auto` sharpens that rather than softening it: autonomy means nobody is watching the
+step where noticing was still possible, which is exactly the argument for putting a
+boundary around the whole session instead of around each decision inside it.
+
+`scc launch --jail` starts the agent inside [ai-jail], which sandboxes with
+bubblewrap on Linux and `sandbox-exec` on macOS. It wraps *outermost* — Headroom
+included — so the jail contains the session and everything the session starts.
+
+**It refuses rather than degrading, and that is the whole design.** Headroom,
+CodeGraph and RTK all end in the agent starting anyway when their binary is missing,
+because each of the three is an enhancement and a launcher that failed over a
+compression proxy would be putting its own preference above the thing the user asked
+for. A sandbox inverts that. It *is* the thing the user asked for, by name, and the
+failure mode is not a worse session — it is somebody who typed `--jail`, watched an
+agent start, and believes they are contained. A false belief about containment is
+worse than a known absence of it, because with the known absence they would not have
+run the thing at all. So a missing binary, a declined install, an unattended run, or
+a platform with no backend all end in nothing starting, and the refusal is decided
+before the graph is built or the entry file is touched: a launch that cannot be
+jailed leaves the workspace exactly as it found it.
+
+**scc decides two flags and no more.** ai-jail defaults network and credential state
+to off, which is the right default for a sandbox and the wrong one for a launcher: an
+agent with neither cannot reach the model it is or authenticate as anyone, so
+`ai-jail claude` bare is a jail that starts nothing. Those two are *function*.
+Everything else — lockdown, denied paths, extra mounts, Docker, the browser — is
+*policy*, and policy belongs in ai-jail's own `~/.ai-jail` and `./.ai-jail`, which it
+reads by itself and scc never writes. A launcher that quietly loosened somebody's
+sandbox policy would be the worst kind of helpful. `--jail-arg` is the per-run escape
+hatch, and it comes last on the command line so a flag the user typed wins over the
+two scc supplies.
+
+Even those two are read off `ai-jail --help` rather than compiled in — the lesson
+§6's Headroom integration already paid for — and a build advertising neither gets
+**no substitute**, only a warning. Guessing at a replacement spelling is precisely how
+a sandbox ends up opened by the tool that was trying to help.
+
+**scc integrates the binary and reimplements nothing.** ai-jail began as the shell
+script in [Akita's article][akita], and copying that script into Go was the obvious
+move and the wrong one: the thing does namespaces, Landlock and seccomp, it has since
+grown a second platform backend, and a half-copy of a sandbox is worse than none for
+the same reason the refusal above exists. Windows has no backend and is unlikely to
+get one, since there is nothing there for bubblewrap or `sandbox-exec` to stand on;
+WSL2 is the answer, and it is a real one rather than a workaround.
+
+[ai-jail]: https://github.com/akitaonrails/ai-jail
+[akita]: https://akitaonrails.com/2026/01/10/ai-agents-garantindo-a-protecao-do-seu-sistema/
+
 ## 10 · The three spec artifacts
 
 §1 routes work into a spec at `specs/<feature>/`; this is what those three files

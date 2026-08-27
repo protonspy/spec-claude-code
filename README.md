@@ -34,6 +34,7 @@ Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc i
 | `skill validate` | Conformance to the published [Agent Skills](https://agentskills.io/specification) spec. |
 | `validate` | Every applicable validator, one exit code, one JSON document. |
 | `rtk` | Wires in [RTK](https://github.com/rtk-ai/rtk): installs it if missing, then splices its usage block into the entry file. |
+| `launch` | Starts the harness with the workspace's symbol graph and RTK block current — and, with `--jail`, inside a sandbox. |
 
 ### RTK, optionally
 
@@ -56,6 +57,33 @@ the markers is untouched either way.
 
 Opt-in on purpose: it tells the agent to prefix every command with a binary the
 machine may not have. `--no-install` writes the block and never touches cargo.
+
+### A sandbox, optionally
+
+An agent needs filesystem access to do its job, and the same access lets it run
+`rm -rf`, read `~/.aws`, or ship a key somewhere — by accident, on a poisoned
+instruction in a file it read, or through a dependency it installed. `scc launch
+--jail` starts it inside [ai-jail](https://github.com/akitaonrails/ai-jail), which
+sandboxes with bubblewrap on Linux and `sandbox-exec` on macOS:
+
+```bash
+npx @protonspy/scc launch claude --jail             # the agent, contained
+npx @protonspy/scc launch claude --jail --jail-arg --lockdown
+```
+
+**It refuses rather than degrading.** Every other integration here starts the agent
+anyway when its binary is missing, because every other one is an enhancement. A
+sandbox is the property you asked for by name: if ai-jail is not installed, or the
+platform has no backend (Windows — use WSL2), nothing starts and it says why. An
+agent that started unjailed would hand you the confidence of containment without the
+containment.
+
+scc passes exactly the two flags that let an agent run at all — a network to reach
+its model and the credential state to authenticate — and reads even those off
+`ai-jail --help` rather than hardcoding them. Everything else is policy and belongs
+in ai-jail's own `~/.ai-jail` / `./.ai-jail`, which scc never writes.
+
+The idea, and the tool, are [Fábio Akita's](https://akitaonrails.com/2026/01/10/ai-agents-garantindo-a-protecao-do-seu-sistema/).
 
 ### Three harnesses, one methodology
 
