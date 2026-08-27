@@ -333,6 +333,7 @@ a shape is checkable. Findings exit `2`.
 | **codewiki** | at `docs/codewiki/`, one page per area: every `[path:start-end]()` citation resolves against the checkout · slugs unique and derived from their headings · no section citing nothing |
 | **adr** | numbering contiguous · superseded records marked rather than edited · `adr:<slug>` citations resolve |
 | **glossary** | each concept has one canonical term · an avoided synonym used as a whole token is a finding |
+| **notes** | at `docs/notes.md`, one line per note: every line under `## Log` parses as `- n-0001 YYYY-MM-DD #tag @path — text` · ids unique · at least one tag · a `@path` that no longer resolves. A line that missed the grammar is the finding that matters — it is invisible to every query, so the note is already lost |
 | **stack** | every direct dependency the project declares appears in `docs/stack.md` — a dependency file is structured data, not source, so this is checkable without reading code. Seven readers today: `go.mod`, `package.json`, `requirements.txt`, `pyproject.toml`, `Cargo.toml`, `composer.json`, `pom.xml` |
 
 Two of these are worth calling out because they are stronger than they look.
@@ -361,7 +362,7 @@ understood. That is the same rule as "a manifest scc cannot parse produces no fi
 and it is why those three are absent: their manifests are executable code, and reading
 one honestly would mean evaluating it.
 
-### The discipline eight validators require
+### The discipline nine validators require
 
 A catalogue this size can destroy its own value. In studied static-analysis deployments
 **35–91% of warnings are non-actionable**, false positives are the single most common reason
@@ -615,16 +616,16 @@ firing on scc's own output is the one defect that teaches users to disbelieve th
 other seven. `TestSkillsNameRulesByTheirHarnessPath` catches what no validator can
 see — a `../..` sitting inside a code span is silently useless to whoever reads it.
 
-### The four seeded anchors — `docs/` is not an empty tree
+### The five seeded anchors — `docs/` is not an empty tree
 
-`init` writes `docs/glossary.md`, `docs/stack.md`, `docs/wiki/index.md`, and
-`docs/wiki/changelog.md`, each one a heading and the format its validator checks.
+`init` writes `docs/glossary.md`, `docs/stack.md`, `docs/notes.md`, `docs/wiki/index.md`,
+and `docs/wiki/changelog.md`, each one a heading and the format its validator checks.
 These are the knowledge base's only documents with a *fixed name*; a wiki page, an
 ADR, and a codewiki page are named after what they are about, so those directories
 are correctly scaffolded empty.
 
 The reason is the same one that makes the skills ship: a workspace that arrives with
-eight validators and an empty `docs/` demands conformance to documents nobody was
+nine validators and an empty `docs/` demands conformance to documents nobody was
 handed. Seeding also improves the first finding a real project sees — a repo with
 dependencies used to get one `stack.missing`, and now gets one line per undocumented
 dependency, pointing at a file that already explains what an entry looks like.
@@ -636,6 +637,50 @@ knowledge, which scc has no improved version of to deliver. Untracked also settl
 the two-harness case without a rule of its own, because `docs/` is one tree per repo
 rather than one per harness — the second `init` finds the files already there and
 leaves them alone, exactly as it does for any existing file.
+
+### `docs/notes.md` — the note log, and why the code stops being one
+
+A comment says what a thing is and how to use it. Everything else that gets written
+beside code — the gotcha, the why-not, the "careful, this looks wrong and is not" —
+reaches exactly one reader: the one already looking at that line. Nobody asking *what
+do we know about this area* finds it, no command lists it, and it dies with the file.
+So it moves to one place, and the place is queryable.
+
+**One note is one line**, index fields first:
+
+```markdown
+- n-0042 2026-02-09 #gotcha @internal/cli/launch.go — wrap writes MCP config to the agent's own file, so it outlives the session
+```
+
+The single line is the whole design, and it buys three things at once. A match is a
+*whole note*, so `grep ' #gotcha ' docs/notes.md` and `scc notes find --tag gotcha`
+answer the same question and neither has to reason about where a record ends — which
+is what lets a file that centralizes every note never be a file anybody reads. It
+closes the door the v1 plan format left open, where `## Notes` grew to half the file
+because nothing forbade it: here there is nowhere for prose to go, and a thought that
+needs a second line is a wiki page, an ADR, or a task, all three of which already
+exist. And it makes the fields addressable — `#tag` is the index the log is queried
+by, `@path` is what keeps a note attached to code without living inside it, and the
+id is what a commit message or a spec cites.
+
+**`scc notes` is the writer, not a gatekeeper.** `add` allocates the id and gets the
+format right, because a format nobody can be made to type is a format that decays;
+`find`, `tags`, `paths` and `show` are the reading surface. The line stays greppable
+anyway — the CLI exists for the questions a substring cannot answer (which tags exist
+before I coin a fourth, what is known about this path, what is new since last week),
+not to stand in front of the file.
+
+**A number is spent, never reused.** `rm` takes the note's text out and leaves an
+HTML-comment tombstone where it stood, so a citation to `n-0042` can go dangling but
+can never come to mean a different note. The tombstone is invisible to a rendered
+read, to a grep for a tag, and to every parser except the one that allocates the next
+id.
+
+**`@path` is the stale check**, and it is the notes half of the codewiki citation
+rule: a note about code that no longer exists is read as current, which is worse than
+the comment it replaced — that one at least died with the file. At the moment of
+*writing* it is only a warning, because a note about a file this branch has not
+created yet is the note most worth having.
 
 ## 7 · Agents — review only
 

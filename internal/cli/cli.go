@@ -74,6 +74,8 @@ func Run(args []string) int {
 		return runMap(args[1:])
 	case "patch":
 		return runPatch(args[1:])
+	case "notes":
+		return runNotes(args[1:])
 	case "skill":
 		return runSkill(args[1:])
 	case "validate":
@@ -121,6 +123,7 @@ Commands:
   plan      Create and inspect plans — new | list | delete | validate
   map       Read a plan or spec by address, not by the whole file — outline | tasks | show | blocks | find | trace
   patch     Change one at an address, without reading it first; verified and rolled back on findings
+  notes     The project's note log in docs/notes.md — add | find | show | tags | paths | rm
   skill     Agent Skills conformance — validate
   validate  Run every applicable validator; exit 2 on findings
   version   Print the version

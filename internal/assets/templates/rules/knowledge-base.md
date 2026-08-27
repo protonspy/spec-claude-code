@@ -12,12 +12,13 @@ docs/
   codewiki/      narrated code, citing exact line ranges
   glossary.md    one canonical term per concept
   stack.md       adopted technology
+  notes.md       one line per observation — [notes.md](notes.md)
 ```
 
 `scc validate` checks all of it structurally: broken wikilinks, orphan pages,
 index/changelog desync, unprocessed `raw/`, ADR numbering, citation resolution,
-synonyms used where a canonical term belongs, and dependencies missing from
-`stack.md`.
+synonyms used where a canonical term belongs, dependencies missing from `stack.md`,
+and a note no query would return.
 
 ## wiki/
 
@@ -76,6 +77,5 @@ in the wiki. An avoided synonym used as a whole word in `docs/` is a finding.
 
 Every adopted technology, with one line on why. **Technology not listed here is an
 open decision, never something adopted silently** — and because a dependency file is
-structured data, this is checkable: a direct dependency declared there and absent
-here is a finding. Adding a dependency is two acts: add it, and say why it earned its
-place.
+structured data, this is checkable: a direct dependency declared there and absent here
+is a finding. Adding a dependency is two acts: add it, and say why.

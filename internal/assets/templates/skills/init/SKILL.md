@@ -95,6 +95,12 @@ stages so no stage inherits the previous one's findings.
    what it was reconstructed from, and when. `status: accepted` where the code shows
    the decision in force; never `proposed` for something already built.
 
+7. **`docs/notes.md`** — the `TODO`, `FIXME`, `HACK` and aside comments already in the
+   code, moved into the log one line each with the file they sit on:
+   `scc notes add "…" --tag <t> --path <file>`. Leave the comment where it is; this run
+   does not touch code, and it goes when that file is next edited. What does not make
+   the move is anything that is really work — that is a task in a plan, not a note.
+
 ## What this does not do
 
 - **It does not write specs.** Documenting a system that already works as `specs/`

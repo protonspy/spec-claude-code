@@ -234,6 +234,11 @@ const (
 	CodewikiSeg = "codewiki" // narrated code, citing [path:start-end]()
 	GlossarySeg = "glossary.md"
 	StackSeg    = "stack.md" // adopted technology; unlisted means undecided
+	// NotesSeg is where a small durable observation goes: the gotcha, the why-not,
+	// the "careful here" that used to be a comment only the reader of that one file
+	// ever saw. One note per line, so a grep returns whole notes rather than
+	// fragments — which is what lets an agent query it without loading it.
+	NotesSeg = "notes.md"
 	// WikiPagesSeg holds the pages themselves, so the wiki's two fixed documents are
 	// distinguished from its content by where they sit rather than by their names.
 	// The validator used to exclude index.md and changelog.md from the page set by
@@ -347,6 +352,11 @@ func Codewiki(root string) string { return filepath.Join(root, DocsSeg, Codewiki
 
 // Glossary returns docs/glossary.md.
 func Glossary(root string) string { return filepath.Join(root, DocsSeg, GlossarySeg) }
+
+// Notes returns docs/notes.md, the project's note log. A missing file is the
+// normal state of a young workspace, not an error: `scc notes add` creates it, and
+// every reader treats absent as an empty log.
+func Notes(root string) string { return filepath.Join(root, DocsSeg, NotesSeg) }
 
 // Stack returns docs/stack.md. Technology absent from it is an open decision,
 // never something adopted silently — and because dependency manifests are

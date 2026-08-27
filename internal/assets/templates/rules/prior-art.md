@@ -20,12 +20,14 @@ it reads as new work rather than as a contradiction.
 | What is it called? | `docs/glossary.md` | the canonical term, and the synonyms that are findings |
 | What may I build on? | `docs/stack.md` | what is adopted; anything absent is an open decision |
 | How does it work today? | `docs/wiki/index.md` · `docs/codewiki/` | the concept pages, and the code already narrated |
+| What bit somebody here already? | `scc notes find --path <path>` · `--tag` | a gotcha already paid for once ([notes.md](notes.md)) |
 
-**`docs/` is in no index.** `scc map` covers `plans/` and `specs/`; the symbol graph
-covers code ([code-search.md](code-search.md)). So this pass is deliberate reading, and
-it is cheap only because the anchors are built for it: `glossary.md` and `stack.md` are
-lists, `wiki/index.md` and the ADR filenames are tables of contents. Open a page when
-its title bears on this work — never to survey the base.
+**`docs/` is in no index but one.** `scc map` covers `plans/` and `specs/`, the symbol
+graph covers code ([code-search.md](code-search.md)), and `scc notes find` covers the
+note log. The rest is deliberate reading, cheap only because the anchors are built for
+it: `glossary.md` and `stack.md` are lists, `wiki/index.md` and the ADR filenames are
+tables of contents. Open a page when its title bears on this work — never to survey
+the base.
 
 ## Say what you found, then cite it
 
