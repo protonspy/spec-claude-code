@@ -398,3 +398,41 @@ func count(haystack []string, want string) int {
 	}
 	return n
 }
+
+// The delivery record is graded when present and silent when absent — the same terms
+// as every other frontmatter answer, and what lets every spec written before it
+// existed keep passing.
+func TestDeliveryRecordIsCheckedWhenPresent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fm   string
+		want string
+	}{
+		{"absent", "autonomy: auto\nci: wait", ""},
+		{"a full record", "autonomy: auto\nbranch: feat/billing\npr: 28\ndelivery: in-review", ""},
+		{"a branch on its own", "autonomy: auto\nbranch: feat/billing\ndelivery: in-progress", ""},
+		{"a state outside the vocabulary", "branch: feat/x\ndelivery: shipping-soon", "spec.delivery-invalid"},
+		{"a PR that is not a number", "branch: feat/x\npr: later\ndelivery: in-review", "spec.pr-invalid"},
+		{"a PR that is not positive", "branch: feat/x\npr: 0\ndelivery: in-review", "spec.pr-invalid"},
+		{"a branch with whitespace in it", "branch: two words\ndelivery: in-progress", "spec.branch-invalid"},
+		{"a branch with nothing said about it", "branch: feat/x", "spec.delivery-unstated"},
+		{"a PR with nothing said about it", "pr: 28", "spec.delivery-unstated"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			reqs := "---\n" + tc.fm + "\n---\n" +
+				strings.SplitN(goodRequirements, "---\n", 3)[2]
+			writeSpec(t, root, "billing", reqs, goodDesign, goodTasks)
+			got := specFindings(t, root, "billing")
+			if tc.want == "" {
+				if len(got) != 0 {
+					t.Errorf("findings on a legitimate record: %v", got)
+				}
+				return
+			}
+			if !contains(got, tc.want) {
+				t.Errorf("findings = %v, want %s", got, tc.want)
+			}
+		})
+	}
+}

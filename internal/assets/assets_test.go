@@ -882,3 +882,46 @@ func descriptionColumn(line string) int {
 	}
 	return -1
 }
+
+// No template scc ships may carry an attribution footer, because delivery.md tells the
+// agent never to write one. A template that demonstrated the thing the rule forbids
+// would teach the example and not the rule — and an example is what gets copied.
+//
+// `Co-Authored-By` is allowed in exactly one place: the sentence that forbids it.
+func TestNoTemplateShipsAnAttributionFooter(t *testing.T) {
+	banned := []string{
+		"Generated with [Claude Code]",
+		"claude.ai/code/session",
+		"noreply@anthropic.com",
+		"Co-authored-by:",
+		"Co-Authored-By:",
+	}
+	deliveryRule := paths.Claude.RulesSeg + "/delivery.md"
+
+	for _, h := range paths.Harnesses() {
+		for _, f := range Workspace(h) {
+			raw, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s %s: %v", h.ID, f.Rel, err)
+			}
+			for _, b := range banned {
+				if !strings.Contains(raw, b) {
+					continue
+				}
+				t.Errorf("%s: %s contains %q — the rule forbids attribution, so no template may model it",
+					h.ID, f.Rel, b)
+			}
+		}
+	}
+
+	// And the prohibition itself is actually there, in the rule that owns delivery.
+	rule, err := Content("rules/delivery.md")
+	if err != nil {
+		t.Fatalf("delivery rule: %v", err)
+	}
+	for _, want := range []string{"Co-Authored-By", "harness"} {
+		if !strings.Contains(rule, want) {
+			t.Errorf("%s never says %q; the no-attribution rule has gone missing", deliveryRule, want)
+		}
+	}
+}

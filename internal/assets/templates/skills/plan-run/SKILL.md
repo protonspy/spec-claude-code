@@ -131,7 +131,10 @@ you stop to deliver.
    again. That loop — one call per task — is why the plan never has to be in context.
    A task naming a spec gets the spec cycle.
 4. **Deliver**, following delivery.md's sequence in full — suite and lint, `scc
-   validate`, both review subagents, commit, push, open the PR.
+   validate`, both review subagents, commit, push, open the PR. Then record it on every
+   spec the group delivered: `scc spec track <feature> --here --pr <n>`. A plan run
+   opens more branches than anything else here, so it is the loop where an unrecorded
+   one is most likely to be the branch nobody comes back to.
 5. **Record the group's state in that same PR.** The checkboxes are ticked in the plan
    file, in the branch that does the work, so `main` and the plan agree the moment the
    merge lands — `scc patch check <plan> 1.1 1.2 …`, which addresses each task by

@@ -1,35 +1,26 @@
 # Delivery — branch, PR
 
 Work does not happen on `main` and does not end with a green test run. It ends with a
-pull request. Each unit of work gets its own branch, in the checkout you are in:
-
-```
-git switch -c <type>/<slug>
-```
-
-Branch from a green `main`, and leave the checkout back on `main` and clean once the
-work lands. Nothing here needs a second directory: how a user runs several sessions
-against one repo at once is theirs to set up.
+pull request. Each unit of work gets its own branch in the checkout you are in —
+`git switch -c <type>/<slug>`, from a green `main` — and the checkout goes back to
+`main`, clean, once the work lands. Nothing here needs a second directory: how a user
+runs several sessions against one repo at once is theirs to set up.
 
 ## Implementation is sequential — you write the code
 
-**There is no implementation subagent and no parallel task dispatch.** Designed the
-other way first, and rejected:
-
-- Delegating implementation puts the cheaper model on the hardest work while the
-  orchestrator keeps the part needing the least capability. That is backwards.
-- Every fresh agent re-pays for discovery. Within one spec your accumulated context is
-  the asset: you use the right parser in 1.2 because you wrote 1.1.
-- **File-disjointness is not independence, and a clean merge hides the difference.**
-  Two tasks touching no common file both need a `Money` type that does not exist yet.
-  Each invents its own, with different semantics, and the merge is clean. Sequential
-  execution cannot produce this: the later task sees the earlier task's code.
+**There is no implementation subagent and no parallel task dispatch.** It puts the
+cheaper model on the hardest work, and every fresh agent re-pays for discovery — within
+one spec your accumulated context is the asset: you use the right parser in 1.2 because
+you wrote 1.1. Above all, **file-disjointness is not independence, and a clean merge
+hides the difference**: two tasks touching no common file both need a `Money` type that
+does not exist yet, each invents its own with different semantics, and the merge is
+clean. Sequential execution cannot produce that — the later task sees the earlier one's
+code.
 
 Feature-level parallelism has none of that and is supported — a *human* picks the split
-and each session has full context. Separate sessions isolate files, not the world:
-suites fighting over a fixed port or one test database must be namespaced or
-serialized, and two features green separately can still break together, which only CI
-on `main` sees.
+and each session has full context. Separate sessions isolate files, not the world: a
+suite fighting over a fixed port or one test database must be namespaced or serialized,
+and two features green separately can still break together, which only CI on `main` sees.
 
 ## The delivery sequence
 
@@ -48,6 +39,15 @@ Once the last task is done:
    worth it; a third means the finding needs a person.
 4. **Commit and push.** Conventional Commits, written from the diff and the spec.
 5. **Open the PR.** Body: what changed, which spec or plan, how it was verified.
+
+**The work is the user's, and the record says so.** No `Co-Authored-By` for an assistant,
+no session link, no "generated with" footer, no naming of a model, vendor, or harness —
+not in a commit message, not in a PR title or body, not in a branch name. Say what
+changed and why; what typed it is not part of the record.
+
+**A branch leaves no trace in the artifacts, so record it.** `scc spec track <feature>
+--here` when you branch, `--pr <n>` when the PR opens; `scc spec sync` reads git and the
+forge back into every spec, so *unfinished* is a state the workspace reports.
 
 Then CI, using the `ci:` answer from kickoff ([autonomy.md](autonomy.md)) — do not ask
 now. **`wait`** means watch the checks until they settle, fixing and pushing while they

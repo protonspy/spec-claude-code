@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/protonspy/spec-claude-code/internal/artifact"
 	"github.com/protonspy/spec-claude-code/internal/ears"
 	"github.com/protonspy/spec-claude-code/internal/finding"
+	"github.com/protonspy/spec-claude-code/internal/mdscan"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 )
 
@@ -121,6 +123,7 @@ func checkRequirements(set *finding.Set, root, feature string) (map[string]requi
 		return nil, false, nil
 	}
 	checkKickoffAs(set, file, doc.Frontmatter, "spec.kickoff-invalid")
+	checkDelivery(set, file, doc.Frontmatter)
 
 	reqs := map[string]requirement{}
 	for i, line := range doc.Body {
@@ -274,4 +277,45 @@ func allowed(values map[string]bool) string {
 	}
 	sort.Strings(out)
 	return strings.Join(out, " | ")
+}
+
+// checkDelivery grades the three keys `scc spec track` and `scc spec sync` write.
+//
+// Checked only when present, like every other frontmatter answer: a spec nobody has
+// branched for is not a spec with a defect, and every spec written before this record
+// existed carries none of these.
+//
+// What it is really protecting is the one question the record answers — what is still
+// unfinished. A `delivery:` value outside the vocabulary makes that question
+// unanswerable by anything but a person reading every spec, which is the state this
+// record was added to end. A `pr:` that is not a number is worse than absent: `spec
+// sync` cannot ask the forge about it, so the spec looks tracked and is not.
+func checkDelivery(set *finding.Set, file string, fm mdscan.Frontmatter) {
+	if state, ok := fm.Get(artifact.KeyDelivery); ok && !artifact.ValidDelivery(state) {
+		set.Addf(file, 1, "spec.delivery-invalid", "`%s: %s` is not one of %s",
+			artifact.KeyDelivery, state, strings.Join(artifact.DeliveryStates(), ", "))
+	}
+	if pr, ok := fm.Get(artifact.KeyPR); ok {
+		if n, err := strconv.Atoi(pr); err != nil || n <= 0 {
+			set.Addf(file, 1, "spec.pr-invalid",
+				"`%s: %s` is not a pull request number, so nothing can ask the forge about it",
+				artifact.KeyPR, pr)
+		}
+	}
+	if branch, ok := fm.Get(artifact.KeyBranch); ok {
+		if strings.TrimSpace(branch) == "" || strings.ContainsAny(branch, " \t") {
+			set.Addf(file, 1, "spec.branch-invalid",
+				"`%s: %s` is not a branch name", artifact.KeyBranch, branch)
+		}
+	}
+	// A branch or a PR with no state is a half-written record: something knows where
+	// the work is and nothing says whether it landed, which is exactly the loose end
+	// the record exists to surface.
+	_, hasBranch := fm.Get(artifact.KeyBranch)
+	_, hasPR := fm.Get(artifact.KeyPR)
+	if _, hasState := fm.Get(artifact.KeyDelivery); (hasBranch || hasPR) && !hasState {
+		set.Addf(file, 1, "spec.delivery-unstated",
+			"a %s or %s is recorded with no `%s:` — run `scc spec sync` to settle it",
+			artifact.KeyBranch, artifact.KeyPR, artifact.KeyDelivery)
+	}
 }

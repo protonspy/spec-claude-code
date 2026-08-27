@@ -146,7 +146,22 @@ import (
 // rule of its own because its trigger is a keystroke — you are about to type a
 // comment that is not a docstring — and prior-art.md gains the read side, since this
 // is now the one corpus under docs/ that does have an index.
-const Version = "19"
+// 20: delivery.md — the commit and the PR carry no attribution. No `Co-Authored-By`
+// for an assistant, no session link, no generated-with footer, no naming of a model,
+// vendor or harness, in a message or a PR body or a branch name. The work is the
+// user's: a tool that signs what it did for somebody is claiming a share of it, and
+// the honest signature is the diff. It lands in delivery.md at no cost to the budget —
+// the opening paragraph's fenced one-liner goes inline, which pays for the paragraph
+// exactly.
+// 21: delivery.md — the spec records where it is being built. A branch was the one
+// part of this methodology that left no trace in the artifacts: the spec said which
+// boxes were ticked and git said a branch had been unmerged for three weeks, and
+// nothing joined the two, so "which of these actually shipped" was answerable only by
+// somebody holding both halves — which under `autonomy: auto` is nobody. `scc spec
+// track --here` records the branch and `--pr` the pull request; `scc spec sync` reads
+// git and the forge back into every spec. The rule pays for the paragraph by
+// tightening §8's argument, which the design doc holds in full anyway.
+const Version = "21"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
