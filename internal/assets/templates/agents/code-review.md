@@ -73,7 +73,8 @@ order of what bites:
 - **Complexity not paying for itself** — an abstraction with one caller, a layer that
   only forwards, a config knob nobody asked for.
 - **Naming and comments that lie.** A comment describing the previous behavior is
-  worse than none.
+  worse than none — and a comment that is not a docstring is a finding of its own: a
+  `TODO`, a `HACK` or an aside belongs in `docs/notes.md`, not in the diff.
 
 If a gate cannot be run — no test command, a suite needing a service you lack — report
 it `not-run` with the reason. **Never report a skipped gate as passing**, and never

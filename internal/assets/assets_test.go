@@ -617,12 +617,13 @@ func TestCommandsCarryTheirDescription(t *testing.T) {
 	}
 }
 
-// The seeds are the knowledge base's four fixed documents, at the paths every
+// The seeds are the knowledge base's five fixed documents, at the paths every
 // validator already looks for them. A seed written anywhere else would be a file
 // nothing reads, next to the finding saying the real one is missing.
 func TestSeedsLandWhereTheValidatorsLook(t *testing.T) {
 	want := []string{
 		"docs/" + paths.GlossarySeg,
+		"docs/" + paths.NotesSeg,
 		"docs/" + paths.StackSeg,
 		"docs/" + paths.WikiSeg + "/" + paths.WikiLog,
 		"docs/" + paths.WikiSeg + "/" + paths.WikiIndex,

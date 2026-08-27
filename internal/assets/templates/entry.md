@@ -31,6 +31,7 @@ Triggered by what you are about to touch:
 - `specs.md` — writing requirements, design, or tasks for a spec
 - `tasks.md` — working through a spec's task list
 - `knowledge-base.md` — something was learned, or a decision was made
+- `notes.md` — **before typing a comment that is not a docstring**; `scc notes find --path <f>`
 
 ## Ask the index before you read the file
 
@@ -50,7 +51,7 @@ finding — so you need not read a plan to change one line of it.
 ```
 specs/<feature>/    requirements.md · design.md · tasks.md
 plans/<name>.md     structure, plus a checklist and/or spec references
-docs/               knowledge base — wiki, adr, codewiki, glossary, stack
+docs/               knowledge base — wiki, adr, codewiki, glossary, stack, notes
 {{.RulesCol}}the methodology above
 {{.SkillsCol}}authoring each part of docs/, and running a plan group by group
 {{- if .HasCommands}}
@@ -62,6 +63,5 @@ docs/               knowledge base — wiki, adr, codewiki, glossary, stack
 
 `scc validate` — or `npx @protonspy/scc validate` if not installed (`@<version>` pins for CI).
 `scc update` brings a newer scc's rules and agents in: it shows the plan, then asks.
-
 Exit `0` ok · `1` could not run · `2` ran and found something. A finding is an answer, not a crash.
 `scc` checks artifact *shape* only; it never reads source, so whether the code honors it is on you.

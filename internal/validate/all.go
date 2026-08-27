@@ -28,6 +28,7 @@ func All() []Validator {
 		{Name: "glossary", Run: Glossary},
 		{Name: "stack", Run: Stack},
 		{Name: "codewiki", Run: Codewiki},
+		{Name: "notes", Run: Notes},
 	}
 }
 
@@ -40,7 +41,7 @@ type Result struct {
 
 // Everything runs every validator and merges the findings into one set.
 //
-// One exit code and one document, because eight validators the user has to invoke
+// One exit code and one document, because nine validators the user has to invoke
 // separately is eight chances to skip one. The per-validator counts come back
 // alongside so the report can group by check without re-running anything.
 func Everything(root string) (*finding.Set, []Result, error) {

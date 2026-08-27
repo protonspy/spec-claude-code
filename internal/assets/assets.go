@@ -137,7 +137,16 @@ import (
 // flow performs. How a user arranges several sessions against one repo is theirs, and
 // saying so is enough — the rule keeps only what it was ever really carrying, which is
 // to leave the checkout back on `main` and clean.
-const Version = "18"
+// 19: notes.md — the small durable observation gets one place to live, and the code
+// stops being it. A comment says what a thing is and how to use it; the gotcha, the
+// why-not and the "careful, this is not what it looks like" go to docs/notes.md as
+// one line each, carrying the path they are about. One line is the whole design: a
+// match is a whole note, so grep and `scc notes find` answer the same question, and
+// the file that centralizes every note is never a file anybody has to read. It is a
+// rule of its own because its trigger is a keystroke — you are about to type a
+// comment that is not a docstring — and prior-art.md gains the read side, since this
+// is now the one corpus under docs/ that does have an index.
+const Version = "19"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -211,6 +220,7 @@ func Workspace(h paths.Harness) []File {
 		"delivery.md",
 		"specs.md",
 		"knowledge-base.md",
+		"notes.md",
 		"code-search.md",
 		"artifacts.md",
 	} {
@@ -260,7 +270,7 @@ func Workspace(h paths.Harness) []File {
 }
 
 // Seed is one of the `docs/` anchor files `scc init` lays down: the knowledge base's
-// four fixed documents, each holding the format its validator checks and nothing
+// five fixed documents, each holding the format its validator checks and nothing
 // else.
 //
 // A seed is deliberately NOT a managed file, and that is a third category rather
@@ -281,7 +291,7 @@ type Seed struct {
 
 // Seeds returns the anchors in destination order.
 //
-// Four, and the rule that picks them is the same one that picks the skills: a seed
+// Five, and the rule that picks them is the same one that picks the skills: a seed
 // for each fixed `docs/` document a validator checks. The per-concept pages, the
 // ADRs, and the codewiki pages have no fixed name, so they have no anchor — an
 // empty directory is the honest scaffold for those.
@@ -292,6 +302,7 @@ type Seed struct {
 func Seeds() []Seed {
 	return []Seed{
 		{Name: "docs/glossary.md", Rel: path.Join(paths.DocsSeg, paths.GlossarySeg)},
+		{Name: "docs/notes.md", Rel: path.Join(paths.DocsSeg, paths.NotesSeg)},
 		{Name: "docs/stack.md", Rel: path.Join(paths.DocsSeg, paths.StackSeg)},
 		{Name: "docs/wiki/changelog.md", Rel: path.Join(paths.DocsSeg, paths.WikiSeg, paths.WikiLog)},
 		{Name: "docs/wiki/index.md", Rel: path.Join(paths.DocsSeg, paths.WikiSeg, paths.WikiIndex)},
