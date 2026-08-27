@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/protonspy/spec-claude-code/internal/codegraph"
+	"github.com/protonspy/spec-claude-code/internal/jail"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 	"github.com/protonspy/spec-claude-code/internal/rtk"
 )
@@ -885,5 +886,75 @@ func TestConfirmInstallDefaultsToYes(t *testing.T) {
 		if got := confirmInstall(strings.NewReader(tc.in), "Install?"); got != tc.want {
 			t.Errorf("confirmInstall(%q) = %v, want %v", tc.in, got, tc.want)
 		}
+	}
+}
+
+// The one integration here that refuses. Every other one degrades to starting the
+// agent bare, because every other one is an enhancement; a sandbox is the property
+// the user asked for by name, and somebody who typed --jail and watched an agent
+// start believes they are contained. A false belief about containment is worse than
+// a known absence of it — they would not have run the thing at all.
+func TestJailRefusesRatherThanStartingUnsandboxed(t *testing.T) {
+	if _, present := jail.Path(); present {
+		t.Skip("ai-jail is installed here, so there is nothing to refuse")
+	}
+	root := initWorkspace(t)
+	started := false
+	orig := launchExec
+	launchExec = func(launchCommand) (int, error) { started = true; return 0, nil }
+	t.Cleanup(func() { launchExec = orig })
+
+	_, stderr, code := run(t, "launch", "claude", "--jail", "--no-install",
+		"--no-graph", "--no-rtk", "--root", root)
+	if code != ExitError {
+		t.Errorf("exit = %d, want %d", code, ExitError)
+	}
+	if started {
+		t.Fatal("the agent started without the sandbox it was asked for")
+	}
+	if stderr == "" {
+		t.Error("nothing was said about why there is no sandbox")
+	}
+}
+
+// It refuses before anything else runs, so a launch that cannot be jailed leaves the
+// workspace exactly as it found it — no graph built, no entry file edited.
+func TestJailRefusesBeforeTouchingTheWorkspace(t *testing.T) {
+	if _, present := jail.Path(); present {
+		t.Skip("ai-jail is installed here")
+	}
+	root := initWorkspace(t)
+	entry := filepath.Join(root, paths.Claude.EntryFile)
+	before, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("read entry: %v", err)
+	}
+	orig := launchExec
+	launchExec = func(launchCommand) (int, error) { return 0, nil }
+	t.Cleanup(func() { launchExec = orig })
+
+	// No --no-rtk: without the refusal, RTK's preflight would splice a block in.
+	if _, _, code := run(t, "launch", "claude", "--jail", "--no-install", "--root", root); code != ExitError {
+		t.Fatalf("exit = %d, want %d", code, ExitError)
+	}
+	after, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("read entry: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Error("a refused launch edited the entry file anyway")
+	}
+}
+
+// Without --jail nothing changes: the sandbox is opt-in, and its report is absent
+// rather than false, so a consumer cannot mistake an ordinary launch for a jailed one.
+func TestLaunchIsUnjailedByDefault(t *testing.T) {
+	root := initWorkspace(t)
+	cmd := launchJSON(t, "launch", "claude", "--json", "--no-graph", "--no-rtk", "--root", root)
+	if cmd.Jail != nil {
+		t.Errorf("jail = %+v, want none without --jail", cmd.Jail)
+	}
+	if cmd.Bin != paths.Claude.Bin {
+		t.Errorf("bin = %q, want %q", cmd.Bin, paths.Claude.Bin)
 	}
 }

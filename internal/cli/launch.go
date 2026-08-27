@@ -12,6 +12,7 @@ import (
 	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/headroom"
+	"github.com/protonspy/spec-claude-code/internal/jail"
 	"github.com/protonspy/spec-claude-code/internal/mdblock"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 	"github.com/protonspy/spec-claude-code/internal/render"
@@ -70,9 +71,12 @@ func runLaunch(args []string) int {
 		"which MCP servers Headroom may register: all | retrieve (its own only) | none")
 	contextTool := fs.Bool("headroom-context-tool", false,
 		"let Headroom set up its own CLI context tool (RTK or lean-ctx) and append its guidance to the entry file")
+	jailFlag := fs.Bool("jail", false, "start the agent inside ai-jail's sandbox; refuses to start it outside one")
+	var jailArgs repeatable
+	fs.Var(&jailArgs, "jail-arg", "an extra `flag` for ai-jail itself, repeatable (policy otherwise lives in .ai-jail)")
 	noGraph := fs.Bool("no-graph", false, "start the agent without building or refreshing the symbol graph")
 	noRTK := fs.Bool("no-rtk", false, "start the agent without setting up RTK's binary or its usage block in the entry file")
-	noInstall := fs.Bool("no-install", false, "never install anything; use Headroom, CodeGraph and RTK only if they are already on PATH")
+	noInstall := fs.Bool("no-install", false, "never install anything; use ai-jail, Headroom, CodeGraph and RTK only if they are already on PATH")
 	yes := fs.Bool("yes", false, "answer the install prompts with yes, for an unattended run")
 	dryRun := fs.Bool("dry-run", false, "print the command this would run, and run nothing")
 	jsonOut := addJSON(fs)
@@ -109,6 +113,26 @@ func runLaunch(args []string) int {
 		return ExitError
 	}
 
+	// The jail is settled first, and it is the one thing here that refuses. Every
+	// other integration degrades because it is an enhancement; a sandbox is a
+	// containment boundary, and a launcher that quietly started the agent outside the
+	// boundary somebody asked for would hand them the confidence of containment
+	// without the containment. So a run that cannot jail starts nothing — and it
+	// decides that before the graph is built or the entry file is touched, so a
+	// refusal leaves the workspace exactly as it found it.
+	var jailed *jailReport
+	if *jailFlag {
+		jailed = resolveJail(jailOptions{
+			noInstall: *noInstall,
+			yes:       *yes,
+			quiet:     *jsonOut,
+			extra:     jailArgs,
+		})
+		if jailed == nil {
+			return ExitError
+		}
+	}
+
 	// --json and --dry-run both report the plan and start nothing. For --json that
 	// is not a shortcut but the only coherent answer: the agent inherits this
 	// terminal and writes to the same stdout, so a launched session and a clean
@@ -130,6 +154,15 @@ func runLaunch(args []string) int {
 			cmd.Bin = headroom.Bin
 			cmd.Args = headroom.WrapArgs(hr.Agent, hr.Options, passthrough)
 		}
+	}
+	// Outermost, after Headroom: the jail contains the whole session, wrapper
+	// included. Anything Headroom registers from inside it lands in the sandbox's
+	// own transient home rather than the real one, which is a change in what `wrap`
+	// leaves behind and worth knowing before combining the two.
+	if jailed != nil {
+		cmd.Args = jail.Args(jailed.Options, jailed.Extra, cmd.Bin, cmd.Args)
+		cmd.Bin = jail.Bin
+		cmd.Jail = jailed
 	}
 	cmd.Graph = resolveGraph(target, graphOptions{
 		disabled:  *noGraph,
@@ -186,6 +219,7 @@ type launchCommand struct {
 	Dir      string           `json:"dir"`
 	Bin      string           `json:"bin"`
 	Args     []string         `json:"args"`
+	Jail     *jailReport      `json:"jail,omitempty"`
 	Headroom *headroomReport  `json:"headroom,omitempty"`
 	Graph    *graphReport     `json:"graph,omitempty"`
 	RTK      *rtkLaunchReport `json:"rtk,omitempty"`
@@ -788,4 +822,139 @@ var launchExec = func(cmd launchCommand) (int, error) {
 		return ExitError, err
 	}
 	return ExitOK, nil
+}
+
+// repeatable is a flag that may be given more than once, collecting its values.
+// The flag package has no such type, and the alternative — a comma-separated
+// string — cannot carry a value containing a comma, which a path or a glob can.
+type repeatable []string
+
+func (r *repeatable) String() string { return strings.Join(*r, " ") }
+
+func (r *repeatable) Set(v string) error {
+	*r = append(*r, v)
+	return nil
+}
+
+// jailReport says what happened on the sandbox side of a launch.
+//
+// Unlike the other three it never describes a launch that went ahead without what
+// was asked for: when this is present at all, the agent is inside the sandbox.
+// There is no "started unjailed" outcome to report, because that outcome does not
+// exist — see resolveJail.
+type jailReport struct {
+	// Wrapping is always true when the report exists, and it is written down
+	// anyway: a JSON consumer checking `jail.wrapping` should get the same answer
+	// as one checking whether the key is there.
+	Wrapping bool   `json:"wrapping"`
+	Path     string `json:"path,omitempty"`
+	Version  string `json:"version,omitempty"`
+	Backend  string `json:"backend,omitempty"`
+	// Install is what happened to the binary: present | installed. The vocabulary
+	// the other integrations use, minus the outcomes that end in starting anyway.
+	Install string `json:"install"`
+	// Options is what scc asked for, kept apart from Extra because scc put these
+	// there and the user did not.
+	Options []string `json:"options,omitempty"`
+	// Missing names anything scc asked for that this build does not advertise.
+	// Reported rather than substituted: a sandbox opened by a guess is worse than
+	// an agent that fails to connect.
+	Missing []string `json:"missing,omitempty"`
+	// Extra is what the user passed with --jail-arg, verbatim and last.
+	Extra []string `json:"extra,omitempty"`
+}
+
+type jailOptions struct {
+	noInstall bool
+	yes       bool
+	quiet     bool
+	extra     []string
+}
+
+// resolveJail puts this launch inside ai-jail, or returns nil having said why it
+// could not.
+//
+// nil means the caller stops. That is the whole difference between this and
+// resolveHeadroom, and it is deliberate: Headroom missing costs a session of
+// compression, while a sandbox missing costs the property the user asked for by
+// name. Somebody who typed --jail and watched an agent start believes they are
+// contained, and a false belief about containment is worse than a known absence of
+// it — they would not have run the thing at all.
+func resolveJail(opts jailOptions) *jailReport {
+	if !jail.Supported() {
+		render.Err(jail.Unsupported())
+		render.Detail("  " + jail.Repo)
+		return nil
+	}
+	report := &jailReport{Wrapping: true, Backend: jail.Backend(), Extra: opts.extra}
+
+	p, ok := jail.Path()
+	if !ok {
+		if !installJail(opts) {
+			return nil
+		}
+		if p, ok = jail.Path(); !ok {
+			render.Err(fmt.Sprintf("cargo reported success but %s is still not on PATH", jail.Bin))
+			return nil
+		}
+		report.Install = installInstalled
+		render.OK(strings.TrimSpace(jail.Bin + " installed: " + p))
+	} else {
+		report.Install = installPresent
+	}
+	report.Path, report.Version = p, jail.Version(p)
+
+	// The two flags an agent needs to function, read off this build's own help
+	// rather than compiled in. Everything else is policy and stays in .ai-jail,
+	// which ai-jail reads by itself.
+	report.Options, report.Missing = jail.Needed(jail.HelpFlags(jail.Help(p)))
+	if len(report.Missing) > 0 && !opts.quiet {
+		render.Warn(fmt.Sprintf("this %s build advertises no %s — the agent may not reach its API or its credentials",
+			jail.Bin, strings.Join(report.Missing, " or ")))
+		render.Detail("  scc passes no substitute rather than guessing; set it in ~/.ai-jail, or pass --jail-arg")
+	}
+	return report
+}
+
+// installJail offers the install, and reports rather than proceeds when it cannot.
+// Every path out of here that is not an installed binary ends the launch.
+func installJail(opts jailOptions) bool {
+	switch {
+	case opts.noInstall:
+		render.Err(fmt.Sprintf("%s is not on PATH, and --no-install was passed", jail.Bin))
+	case !jail.Available():
+		render.Err(fmt.Sprintf("%s is not on PATH and cargo is not either, so it cannot be installed here", jail.Bin))
+		render.Detail("  " + jail.InstallHint())
+		return false
+	case opts.yes:
+		return runJailInstall(opts)
+	case opts.quiet || !interactive():
+		// Unattended. Building a Rust binary without being asked is not a decision
+		// scc makes silently, and a sandbox is not a thing to install by surprise.
+		render.Err(fmt.Sprintf("%s is not on PATH, and nobody is here to answer the install prompt", jail.Bin))
+	default:
+		render.Warn(fmt.Sprintf("%s is not on PATH — it is the sandbox --jail asks for (%s)", jail.Bin, jail.Backend()))
+		render.Detail("  " + jail.Repo)
+		if confirmInstall(promptIn, fmt.Sprintf("Install it now with `%s`?", jail.InstallCmd())) {
+			return runJailInstall(opts)
+		}
+		render.Err("install declined, so there is no sandbox to start the agent in")
+		return false
+	}
+	render.Detail("  " + jail.InstallHint())
+	render.Detail("  or drop --jail to start the agent without a sandbox, deliberately")
+	return false
+}
+
+func runJailInstall(opts jailOptions) bool {
+	render.Info(fmt.Sprintf("installing %s: %s — this takes a few minutes", jail.Bin, jail.InstallCmd()))
+	out := os.Stdout
+	if opts.quiet {
+		out = os.Stderr
+	}
+	if err := jail.Install(out, os.Stderr); err != nil {
+		render.Err(err.Error())
+		return false
+	}
+	return true
 }
