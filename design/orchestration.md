@@ -1012,19 +1012,44 @@ a platform with no backend all end in nothing starting, and the refusal is decid
 before the graph is built or the entry file is touched: a launch that cannot be
 jailed leaves the workspace exactly as it found it.
 
-**scc decides two flags and no more.** ai-jail defaults network and credential state
-to off, which is the right default for a sandbox and the wrong one for a launcher: an
-agent with neither cannot reach the model it is or authenticate as anyone, so
-`ai-jail claude` bare is a jail that starts nothing. Those two are *function*.
-Everything else — lockdown, denied paths, extra mounts, Docker, the browser — is
-*policy*, and policy belongs in ai-jail's own `~/.ai-jail` and `./.ai-jail`, which it
-reads by itself and scc never writes. A launcher that quietly loosened somebody's
-sandbox policy would be the worst kind of helpful. `--jail-arg` is the per-run escape
-hatch, and it comes last on the command line so a flag the user typed wins over the
-two scc supplies.
+**scc asks for two capabilities and its own toolchain, and nothing else.** ai-jail
+defaults network and credential state to off, which is the right default for a
+sandbox and the wrong one for a launcher: an agent with neither cannot reach the
+model it is or authenticate as anyone, so `ai-jail claude` bare is a jail that starts
+nothing. Those two are *function*. Everything else — lockdown, denied paths, Docker,
+the browser — is *policy*, and policy belongs in ai-jail's own `~/.ai-jail` and
+`./.ai-jail`, which it reads by itself and scc never writes. A launcher that quietly
+loosened somebody's sandbox policy would be the worst kind of helpful. `--jail-arg`
+is the per-run escape hatch, and it comes last on the command line so a flag the user
+typed wins over what scc supplies.
 
-Even those two are read off `ai-jail --help` rather than compiled in — the lesson
-§6's Headroom integration already paid for — and a build advertising neither gets
+**The toolchain is the same argument one step later, and it was originally missed.**
+ai-jail's private home replaces `$HOME` with a fresh tmpfs and binds only the command
+it was handed — it says so plainly: *tools with needs beyond their install directory
+stay on the `--map` escape hatch* — and then prunes `PATH` to the directories that
+survived. So `rtk` in `~/.cargo/bin` and an npm-installed `scc` disappear, and the
+agent is left in front of an entry file telling it to prefix every command with a
+binary that is not there and rules telling it to answer questions with a command that
+is not there either. It finds that out one failed command at a time and works around
+it by reading whole files, which is the cost this methodology exists to remove. A
+jail that starts an agent unable to run the tools the file in front of it names is a
+jail that starts a useless agent — the same failure as one that cannot reach its
+model, arriving a step later. So scc maps three binaries back in read-only: itself,
+because every rule it scaffolds answers questions with it, and `rtk` and `codegraph`,
+because scc wrote the blocks that tell the agent to use them. The list is closed,
+every mount is reported in `jail.maps` and printed in the command line, and a tool
+scc never mentioned is one the user maps with `--jail-arg`.
+
+Two details are load-bearing. A **compiled binary is mounted at the name `PATH`
+knows** and nothing else comes with it — which is also what makes the npm
+distribution work, since `os.Executable` is the real Go binary behind the node shim,
+and mounting it at the shim's path takes node out of the picture entirely. A
+**script** needs its interpreter, its siblings and the symlink structure its module
+resolution walks, so its bin directory and package root come too; that is `codegraph`,
+and it is why the walk reads shebangs at all.
+
+All three flags are read off `ai-jail --help` rather than compiled in — the lesson
+§6's Headroom integration already paid for — and a build advertising one of them gets
 **no substitute**, only a warning. Guessing at a replacement spelling is precisely how
 a sandbox ends up opened by the tool that was trying to help.
 

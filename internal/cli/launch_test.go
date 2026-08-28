@@ -958,3 +958,70 @@ func TestLaunchIsUnjailedByDefault(t *testing.T) {
 		t.Errorf("bin = %q, want %q", cmd.Bin, paths.Claude.Bin)
 	}
 }
+
+// The bug this fixes, stated as a test: ai-jail's private home replaces $HOME with
+// a fresh tmpfs and binds only the command it was handed, so an agent told by
+// scc's own entry file to prefix every command with `rtk` finds no rtk. Mapping is
+// how it gets one back, and the mount is read-only and named.
+func TestJailMapsTheToolchainItsOwnGuidanceNames(t *testing.T) {
+	home := t.TempDir()
+	rtkBin := filepath.Join(home, "rtk")
+	if err := os.WriteFile(rtkBin, []byte("\x7fELF fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report := &jailReport{flags: map[string]bool{jail.FlagMap: true}}
+
+	jailToolchain(report, home, []jailTool{{entry: rtkBin}}, true)
+
+	if len(report.Maps) != 1 || report.Maps[0].Src != rtkBin {
+		t.Fatalf("maps = %+v, want a read-only mount of %s", report.Maps, rtkBin)
+	}
+	if strings.Join(report.mapArgs, " ") != jail.FlagMap+" "+rtkBin {
+		t.Errorf("options = %q", report.mapArgs)
+	}
+}
+
+// A build that does not advertise --map gets no substitute — the same answer the
+// other two flags get. The launch still goes ahead: the sandbox is intact and is
+// what was asked for, and it is the toolchain that is missing.
+func TestJailReportsABuildThatCannotMapRatherThanGuessing(t *testing.T) {
+	home := t.TempDir()
+	rtkBin := filepath.Join(home, "rtk")
+	if err := os.WriteFile(rtkBin, []byte("\x7fELF fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report := &jailReport{flags: jail.HelpFlags("  --network  enable network\n")}
+
+	jailToolchain(report, home, []jailTool{{entry: rtkBin}}, true)
+
+	if report.mapArgs != nil || report.Maps != nil {
+		t.Errorf("maps = %+v, args = %q, want neither", report.Maps, report.mapArgs)
+	}
+	found := false
+	for _, m := range report.Missing {
+		if m == jail.FlagMap {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("missing = %v, want %s named", report.Missing, jail.FlagMap)
+	}
+}
+
+// A tool already outside the hidden region is left alone. scc asks the sandbox
+// for what an agent cannot work without and stops there; everything else is
+// policy, and policy lives in .ai-jail.
+func TestJailMapsNothingItDoesNotHaveTo(t *testing.T) {
+	home := t.TempDir()
+	elsewhere := filepath.Join(t.TempDir(), "rtk")
+	if err := os.WriteFile(elsewhere, []byte("\x7fELF fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report := &jailReport{flags: map[string]bool{jail.FlagMap: true}}
+
+	jailToolchain(report, home, []jailTool{{entry: elsewhere}}, true)
+
+	if len(report.Maps) != 0 || report.mapArgs != nil {
+		t.Errorf("maps = %+v, want none for a tool the sandbox keeps", report.Maps)
+	}
+}
