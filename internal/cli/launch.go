@@ -155,15 +155,6 @@ func runLaunch(args []string) int {
 			cmd.Args = headroom.WrapArgs(hr.Agent, hr.Options, passthrough)
 		}
 	}
-	// Outermost, after Headroom: the jail contains the whole session, wrapper
-	// included. Anything Headroom registers from inside it lands in the sandbox's
-	// own transient home rather than the real one, which is a change in what `wrap`
-	// leaves behind and worth knowing before combining the two.
-	if jailed != nil {
-		cmd.Args = jail.Args(jailed.Options, jailed.Extra, cmd.Bin, cmd.Args)
-		cmd.Bin = jail.Bin
-		cmd.Jail = jailed
-	}
 	cmd.Graph = resolveGraph(target, graphOptions{
 		disabled:  *noGraph,
 		noInstall: *noInstall,
@@ -184,6 +175,23 @@ func runLaunch(args []string) int {
 		plan:      plan,
 		quiet:     *jsonOut,
 	})
+
+	// Outermost, after Headroom: the jail contains the whole session, wrapper
+	// included. Anything Headroom registers from inside it lands in the sandbox's
+	// own transient home rather than the real one, which is a change in what `wrap`
+	// leaves behind and worth knowing before combining the two.
+	//
+	// Last of everything, rather than beside resolveJail where the refusal happens,
+	// because the toolchain it maps in is not settled until the two steps above have
+	// run: a launch that just installed rtk has to map the binary it installed, and
+	// one composed before that would sandbox the agent away from it.
+	if jailed != nil {
+		jailToolchain(jailed, jail.HiddenRoot(), jailTools(), *jsonOut)
+		opts := append(append([]string{}, jailed.Options...), jailed.mapArgs...)
+		cmd.Args = jail.Args(opts, jailed.Extra, cmd.Bin, cmd.Args)
+		cmd.Bin = jail.Bin
+		cmd.Jail = jailed
+	}
 	if cmd.Args == nil {
 		// A JSON consumer gets [] rather than null: the field is a command line,
 		// and an empty one is still a list.
@@ -856,12 +864,23 @@ type jailReport struct {
 	// Options is what scc asked for, kept apart from Extra because scc put these
 	// there and the user did not.
 	Options []string `json:"options,omitempty"`
+	// Maps is the toolchain scc mounted back in read-only: the binaries its own
+	// guidance names, which the sandbox's private home would otherwise take away
+	// along with the rest of $HOME.
+	Maps []jail.Mapping `json:"maps,omitempty"`
 	// Missing names anything scc asked for that this build does not advertise.
 	// Reported rather than substituted: a sandbox opened by a guess is worse than
 	// an agent that fails to connect.
 	Missing []string `json:"missing,omitempty"`
 	// Extra is what the user passed with --jail-arg, verbatim and last.
 	Extra []string `json:"extra,omitempty"`
+
+	// flags is what this build's own help advertises, read once in resolveJail and
+	// consulted again when the toolchain is mapped. mapArgs is Maps as this build
+	// spells them. Neither is reported: flags is an implementation detail of asking,
+	// and mapArgs would say what Maps already says, in a second vocabulary.
+	flags   map[string]bool
+	mapArgs []string
 }
 
 type jailOptions struct {
@@ -907,7 +926,8 @@ func resolveJail(opts jailOptions) *jailReport {
 	// The two flags an agent needs to function, read off this build's own help
 	// rather than compiled in. Everything else is policy and stays in .ai-jail,
 	// which ai-jail reads by itself.
-	report.Options, report.Missing = jail.Needed(jail.HelpFlags(jail.Help(p)))
+	report.flags = jail.HelpFlags(jail.Help(p))
+	report.Options, report.Missing = jail.Needed(report.flags)
 	if len(report.Missing) > 0 && !opts.quiet {
 		render.Warn(fmt.Sprintf("this %s build advertises no %s — the agent may not reach its API or its credentials",
 			jail.Bin, strings.Join(report.Missing, " or ")))
@@ -944,6 +964,93 @@ func installJail(opts jailOptions) bool {
 	render.Detail("  " + jail.InstallHint())
 	render.Detail("  or drop --jail to start the agent without a sandbox, deliberately")
 	return false
+}
+
+// jailToolchain mounts the binaries scc's own guidance names back into the
+// sandbox, read-only.
+//
+// This is the third thing scc asks the jail for, and it is asked for the same
+// reason as the first two. ai-jail's private home replaces $HOME with a fresh
+// tmpfs and binds only the command it was handed, so `rtk` in ~/.cargo/bin and an
+// npm-installed `scc` vanish with the rest of the home, and PATH is then pruned
+// to what survived. The agent is left in front of an entry file telling it to
+// prefix every command with a binary that is not there, and rules telling it to
+// answer questions with a command that is not there either — which it discovers
+// one failed command at a time, and works around by reading whole files instead.
+//
+// Mapping is a real loosening and it is kept as narrow as the tools allow: three
+// binaries scc can name, read-only, every one of them reported in Maps and
+// printed in the command line. Everything else stays policy, and policy stays in
+// .ai-jail.
+// root and tools are parameters rather than calls, so a test can state a
+// toolchain and a hidden region instead of depending on how the machine running
+// the suite installed its own.
+func jailToolchain(report *jailReport, root string, tools []jailTool, quiet bool) {
+	if root == "" {
+		return
+	}
+	var maps []jail.Mapping
+	for _, t := range tools {
+		maps = append(maps, jail.Needs(root, t.entry, t.real)...)
+	}
+	report.Maps = jail.Dedupe(maps)
+	args, ok := jail.MapArgs(report.flags, report.Maps)
+	if !ok {
+		// Reported, never substituted. The launch goes ahead — the sandbox is what
+		// was asked for and it is intact — but the agent will find its own toolchain
+		// missing, and that is worth hearing before it does.
+		report.Missing = append(report.Missing, jail.FlagMap)
+		report.Maps = nil
+		if !quiet {
+			render.Warn(fmt.Sprintf("this %s build advertises no %s — %s, %s and %s will not exist inside the sandbox",
+				jail.Bin, jail.FlagMap, prog(), rtk.Bin, codegraph.Bin))
+			render.Detail("  map them from ~/.ai-jail instead, under ro_maps")
+		}
+		return
+	}
+	report.mapArgs = args
+}
+
+// jailTool is one binary to keep reachable: where PATH finds it, and the file scc
+// already knows sits behind that name.
+type jailTool struct {
+	entry string
+	real  string
+}
+
+// jailTools is the toolchain, and the list is closed on purpose: scc, because
+// every rule it scaffolds answers questions with it; rtk and codegraph, because
+// scc wrote the blocks in the entry file that tell the agent to use them. A tool
+// scc never mentioned is a tool the user can map themselves with --jail-arg.
+func jailTools() []jailTool {
+	tools := []jailTool{sccTool()}
+	if p, ok := rtk.Path(); ok {
+		tools = append(tools, jailTool{entry: p})
+	}
+	if p, ok := codegraph.Path(); ok {
+		tools = append(tools, jailTool{entry: p})
+	}
+	return tools
+}
+
+// sccTool names the running binary rather than whatever PATH resolves to, which
+// is what makes the npm distribution work inside a sandbox at all: `scc` there is
+// a node shim that spawns the Go binary out of a platform package, and
+// os.Executable is that binary. Mapping it at the name PATH knows replaces a
+// launcher with the thing it launches, and takes node out of the picture.
+func sccTool() jailTool {
+	real, err := os.Executable()
+	if err != nil {
+		real = ""
+	}
+	entry, err := exec.LookPath("scc")
+	if err != nil {
+		// Not on PATH — run through npx, or from a build directory. Mount it where
+		// it stands: an agent that cannot find it is a smaller problem than one
+		// whose `scc` is a path that does not exist.
+		entry = real
+	}
+	return jailTool{entry: entry, real: real}
 }
 
 func runJailInstall(opts jailOptions) bool {

@@ -19,13 +19,14 @@
 // # What scc decides, and what it does not
 //
 // scc passes exactly the flags that make an agent able to run at all — a network it
-// can reach its model through, and the credential state it authenticates with — and
-// nothing else. Every other question (lockdown, denied paths, extra mounts, the
-// browser, Docker) is *policy*, and policy belongs in ai-jail's own `~/.ai-jail` and
-// `./.ai-jail`, which it reads by itself and scc never writes. A launcher that
+// can reach its model through, the credential state it authenticates with, and
+// read-only mounts for the handful of binaries scc's own guidance tells it to use
+// (see [FlagMap]) — and nothing else. Every other question (lockdown, denied paths,
+// the browser, Docker) is *policy*, and policy belongs in ai-jail's own `~/.ai-jail`
+// and `./.ai-jail`, which it reads by itself and scc never writes. A launcher that
 // quietly loosened somebody's sandbox policy would be the worst kind of helpful.
 //
-// Even those two are read off `ai-jail --help` rather than compiled in, which is the
+// All three are read off `ai-jail --help` rather than compiled in, which is the
 // lesson internal/headroom already paid for: a flag name hardcoded here turns a
 // rename in somebody else's release into a launch that dies on "no such option".
 //
