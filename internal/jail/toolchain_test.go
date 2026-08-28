@@ -133,7 +133,7 @@ func contains(all []string, want string) bool {
 
 // Two tools installed the same way name the same package root and the same
 // interpreter. The command line says it once.
-func TestDedupeDropsRepeatsAndWhatADirectoryCovers(t *testing.T) {
+func TestComposeDropsRepeatsAndWhatADirectoryCovers(t *testing.T) {
 	tr := newTree(t)
 	dir := filepath.Join(tr.home, "bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -141,7 +141,7 @@ func TestDedupeDropsRepeatsAndWhatADirectoryCovers(t *testing.T) {
 	}
 	inside := tr.write(t, "bin/rtk", "\x7fELF fake")
 
-	got := specs(Dedupe([]Mapping{
+	got := specs(Compose([]Mapping{
 		{Src: dir},
 		{Src: inside},
 		{Src: dir},
@@ -149,7 +149,32 @@ func TestDedupeDropsRepeatsAndWhatADirectoryCovers(t *testing.T) {
 	}))
 	want := []string{dir, inside + ":" + filepath.Join(tr.home, "other", "rtk")}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Errorf("Dedupe = %v, want %v", got, want)
+		t.Errorf("Compose = %v, want %v", got, want)
+	}
+}
+
+// Mounts apply in order, so a directory arriving after a file underneath it hides
+// the file. Measured inside a real sandbox: an npm-installed scc mapped as "the
+// real binary, at the shim's name" came back as the shim, because the bin
+// directory was mounted on top of it a moment later. Directories first.
+func TestComposePutsDirectoriesBeforeTheFilesInsideThem(t *testing.T) {
+	tr := newTree(t)
+	real := tr.write(t, "tools/scc", "\x7fELF fake")
+	binDir := filepath.Join(tr.home, "n", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := filepath.Join(binDir, "scc")
+
+	// The order Needs produces: the specific mount first, the directory it lands
+	// inside second.
+	got := specs(Compose([]Mapping{
+		{Src: real, Dest: shim},
+		{Src: binDir},
+	}))
+	want := []string{binDir, real + ":" + shim}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("Compose = %v, want %v — the file mount has to land on top", got, want)
 	}
 }
 

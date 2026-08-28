@@ -993,7 +993,7 @@ func jailToolchain(report *jailReport, root string, tools []jailTool, quiet bool
 	for _, t := range tools {
 		maps = append(maps, jail.Needs(root, t.entry, t.real)...)
 	}
-	report.Maps = jail.Dedupe(maps)
+	report.Maps = jail.Compose(maps)
 	args, ok := jail.MapArgs(report.flags, report.Maps)
 	if !ok {
 		// Reported, never substituted. The launch goes ahead — the sandbox is what

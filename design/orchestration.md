@@ -1048,6 +1048,13 @@ and mounting it at the shim's path takes node out of the picture entirely. A
 resolution walks, so its bin directory and package root come too; that is `codegraph`,
 and it is why the walk reads shebangs at all.
 
+And **the order the mounts are asked for in is load-bearing**, which only shows from
+inside the sandbox. Binds apply in sequence, so a directory arriving after a file
+underneath it hides that file: the first cut mapped scc as *the real binary, at the
+shim's name* and then mapped the bin directory the shim's neighbours needed, and what
+answered inside the jail was the shim. Directories go first, so the specific mount —
+the one that was the whole point — lands on top.
+
 All three flags are read off `ai-jail --help` rather than compiled in — the lesson
 §6's Headroom integration already paid for — and a build advertising one of them gets
 **no substitute**, only a warning. Guessing at a replacement spelling is precisely how
