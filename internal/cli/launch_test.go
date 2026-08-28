@@ -959,12 +959,25 @@ func TestLaunchIsUnjailedByDefault(t *testing.T) {
 	}
 }
 
+// resolvedDir is a temp directory named the way the mapping walk will name it.
+// The walk resolves symlinks, because a mount has to point at the real file, and a
+// bare t.TempDir does not: it is under /var on macOS, which is a symlink to
+// /private/var, and it comes back as an 8.3 short name on Windows.
+func resolvedDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // The bug this fixes, stated as a test: ai-jail's private home replaces $HOME with
 // a fresh tmpfs and binds only the command it was handed, so an agent told by
 // scc's own entry file to prefix every command with `rtk` finds no rtk. Mapping is
 // how it gets one back, and the mount is read-only and named.
 func TestJailMapsTheToolchainItsOwnGuidanceNames(t *testing.T) {
-	home := t.TempDir()
+	home := resolvedDir(t)
 	rtkBin := filepath.Join(home, "rtk")
 	if err := os.WriteFile(rtkBin, []byte("\x7fELF fake"), 0o755); err != nil {
 		t.Fatal(err)
@@ -985,7 +998,7 @@ func TestJailMapsTheToolchainItsOwnGuidanceNames(t *testing.T) {
 // other two flags get. The launch still goes ahead: the sandbox is intact and is
 // what was asked for, and it is the toolchain that is missing.
 func TestJailReportsABuildThatCannotMapRatherThanGuessing(t *testing.T) {
-	home := t.TempDir()
+	home := resolvedDir(t)
 	rtkBin := filepath.Join(home, "rtk")
 	if err := os.WriteFile(rtkBin, []byte("\x7fELF fake"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1012,8 +1025,8 @@ func TestJailReportsABuildThatCannotMapRatherThanGuessing(t *testing.T) {
 // for what an agent cannot work without and stops there; everything else is
 // policy, and policy lives in .ai-jail.
 func TestJailMapsNothingItDoesNotHaveTo(t *testing.T) {
-	home := t.TempDir()
-	elsewhere := filepath.Join(t.TempDir(), "rtk")
+	home := resolvedDir(t)
+	elsewhere := filepath.Join(resolvedDir(t), "rtk")
 	if err := os.WriteFile(elsewhere, []byte("\x7fELF fake"), 0o755); err != nil {
 		t.Fatal(err)
 	}
