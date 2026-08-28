@@ -181,11 +181,21 @@ func needs(root, entry, real string, depth int) []Mapping {
 	return out
 }
 
-// Dedupe drops repeats and anything a directory in the same set already covers,
-// preserving order. Two tools installed the same way name the same interpreter
-// and the same package root, and a command line that says so three times is one
-// nobody reads.
-func Dedupe(maps []Mapping) []Mapping {
+// Compose is the set of mounts as a sandbox has to apply them: repeats dropped,
+// and every directory before the files that land inside it.
+//
+// The repeats are the easy half — two tools installed the same way name the same
+// interpreter and the same package root, and a command line that says so three
+// times is one nobody reads.
+//
+// The ordering is the half that was wrong first, and it is invisible until you
+// look inside the sandbox. Mounts are applied in the order they are given, so a
+// directory bind arriving after a file bind underneath it hides the file: an
+// npm-installed `scc` mapped as "the real binary, at the shim's name" came back
+// as the shim, because the bin directory the shim's neighbours needed was mounted
+// on top of it a moment later. Directories first, and the specific mount wins —
+// which is the whole reason it was asked for.
+func Compose(maps []Mapping) []Mapping {
 	var dirs []string
 	for _, m := range maps {
 		if m.Dest == "" && isDir(m.Src) {
@@ -193,7 +203,7 @@ func Dedupe(maps []Mapping) []Mapping {
 		}
 	}
 	seen := map[string]bool{}
-	out := make([]Mapping, 0, len(maps))
+	kept := make([]Mapping, 0, len(maps))
 	for _, m := range maps {
 		if seen[m.Spec()] {
 			continue
@@ -202,7 +212,19 @@ func Dedupe(maps []Mapping) []Mapping {
 			continue
 		}
 		seen[m.Spec()] = true
-		out = append(out, m)
+		kept = append(kept, m)
+	}
+
+	out := make([]Mapping, 0, len(kept))
+	for _, m := range kept {
+		if isDir(m.Src) {
+			out = append(out, m)
+		}
+	}
+	for _, m := range kept {
+		if !isDir(m.Src) {
+			out = append(out, m)
+		}
 	}
 	return out
 }
