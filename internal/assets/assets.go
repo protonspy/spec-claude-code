@@ -161,7 +161,7 @@ import (
 // track --here` records the branch and `--pr` the pull request; `scc spec sync` reads
 // git and the forge back into every spec. The rule pays for the paragraph by
 // tightening §8's argument, which the design doc holds in full anyway.
-const Version = "21"
+const Version = "22"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.

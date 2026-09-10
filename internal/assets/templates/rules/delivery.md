@@ -42,8 +42,8 @@ Once the last task is done:
 
 **The work is the user's, and the record says so.** No `Co-Authored-By` for an assistant,
 no session link, no "generated with" footer, no naming of a model, vendor, or harness —
-not in a commit message, not in a PR title or body, not in a branch name. Say what
-changed and why; what typed it is not part of the record.
+not in a commit message, not in a PR title or body, not in a branch name. What typed it
+is not part of the record, and `scc validate` reports it if it is — so re-run it here.
 
 **A branch leaves no trace in the artifacts, so record it.** `scc spec track <feature>
 --here` when you branch, `--pr <n>` when the PR opens; `scc spec sync` reads git and the

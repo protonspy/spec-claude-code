@@ -15,6 +15,11 @@ type Validator struct {
 // All is every validator that runs under `scc validate`, in a fixed order so two runs
 // over one workspace report identically.
 //
+// attribution comes last because it is the only one whose subject is not a file: it
+// reads the commits this branch has added rather than anything on disk, so a reader
+// scanning the list finds every artifact check together and the history check after
+// them.
+//
 // Each one is silent when its subject is absent: a workspace with no skills is not a
 // workspace with findings. That is what lets the aggregate command run unconditionally
 // instead of asking the user which validators apply.
@@ -29,6 +34,7 @@ func All() []Validator {
 		{Name: "stack", Run: Stack},
 		{Name: "codewiki", Run: Codewiki},
 		{Name: "notes", Run: Notes},
+		{Name: "attribution", Run: Attribution},
 	}
 }
 
@@ -41,8 +47,8 @@ type Result struct {
 
 // Everything runs every validator and merges the findings into one set.
 //
-// One exit code and one document, because nine validators the user has to invoke
-// separately is eight chances to skip one. The per-validator counts come back
+// One exit code and one document, because ten validators the user has to invoke
+// separately is nine chances to skip one. The per-validator counts come back
 // alongside so the report can group by check without re-running anything.
 func Everything(root string) (*finding.Set, []Result, error) {
 	set := &finding.Set{}
