@@ -54,7 +54,7 @@ func runValidateAll(args []string) int {
 	// fixable" is easiest to violate right here, where every check reports at once —
 	// so the shape of the output has to carry the summary before the detail.
 	for _, r := range results {
-		line := fmt.Sprintf("%-9s %d", r.Name, r.Findings)
+		line := fmt.Sprintf("%-12s %d", r.Name, r.Findings)
 		if r.Findings == 0 {
 			render.Info(line)
 			continue

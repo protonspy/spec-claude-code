@@ -111,7 +111,7 @@ func Base(dir string) string {
 // local checkout has been deleted, which is most of them.
 func ref(dir, branch string) string {
 	for _, candidate := range []string{"refs/heads/" + branch, "refs/remotes/origin/" + branch} {
-		if _, err := run(Bin, dir, "rev-parse", "--verify", "--quiet", candidate); err == nil {
+		if verify(dir, candidate) {
 			return candidate
 		}
 	}
@@ -233,4 +233,109 @@ func LookPR(dir string, number int) (PR, error) {
 		return PR{Number: number}, err
 	}
 	return PR{Number: raw.Number, State: strings.ToUpper(raw.State), Branch: raw.HeadRefName, URL: raw.URL}, nil
+}
+
+// Commit is one commit's identity and its message in full.
+//
+// Message is the whole thing — subject, body and trailers — because the trailers
+// are the point: a caller asking what this history says about who did the work is
+// asking about the lines git itself reads as authorship, and those sit at the end.
+type Commit struct {
+	SHA     string `json:"sha"`
+	Short   string `json:"short"`
+	Subject string `json:"subject"`
+	Message string `json:"message"`
+}
+
+// The record and field separators used to read `git log`. ASCII 0x1e and 0x1f
+// exist for exactly this and cannot appear in a commit message, which newlines,
+// tabs and every printable delimiter can — a message quoting a delimiter would
+// otherwise split into two commits, and the reader would blame the wrong sha.
+const (
+	recordSep = "\x1e"
+	fieldSep  = "\x1f"
+)
+
+// Commits lists the commits that are on HEAD and not on base, newest first.
+//
+// "Not on base" is the whole definition of the work in front of the user: on a
+// feature branch it is the branch, and on the base branch itself it is whatever
+// has not been pushed yet. Anything already on the base is somebody else's
+// history, and a caller that reported on it would report the same thing on every
+// branch in the repository forever.
+//
+// Absence is a normal answer here as it is everywhere else in this package: no
+// git, no repository, an unborn HEAD, a shallow clone with no base ref, or a
+// branch that is exactly its base all return no commits and no error. A caller
+// checking a property of this branch's history has nothing to check, which is a
+// different thing from a failure and must not read as one.
+func Commits(dir, base string) ([]Commit, error) {
+	if !Found(Bin) {
+		return nil, ErrUnavailable
+	}
+	if base == "" {
+		base = Base(dir)
+	}
+	against := compareRef(dir, base)
+	if against == "" {
+		return nil, nil
+	}
+	format := strings.Join([]string{"%H", "%h", "%s", "%B"}, fieldSep) + recordSep
+	out, err := run(Bin, dir, "log", "--no-merges", "--format="+format, against+"..HEAD")
+	if err != nil {
+		// An unborn HEAD, a range git cannot resolve, a repository mid-rebase.
+		// Nothing to report, and nothing worth failing a validation run over.
+		return nil, nil
+	}
+	return parseLog(out), nil
+}
+
+// compareRef is what "not on base" is measured against, or "" when no ref can
+// answer.
+//
+// Standing on the base branch is the case worth spelling out: refs/heads/main
+// compared against itself is empty, so a check run there would silently pass on
+// every commit in the repository. The remote's copy is the honest comparison —
+// what is here and not yet pushed — and a base branch with no remote at all
+// leaves genuinely nothing to compare against.
+func compareRef(dir, base string) string {
+	branch, err := CurrentBranch(dir)
+	if err == nil && branch == base {
+		remote := "refs/remotes/origin/" + base
+		if verify(dir, remote) {
+			return remote
+		}
+		return ""
+	}
+	return ref(dir, base)
+}
+
+// verify reports whether a ref resolves.
+func verify(dir, r string) bool {
+	_, err := run(Bin, dir, "rev-parse", "--verify", "--quiet", r)
+	return err == nil
+}
+
+// parseLog turns the separated log stream back into commits. A trailing record
+// separator leaves an empty final field, which is dropped rather than reported as
+// a commit with no sha.
+func parseLog(out string) []Commit {
+	var commits []Commit
+	for _, record := range strings.Split(out, recordSep) {
+		record = strings.Trim(record, "\n")
+		if record == "" {
+			continue
+		}
+		fields := strings.SplitN(record, fieldSep, 4)
+		if len(fields) != 4 {
+			continue
+		}
+		commits = append(commits, Commit{
+			SHA:     fields[0],
+			Short:   fields[1],
+			Subject: fields[2],
+			Message: strings.TrimRight(fields[3], "\n"),
+		})
+	}
+	return commits
 }
