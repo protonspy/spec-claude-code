@@ -91,7 +91,11 @@ jobs:
       # flagged stdlib/dep is exactly what we're guarding against.
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          # Pinned, like every action above it. `@latest` is a standing dependency on
+          # whatever upstream released last: v1.8.0 raised its go directive to 1.26 and
+          # broke this job on a toolchain nothing else here needed to change. Bump it
+          # deliberately, alongside the go-version above.
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           "$(go env GOPATH)/bin/govulncheck" ./...
 
       # golangci-lint runs the conservative set configured in .golangci.yml.
