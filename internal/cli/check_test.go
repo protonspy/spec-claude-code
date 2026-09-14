@@ -94,16 +94,40 @@ func TestTestSetRecordsTheCommandInTheManifest(t *testing.T) {
 
 // A workspace with no command in it writes no key at all, so every manifest that
 // existed before this feature is byte-identical after it.
-func TestManifestStaysUnchangedWithoutATestCommand(t *testing.T) {
+func TestInitWritesTheCheckBase(t *testing.T) {
 	root := initWorkspace(t)
 	raw, err := os.ReadFile(paths.Claude.Manifest(root))
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	for _, key := range []string{`"test"`, `"min_coverage"`} {
-		if strings.Contains(string(raw), key) {
-			t.Errorf("a workspace that recorded nothing carries %s:\n%s", key, raw)
+	// The four questions are in the file from the first command, so the first
+	// person or agent to open it sees what this project has to answer. Empty, not
+	// absent: `scc check set` is what fills them in.
+	for _, key := range []string{`"build": ""`, `"format": ""`, `"lint": ""`, `"test": ""`} {
+		if !strings.Contains(string(raw), key) {
+			t.Errorf("the scaffolded base has no %s:\n%s", key, raw)
 		}
+	}
+	// The floor stays out until somebody sets one: it has a working default, and
+	// writing it here would pin every workspace to today's number.
+	if strings.Contains(string(raw), `"min_coverage"`) {
+		t.Errorf("init pinned a coverage floor nobody chose:\n%s", raw)
+	}
+	// And the base reads as a base — one block at the top, not four keys with
+	// every content hash in the workspace between them.
+	if i, j := strings.Index(string(raw), `"check"`), strings.Index(string(raw), `"files"`); i < 0 || i > j {
+		t.Errorf("check is not above files (%d vs %d)", i, j)
+	}
+	// It is also the state `scc check show` reports, so the file and the command
+	// cannot disagree about what has been decided.
+	// An undecided gate is a warning, so it lands on stderr — both streams together
+	// are what a person sees.
+	stdout, stderr, code := run(t, "check", "show", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("check show: exit = %d", code)
+	}
+	if !strings.Contains(stdout+stderr, "not recorded") {
+		t.Errorf("check show does not report the empty base: %q", stdout+stderr)
 	}
 }
 
