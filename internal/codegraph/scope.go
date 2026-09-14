@@ -94,8 +94,14 @@ func Roots(workspace string, scope []string) (roots []Root, missing []string) {
 // write "everything under backend/src" and handing that to filepath.Glob would
 // mean one graph per child of that directory — which is not what anybody means
 // and would be an expensive way to find out.
+// A backslash is a separator here on every platform, which is deliberately not
+// what filepath.ToSlash does. ToSlash is the *host's* conversion — a no-op on
+// Linux — so a scope recorded as `backend\src` on Windows would name a directory
+// there and nothing anywhere else. The manifest is committed and crosses
+// machines, and internal/manifest already fixes the separator for recorded paths
+// for exactly this reason; a scope is a recorded path too.
 func normalize(raw string) string {
-	p := strings.TrimSpace(filepath.ToSlash(raw))
+	p := strings.TrimSpace(strings.ReplaceAll(raw, `\`, "/"))
 	for {
 		switch {
 		case strings.HasSuffix(p, "/**"):

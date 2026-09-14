@@ -161,3 +161,21 @@ func TestScopeRefusesPathsThatEscape(t *testing.T) {
 		}
 	}
 }
+
+// A scope means the same thing on every machine, which is why the backslash is
+// handled here rather than by filepath.ToSlash.
+//
+// ToSlash is the host's conversion and a no-op on Linux, so a scope recorded as
+// `backend\src` on Windows would name a directory there and nothing anywhere
+// else — in a file that is committed and read by the whole team. This test is
+// the guard, and it only fails on the platforms where the old code was wrong.
+func TestScopeIsSeparatorIndependent(t *testing.T) {
+	root := tree(t, "backend/src")
+	for _, pattern := range []string{`backend\src`, "backend/src", `backend\src\`, `backend\src\*`} {
+		roots, missing := Roots(root, []string{pattern})
+		if len(missing) != 0 || len(roots) != 1 || roots[0].Rel != "backend/src" {
+			t.Errorf("%q resolved to %v (missing %v), want backend/src on every platform",
+				pattern, rels(roots), missing)
+		}
+	}
+}
