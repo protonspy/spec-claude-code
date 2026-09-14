@@ -27,7 +27,7 @@ Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc i
 
 | Command | What it does |
 |---|---|
-| `init` | Scaffolds the workspace and records what it wrote, then wires in the git hooks and RTK's usage block. Idempotent; never overwrites your edits. |
+| `init` | Scaffolds the workspace and records what it wrote, then wires in the git hooks, RTK's usage block and a `.devcontainer/`. Idempotent; never overwrites your edits. |
 | `update` | Compares every managed file against this build, shows the plan, and applies it once you agree. |
 | `spec new\|list\|show\|delete\|validate` | The three-artifact vehicle for work whose *what* and *how* need settling first. |
 | `plan new\|list\|delete\|validate` | One file, for everything else: a checklist, a decomposition into specs, or both. |
@@ -132,21 +132,24 @@ one it replaced claimed a newer version; `--keep` leaves it alone. `init` and
 deliberately rather than as a side effect. Everything outside the markers is
 untouched either way, and `--no-install` writes the block without touching cargo.
 
-### A sandbox, optionally
+### A sandbox, by default
 
 An agent needs filesystem access to do its job, and the same access lets it run
 `rm -rf`, read `~/.aws`, or ship a key somewhere — by accident, on a poisoned
-instruction in a file it read, or through a dependency it installed. `scc launch
---jail` starts it inside [ai-jail](https://github.com/akitaonrails/ai-jail), which
-sandboxes with bubblewrap on Linux and `sandbox-exec` on macOS:
+instruction in a file it read, or through a dependency it installed. So `scc launch`
+puts it behind a boundary without being asked: [ai-jail](https://github.com/akitaonrails/ai-jail)
+on Linux and macOS, which sandboxes with bubblewrap and `sandbox-exec`, and a dev
+container on Windows.
 
 ```bash
-npx @protonspy/scc launch claude --jail             # the agent, contained
+npx @protonspy/scc launch claude                    # contained, if a backend is here
+npx @protonspy/scc launch claude --jail             # demand it: install, or refuse to start
+npx @protonspy/scc launch claude --no-sandbox       # deliberately on the host
 npx @protonspy/scc launch claude --jail --jail-arg --lockdown
 ```
 
 **On by default, and the install is the opt-in.** A sandbox nobody turns on is a
-sandbox nobody has � so ai-jail on PATH means every `scc launch` here is contained,
+sandbox nobody has — so ai-jail on PATH means every `scc launch` here is contained,
 and absent means one line naming what would have contained it. `--jail` is the
 demand rather than the default: asked for by name, it installs what is missing and
 **refuses to start at all** if it cannot deliver, because a false belief about
@@ -154,18 +157,23 @@ containment is worse than a known absence of one. `--no-sandbox` is the way out.
 
 **On Windows the backend is a dev container.** ai-jail stands on Linux namespaces
 and Apple's sandbox interface and has neither there, so `scc launch` runs the agent
-through `devcontainer up` and `devcontainer exec` � no editor in the loop. It is the
+through `devcontainer up` and `devcontainer exec` — no editor in the loop. It is the
 weaker of the two boundaries and scc says so on the run that gets it: a container
 does not protect the `~/.claude` credentials mounted into it, which is why WSL2 is
 still named as the better answer. `scc init` seeds `.devcontainer/` carrying scc,
 rtk, codegraph and the agent; `/scc-init` fits the image to your language.
 
-scc passes exactly the two flags that let an agent run at all — a network to reach
-its model and the credential state to authenticate — and reads even those off
-`ai-jail --help` rather than hardcoding them. Everything else is policy and belongs
-in ai-jail's own `~/.ai-jail` / `./.ai-jail`, which scc never writes.
+**scc asks ai-jail for as little as it can, and reads even that off `ai-jail --help`**
+rather than hardcoding a flag name — the toolchain it maps back in read-only (`scc`,
+`rtk`, `codegraph`, the binaries its own guidance names), and the capabilities an
+agent needs to reach its model. A build that advertises none of them gets a warning
+and no substitute: a sandbox opened by a guess is the failure the whole feature
+exists to prevent. Everything else is policy and belongs in ai-jail's own
+`~/.ai-jail` / `./.ai-jail`, which it reads by itself and scc never writes.
 
-The idea, and the tool, are [Fábio Akita's](https://akitaonrails.com/2026/01/10/ai-agents-garantindo-a-protecao-do-seu-sistema/).
+The idea, and the tool, are [Fábio Akita's](https://akitaonrails.com/en/2026/03/01/ai-jail-sandbox-for-ai-agents-from-shell-script-to-real-tool/) —
+that write-up documents the Rust tool scc integrates; the [original shell script](https://akitaonrails.com/2026/01/10/ai-agents-garantindo-a-protecao-do-seu-sistema/)
+is where the idea started.
 
 ### Three harnesses, one methodology
 
