@@ -147,7 +147,7 @@ func (s *Set) Report(subject string) {
 		return
 	}
 	sorted := s.Sorted()
-	render.Err(fmt.Sprintf("%s: %s", subject, plural(len(sorted))))
+	render.Err(fmt.Sprintf("%s: %s", subject, Count(len(sorted))))
 	var file string
 	for _, f := range sorted {
 		if f.File != file {
@@ -165,7 +165,11 @@ func location(f Finding) string {
 	return strconv.Itoa(f.Line)
 }
 
-func plural(n int) string {
+// Count is a finding tally in words — "1 finding", "3 findings". Exported so
+// anything that reports a count phrases it the way the validators do: a hook
+// that said "3 findings found" beside a report that says "3 findings" is two
+// vocabularies for one number.
+func Count(n int) string {
 	if n == 1 {
 		return "1 finding"
 	}

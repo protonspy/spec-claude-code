@@ -13,16 +13,18 @@
 // the validator, and deciding where the text came from belongs to the caller.
 //
 // **A signature is a shape, never a word.** Nothing here fires on a vendor's name
-// alone: `chore(deps): bump the anthropic SDK to 0.40` and `feat(harness): add
-// opencode support` are ordinary commits, and a check that flagged them would be
-// suppressed within a day — which costs more than every signature it would ever
-// catch. Every rule below is a trailer, a footer phrase, or a link, and the
-// vocabulary only decides whether that shape names an assistant.
+// appearing in a sentence: `chore(deps): bump the anthropic SDK to 0.40` and
+// `feat(harness): add opencode support` are ordinary commits, and a check that
+// flagged them would be suppressed within a day — which costs more than every
+// signature it would ever catch. Every rule below is a trailer, a footer phrase, a
+// link, a badge, or a line that says nothing but the name; the vocabulary only
+// ever decides whether that shape names an assistant.
 package attribution
 
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // Hit is one signature found in the text, at the line it sits on.
@@ -45,28 +47,61 @@ const (
 	// RuleFooter is a "generated with"/"created by" line naming a model, vendor
 	// or harness — the footer the harnesses append by default.
 	RuleFooter = "generated-with"
-	// RuleLink is a session link or a vendor no-reply address. It is separate
-	// from the other two because it survives them: a footer rewritten by hand
-	// often keeps the URL.
+	// RuleLink is a session link, a vendor's own page, or a vendor no-reply
+	// address. It is separate from the other two because it survives them: a
+	// footer rewritten by hand usually keeps the URL.
 	RuleLink = "assistant-link"
+	// RuleBadge is a Markdown link or image whose label or target names an
+	// assistant — the `[Claude Code](…)` half of the footer the harnesses append.
+	// It is its own rule because the phrase in front of it is the part a session
+	// rewrites: a badge with no footer phrase in front of it and no vendor host
+	// behind it is still a signature.
+	RuleBadge = "assistant-badge"
+	// RuleMention is a line that is nothing but an assistant's name, sitting
+	// where a signature sits — "Claude Code" behind a robot emoji, "— Claude Opus
+	// 5", a last line reading "via Codex". It is what a stripped-down footer
+	// collapses to once the phrase, the badge and the link are all gone.
+	//
+	// It is the one rule where the vocabulary comes closest to doing the naming,
+	// so it is gated twice: the line has to say nothing else, *and* it has to be
+	// in a signature's position — under a symbol, behind a dash, or at the end of
+	// the message. Without the second gate it reports "Claude Code, Codex, and
+	// opencode", which is a sentence this project's own pull requests write.
+	RuleMention = "assistant-mention"
 )
 
-// The three shapes. Compiled once, applied per line, and deliberately anchored:
-// a pattern that could match mid-sentence would fire on a commit message that
+// The shapes. Compiled once, applied per line, and deliberately anchored: a
+// pattern that could match mid-sentence would fire on a commit message that
 // merely quotes one of these lines, which is exactly what a fix for this finding
 // looks like.
 var (
 	// A git trailer: a known key at the start of a line, with a value.
 	trailer = regexp.MustCompile(`(?i)^[ \t]*(co-?authored-by|assisted-by|generated-by|signed-off-by)[ \t]*:[ \t]*(\S.*?)[ \t]*$`)
-	// The footer phrase. Both halves have to be present on the line — the phrase
-	// and a name — or it is prose.
-	footer = regexp.MustCompile(`(?i)\b(?:generated|created|authored|written|made|built)\s+(?:with|by|using)\b`)
-	// A session link or a vendor no-reply address, which is a signature on its
-	// own: nobody cites either of these to explain a change.
-	link = regexp.MustCompile(`(?i)\b(?:https?://)?(?:claude\.ai|claude\.com/claude-code|chatgpt\.com|chat\.openai\.com|cursor\.(?:com|sh)/|copilot\.microsoft\.com)\S*|\b[\w.+-]+@(?:anthropic|openai)\.com\b`)
+	// The footer phrase. It is only half a shape: the caller requires the name to
+	// follow it on the same line, so a sentence that happens to say "written by"
+	// about something else stays prose.
+	footer = regexp.MustCompile(`(?i)\b(?:generated|created|authored|written|made|built|produced|drafted)\s+(?:with|by|using|via)\b`)
+	// A session link, a vendor's own page, or a vendor no-reply address, which is
+	// a signature on its own: nobody cites any of these to explain a change.
+	//
+	// Whole hosts, rather than the one path today's footer happens to use.
+	// claude.com/claude-code is the spelling that walked past a rule written
+	// around claude.ai, and the next rewording moves the path again.
+	link = regexp.MustCompile(`(?i)\b(?:https?://)?(?:[\w-]+\.)*(?:claude\.(?:ai|com)|anthropic\.com|chatgpt\.com|openai\.com|cursor\.(?:com|sh)|copilot\.microsoft\.com|codeium\.com|windsurf\.com|sourcegraph\.com/cody)(?:/\S*)?|\b[\w.+-]+@(?:anthropic|openai)\.com\b`)
+	// A Markdown link or image: a label in brackets and a target in parentheses,
+	// with an optional leading bang. Both halves are measured, so a badge survives
+	// having either one of them rewritten.
+	badge = regexp.MustCompile(`!?\[([^\]\n]{0,160})\]\(([^)\n]{0,400})\)`)
+	// What a line carries besides its words: the robot, a rule, a dash, emphasis,
+	// a bullet, a trailing stop — everything a footer keeps once the phrase in
+	// front of it is gone.
+	decoration = regexp.MustCompile(`^[\s\pP\pS]+|[\s\pP\pS]+$`)
+	// One word of a line, for the mention rule.
+	word = regexp.MustCompile(`[\p{L}\p{N}][\p{L}\p{N}.+-]*`)
 )
 
-// assistants is the closed vocabulary a trailer or a footer is measured against.
+// assistants is the closed vocabulary a trailer, a footer, a badge or a mention
+// is measured against.
 //
 // Closed on purpose, and matched as a substring so "Claude Opus 5 (1M context)"
 // and "claude-sonnet-5" both land. It is safe to be this broad only because every
@@ -90,6 +125,19 @@ var assistants = []string{
 // have been reported. Both are the same mistake: a vocabulary entry short enough
 // to appear inside an innocent word costs more than the signature it catches.
 
+// filler is what a bare mention may say around the name: a product word, a model,
+// a size, a connective. The list is short on purpose — every entry widens what
+// counts as "the line says nothing else", and the mention rule is sound only
+// while that phrase stays true.
+var filler = map[string]bool{
+	"code": true, "cli": true, "ai": true, "agent": true, "app": true,
+	"model": true, "opus": true, "sonnet": true, "haiku": true, "fable": true,
+	"gpt": true, "pro": true, "max": true, "mini": true, "turbo": true,
+	"preview": true, "context": true, "via": true, "with": true, "by": true,
+	"using": true, "and": true, "the": true, "powered": true, "assisted": true,
+	"help": true, "from": true, "sdk": true, "api": true, "v": true,
+}
+
 // Names reports whether s mentions something on the vocabulary. Exported because
 // the vocabulary is the part a caller might reasonably want to ask about.
 func Names(s string) bool {
@@ -106,12 +154,15 @@ func Names(s string) bool {
 //
 // One line can carry at most one hit, and the rules are tried in the order they
 // are declared. That is not a shortcut: the harness default footer is a single
-// line carrying a footer phrase *and* a link, and reporting it twice would make
-// one mistake look like two — the shape of a validator nobody trusts the count of.
+// line carrying a footer phrase, a badge *and* a link, and reporting it three
+// times would make one mistake look like three — the shape of a validator nobody
+// trusts the count of.
 func Scan(text string) []Hit {
+	lines := strings.Split(normalize(text), "\n")
+	last := lastWritten(lines)
 	var out []Hit
-	for i, line := range strings.Split(normalize(text), "\n") {
-		if h, ok := scanLine(line); ok {
+	for i, line := range lines {
+		if h, ok := scanLine(line, i == last); ok {
 			h.Line = i + 1
 			out = append(out, h)
 		}
@@ -119,17 +170,107 @@ func Scan(text string) []Hit {
 	return out
 }
 
-func scanLine(line string) (Hit, bool) {
+// lastWritten is the index of the final non-blank line — where a footer lands,
+// and the position the mention rule needs to know about. -1 when the text is
+// blank.
+func lastWritten(lines []string) int {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return i
+		}
+	}
+	return -1
+}
+
+func scanLine(line string, last bool) (Hit, bool) {
 	if m := trailer.FindStringSubmatch(line); m != nil && Names(m[2]) {
 		return Hit{Rule: RuleTrailer, Match: strings.TrimSpace(line)}, true
 	}
-	if footer.MatchString(line) && Names(line) {
+	// The name has to come *after* the phrase, not merely somewhere on the line.
+	// Measured on this project's own history: "opencode has one AGENTS.md written
+	// by whichever ran first" carries the phrase and the vocabulary and is a
+	// sentence about opencode, not a line signed by it.
+	if at := footer.FindStringIndex(line); at != nil && Names(line[at[1]:]) {
 		return Hit{Rule: RuleFooter, Match: strings.TrimSpace(line)}, true
+	}
+	if m := badge.FindStringSubmatch(line); m != nil && (Names(m[1]) || Names(m[2])) {
+		return Hit{Rule: RuleBadge, Match: strings.TrimSpace(m[0])}, true
 	}
 	if m := link.FindString(line); m != "" {
 		return Hit{Rule: RuleLink, Match: m}, true
 	}
+	if m, ok := mention(line, last); ok {
+		return Hit{Rule: RuleMention, Match: m}, true
+	}
 	return Hit{}, false
+}
+
+// mention reports a line that is nothing but an assistant's name, in the place a
+// signature goes.
+//
+// Two gates, and both are needed. The line has to say nothing else: strip the
+// decoration a footer keeps, then require every remaining word to be the name
+// itself or one of a short list of product words, under a cap — "fix(cli): stop
+// claude-sonnet-5 being spelled two ways" names an assistant in a sentence this
+// will never accept.
+//
+// And it has to sit where a signature sits: behind a symbol or a dash, or at the
+// end of the message. That is what separates a robot emoji followed by "Claude
+// Code" from "Claude Code, Codex, and opencode" — a list this project writes in
+// its own pull requests, and the false positive the first gate alone would
+// produce. A Markdown bullet is deliberately not a trigger, for the same reason.
+func mention(line string, last bool) (string, bool) {
+	s := strings.TrimSpace(decoration.ReplaceAllString(line, ""))
+	if s == "" || !Names(s) || !(last || signed(line)) {
+		return "", false
+	}
+	words := word.FindAllString(s, -1)
+	if len(words) == 0 || len(words) > 6 {
+		return "", false
+	}
+	named := false
+	for _, w := range words {
+		low := strings.ToLower(w)
+		switch {
+		case Names(low):
+			named = true
+		case filler[low], isVersion(low):
+		default:
+			return "", false
+		}
+	}
+	if !named {
+		return "", false
+	}
+	return strings.TrimSpace(line), true
+}
+
+// signed reports whether a line opens the way a signature opens: a symbol — the
+// robot, a sparkle, a trademark — or a typographic dash.
+//
+// The hyphen, the asterisk and the angle bracket are all absent, and that is the
+// point: they open a Markdown bullet and a quote, which is how an ordinary list
+// of harnesses starts. A signature's decoration and a list's bullet look alike
+// enough that guessing between them is how this rule would earn its first false
+// positive.
+func signed(line string) bool {
+	for _, r := range strings.TrimLeft(line, " \t") {
+		return unicode.IsSymbol(r) || r == '—' || r == '–' || r == '~'
+	}
+	return false
+}
+
+// isVersion accepts the scraps of a model name that are not words: "5", "4.5",
+// "v2", "1m". It sits beside filler rather than in it because it is a shape too.
+func isVersion(w string) bool {
+	w = strings.TrimPrefix(w, "v")
+	w = strings.TrimSuffix(w, "m")
+	if w == "" {
+		return false
+	}
+	return strings.IndexFunc(w, func(r rune) bool {
+		return (r < '0' || r > '9') && r != '.'
+	}) < 0
 }
 
 // normalize folds CRLF so a message written on Windows scans identically to the

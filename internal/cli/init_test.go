@@ -16,10 +16,15 @@ import (
 // initWorkspace scaffolds a throwaway workspace and returns its root. Every test
 // passes --root explicitly rather than changing directory: os.Chdir is process-wide
 // and would make these tests unsafe to run alongside anything else.
+//
+// --no-rtk for the same reason, one layer out: init wires RTK in when the binary is
+// on PATH, so without the flag what lands in the entry file would depend on whether
+// the machine running the suite happens to have cargo-installed rtk. The tests that
+// are about RTK say so, and put their own binary on PATH.
 func initWorkspace(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	if _, stderr, code := run(t, "init", "--claude", "--root", root); code != ExitOK {
+	if _, stderr, code := run(t, "init", "--no-rtk", "--claude", "--root", root); code != ExitOK {
 		t.Fatalf("init: exit = %d (stderr: %s)", code, stderr)
 	}
 	return root
@@ -74,7 +79,7 @@ func TestInitSeedsTheKnowledgeBaseWithoutManagingIt(t *testing.T) {
 	if err := os.WriteFile(paths.Glossary(root), []byte(mine), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if _, stderr, code := run(t, "init", "--claude", "--root", root); code != ExitOK {
+	if _, stderr, code := run(t, "init", "--no-rtk", "--claude", "--root", root); code != ExitOK {
 		t.Fatalf("second init: %d (%s)", code, stderr)
 	}
 	got, err := os.ReadFile(paths.Glossary(root))
@@ -104,7 +109,7 @@ func TestUpdateIgnoresTheSeededKnowledgeBase(t *testing.T) {
 
 func TestInitJSONReportsEveryAction(t *testing.T) {
 	root := t.TempDir()
-	stdout, stderr, code := run(t, "init", "--root", root, "--json")
+	stdout, stderr, code := run(t, "init", "--no-rtk", "--root", root, "--json")
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
@@ -136,7 +141,7 @@ func TestInitIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	stdout, stderr, code := run(t, "init", "--root", root, "--json")
+	stdout, stderr, code := run(t, "init", "--no-rtk", "--root", root, "--json")
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
@@ -168,7 +173,7 @@ func TestInitLeavesEditedFilesAlone(t *testing.T) {
 	if err := workspace.AtomicWrite(rule, []byte(mine), 0o644); err != nil {
 		t.Fatalf("AtomicWrite: %v", err)
 	}
-	if _, stderr, code := run(t, "init", "--claude", "--root", root); code != ExitOK {
+	if _, stderr, code := run(t, "init", "--no-rtk", "--claude", "--root", root); code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
 	got, err := os.ReadFile(rule)
@@ -188,7 +193,7 @@ func TestInitForceNamesWhatItClobbered(t *testing.T) {
 	if err := workspace.AtomicWrite(rule, []byte("# mine\n"), 0o644); err != nil {
 		t.Fatalf("AtomicWrite: %v", err)
 	}
-	_, stderr, code := run(t, "init", "--claude", "--root", root, "--force")
+	_, stderr, code := run(t, "init", "--no-rtk", "--claude", "--root", root, "--force")
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
@@ -206,7 +211,7 @@ func TestInitForceNamesWhatItClobbered(t *testing.T) {
 
 func TestInitRejectsAMissingRoot(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope")
-	_, stderr, code := run(t, "init", "--claude", "--root", missing)
+	_, stderr, code := run(t, "init", "--no-rtk", "--claude", "--root", missing)
 	if code != ExitError {
 		t.Errorf("exit = %d, want %d", code, ExitError)
 	}
@@ -219,7 +224,7 @@ func TestInitRejectsAMissingRoot(t *testing.T) {
 // Ignoring it would report success for something scc did not do.
 func TestInitRejectsPositionals(t *testing.T) {
 	root := t.TempDir()
-	if _, _, code := run(t, "init", "--claude", "--root", root, "user-auth"); code != ExitError {
+	if _, _, code := run(t, "init", "--no-rtk", "--claude", "--root", root, "user-auth"); code != ExitError {
 		t.Errorf("exit = %d, want %d", code, ExitError)
 	}
 }

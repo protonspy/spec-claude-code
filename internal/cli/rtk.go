@@ -241,3 +241,49 @@ func spliceEntry(root, entry, block string, opts rtkOptions) (blockFile, error) 
 	}
 	return file, nil
 }
+
+// rtkAsk is the question every entry point has to settle before it can wire RTK
+// in: may scc build the binary right now, on this run, with nobody necessarily
+// watching?
+//
+// It lives here rather than in either caller because `init` and `launch` ask it
+// for the same reason and have to answer it the same way. RTK's install is a Rust
+// toolchain and a build that takes minutes, and its block tells the agent to
+// prefix every command with the binary that build produces — so a second copy of
+// this decision is a second place for the two to drift on what "nobody is here"
+// or "cargo is missing" means.
+type rtkAsk struct {
+	// yes is consent already given by flag, so there is no question to put.
+	yes bool
+	// noInstall and plan are the two ways of saying "report, do not build".
+	noInstall bool
+	plan      bool
+	// quiet means the caller is emitting JSON, which is also an unattended run:
+	// stdout carries the document and nothing may prompt into it.
+	quiet bool
+}
+
+// rtkInstallOK returns "" when scc may build RTK now, and otherwise the reason it
+// may not — phrased for the line the caller prints, since every caller's next move
+// is to say why the agent is starting without it.
+func rtkInstallOK(a rtkAsk) string {
+	switch {
+	case a.noInstall || a.plan:
+		return rtk.Bin + " is not on PATH"
+	case !rtk.Available():
+		return fmt.Sprintf("cargo is not on PATH, so %s cannot be built", rtk.Bin)
+	case a.yes:
+		// Asked for by flag; no question to put.
+		return ""
+	case a.quiet || !interactive():
+		return fmt.Sprintf("%s is not on PATH, and nobody is here to answer the install prompt", rtk.Bin)
+	}
+	render.Warn(fmt.Sprintf("%s is not on PATH — it filters command output before it reaches the model", rtk.Bin))
+	render.Detail("  " + rtk.Repo)
+	// The question names the file, because consenting to an install is not
+	// consenting to an edit and the user cannot see the second one coming.
+	if !confirmInstall(promptIn, fmt.Sprintf("Build it with `%s` and add its usage block to the entry file?", rtk.InstallCmd())) {
+		return "install declined"
+	}
+	return ""
+}

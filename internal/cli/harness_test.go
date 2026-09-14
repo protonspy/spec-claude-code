@@ -35,7 +35,7 @@ func withoutTerminal(t *testing.T) {
 func TestInitScaffoldsTheChosenHarness(t *testing.T) {
 	for _, h := range paths.Harnesses() {
 		root := t.TempDir()
-		if _, stderr, code := run(t, "init", "--"+h.ID, "--root", root); code != ExitOK {
+		if _, stderr, code := run(t, "init", "--no-rtk", "--"+h.ID, "--root", root); code != ExitOK {
 			t.Fatalf("%s: exit = %d (%s)", h.ID, code, stderr)
 		}
 		if !workspace.IsWorkspace(root) {
@@ -58,7 +58,7 @@ func TestInitScaffoldsTheChosenHarness(t *testing.T) {
 func TestInitWithoutAFlagDefaultsToClaude(t *testing.T) {
 	withoutTerminal(t)
 	root := t.TempDir()
-	if _, stderr, code := run(t, "init", "--root", root); code != ExitOK {
+	if _, stderr, code := run(t, "init", "--no-rtk", "--root", root); code != ExitOK {
 		t.Fatalf("exit = %d (%s)", code, stderr)
 	}
 	got := workspace.Harnesses(root)
@@ -72,7 +72,7 @@ func TestInitWithoutAFlagDefaultsToClaude(t *testing.T) {
 func TestInitAsksWhenNobodyPassedAFlag(t *testing.T) {
 	withPrompt(t, "2\n")
 	root := t.TempDir()
-	stdout, stderr, code := run(t, "init", "--root", root)
+	stdout, stderr, code := run(t, "init", "--no-rtk", "--root", root)
 	if code != ExitOK {
 		t.Fatalf("exit = %d (%s)", code, stderr)
 	}
@@ -90,7 +90,7 @@ func TestInitAsksWhenNobodyPassedAFlag(t *testing.T) {
 func TestInitDoesNotAskUnderJSON(t *testing.T) {
 	withPrompt(t, "2\n")
 	root := t.TempDir()
-	stdout, stderr, code := run(t, "init", "--root", root, "--json")
+	stdout, stderr, code := run(t, "init", "--no-rtk", "--root", root, "--json")
 	if code != ExitOK {
 		t.Fatalf("exit = %d (%s)", code, stderr)
 	}
@@ -107,7 +107,7 @@ func TestInitDoesNotAskUnderJSON(t *testing.T) {
 // describes. Refusing is better than guessing.
 func TestInitRefusesTwoHarnessesAtOnce(t *testing.T) {
 	root := t.TempDir()
-	_, stderr, code := run(t, "init", "--codex", "--opencode", "--root", root)
+	_, stderr, code := run(t, "init", "--no-rtk", "--codex", "--opencode", "--root", root)
 	if code != ExitError {
 		t.Fatalf("exit = %d, want %d", code, ExitError)
 	}

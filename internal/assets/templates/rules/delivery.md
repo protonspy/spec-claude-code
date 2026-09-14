@@ -10,40 +10,40 @@ runs several sessions against one repo at once is theirs to set up.
 
 **There is no implementation subagent and no parallel task dispatch.** It puts the
 cheaper model on the hardest work, and every fresh agent re-pays for discovery — within
-one spec your accumulated context is the asset: you use the right parser in 1.2 because
-you wrote 1.1. Above all, **file-disjointness is not independence, and a clean merge
-hides the difference**: two tasks touching no common file both need a `Money` type that
-does not exist yet, each invents its own with different semantics, and the merge is
-clean. Sequential execution cannot produce that — the later task sees the earlier one's
-code.
+one spec your context is the asset: you use the right parser in 1.2 because you wrote
+1.1. Above all, **file-disjointness is not independence, and a clean merge hides it**:
+two tasks sharing no file both need a `Money` type that does not exist, each invents one
+with different semantics, and the merge is clean. Sequential execution cannot do that.
 
 Feature-level parallelism has none of that and is supported — a *human* picks the split
-and each session has full context. Separate sessions isolate files, not the world: a
-suite fighting over a fixed port or one test database must be namespaced or serialized,
-and two features green separately can still break together, which only CI on `main` sees.
+and each session has full context. Separate sessions isolate files, not the world: a fixed
+port or one test database must be namespaced, and two green features can break together.
 
 ## The delivery sequence
 
 Once the last task is done:
 
-1. **Full suite + lint** on the integrated branch. Per-task scoped runs cannot see
-   breakage between tasks.
-2. **`scc validate`** — the artifacts have to be in shape too, and exit `2` is not done.
+1. **`scc check`** on the integrated branch — build, format, lint and suite, in that
+   order, stopping at the first failure. Per-task runs cannot see breakage between tasks.
+2. **`scc validate --checks --pr`** — artifacts, record and the gates together; `2` is not done.
 3. **`code-review` and `security-review`** subagents on the diff, dispatched together.
-   Each returns a verdict, what it checked, and findings by severity — you fix from
-   that report, you do not re-review. `blocked` or any `blocker`/`critical` means the PR
-   does not open yet; `major`/`high` is fixed before merge; `minor`/`low` is your call,
-   and "not doing this, and why" in the PR body is a legitimate answer. A gate reported
+   Each returns a verdict, what it checked, and findings by severity — you fix from that
+   report, you do not re-review. `blocked` or any `blocker`/`critical` means the PR does
+   not open yet; `major`/`high` is fixed before merge; `minor`/`low` is your call, and
+   "not doing this, and why" in the PR body is a legitimate answer. A gate reported
    `not-run` is not a pass. The PR should arrive already reviewed — a human's attention
-   spent on what a subagent would have caught is waste. One round of fix-and-re-run is
-   worth it; a third means the finding needs a person.
+   spent on what a subagent would catch is waste; one round of fix-and-re-run, not three.
 4. **Commit and push.** Conventional Commits, written from the diff and the spec.
 5. **Open the PR.** Body: what changed, which spec or plan, how it was verified.
 
 **The work is the user's, and the record says so.** No `Co-Authored-By` for an assistant,
-no session link, no "generated with" footer, no naming of a model, vendor, or harness —
-not in a commit message, not in a PR title or body, not in a branch name. What typed it
-is not part of the record, and `scc validate` reports it if it is — so re-run it here.
+no session link, no "generated with" footer or badge, no naming of a model, vendor or
+harness — not in a commit message, not in a PR title or body. The `commit-msg` hook
+rejects it as you write it, `SCC_SKIP_HOOKS=1` is not the fix, `--pr` reads the PR body.
+
+**The gates are commands, not claims.** `scc check` runs what this workspace recorded
+for build, format, lint and test; the last reads back `{"total": N, "coverage": P}` and
+is held to a floor. `pre-push` runs them, so what cannot clear them does not become a PR.
 
 **A branch leaves no trace in the artifacts, so record it.** `scc spec track <feature>
 --here` when you branch, `--pr <n>` when the PR opens; `scc spec sync` reads git and the

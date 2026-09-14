@@ -80,6 +80,10 @@ func Run(args []string) int {
 		return runSkill(args[1:])
 	case "validate":
 		return runValidateAll(args[1:])
+	case "check":
+		return runCheck(args[1:])
+	case "hooks":
+		return runHooks(args[1:])
 	default:
 		render.Err(fmt.Sprintf("unknown command %q", args[0]))
 		fmt.Fprintf(os.Stderr, "run `%s help` for the available commands\n", prog())
@@ -114,7 +118,7 @@ Usage:
   %s <command> [flags]
 
 Commands:
-  init      Scaffold a workspace: rules, agents, skills, commands, layout, manifest
+  init      Scaffold a workspace: rules, agents, skills, layout, manifest, hooks, RTK block
   update    Bring the managed files onto this build's templates, after showing the plan
   rtk       Install RTK if missing and put its usage block in the entry file
   launch    Start a harness here, with its symbol graph and RTK block current; --jail sandboxes it
@@ -126,6 +130,8 @@ Commands:
   notes     The project's note log in docs/notes.md — add | find | show | tags | paths | rm
   skill     Agent Skills conformance — validate
   validate  Run every applicable validator; exit 2 on findings
+  check     The delivery gate — build, format, lint, test: run | set | skip | show
+  hooks     Git hooks that run the validators — install | check | remove
   version   Print the version
   help      Show this help
 

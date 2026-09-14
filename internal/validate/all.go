@@ -23,7 +23,56 @@ type Validator struct {
 // Each one is silent when its subject is absent: a workspace with no skills is not a
 // workspace with findings. That is what lets the aggregate command run unconditionally
 // instead of asking the user which validators apply.
-func All() []Validator {
+func All(opts ...Option) []Validator {
+	return append(base(), extra(opts)...)
+}
+
+// Option turns on a check that a default run leaves off.
+//
+// There are two, and both are behind it for the same reason: cost. `scc validate`
+// sits on the pre-commit path, where a gate that costs a second per commit is a
+// gate somebody turns off and then none of the others run either. WithPR goes to
+// the network; WithChecks runs the project's compiler, linter and suite. Everything else here
+// reads files that are already on disk, and the bar for adding a third option is
+// exactly that — a check that is cheap belongs in base(), where nobody has to
+// remember it.
+type Option func(*options)
+
+type options struct {
+	pr     bool
+	checks bool
+}
+
+// WithPR adds the pull-request check: the title and body of the PR open on this
+// branch, read through `gh`. Off by default, on in the pre-push hook and under
+// `scc validate --pr`, which are the two moments the pull request exists.
+func WithPR() Option { return func(o *options) { o.pr = true } }
+
+// WithChecks adds the delivery gate: the project's own build, format, lint and
+// test commands, run, with the suite's coverage held against the floor. Off by
+// default, on under `scc validate --checks` and in the pre-push hook of a
+// workspace that has decided something — the moment a branch becomes a pull
+// request.
+func WithChecks() Option { return func(o *options) { o.checks = true } }
+
+func extra(opts []Option) []Validator {
+	var o options
+	for _, fn := range opts {
+		fn(&o)
+	}
+	var out []Validator
+	// Checks before pr: they are the slow ones, and a run that is going to fail on
+	// a broken build should say so before it spends a network round trip on the forge.
+	if o.checks {
+		out = append(out, Validator{Name: "checks", Run: Checks})
+	}
+	if o.pr {
+		out = append(out, Validator{Name: "pr", Run: AttributionPR})
+	}
+	return out
+}
+
+func base() []Validator {
 	return []Validator{
 		{Name: "skill", Run: Skills},
 		{Name: "spec", Run: Specs},
@@ -50,10 +99,10 @@ type Result struct {
 // One exit code and one document, because ten validators the user has to invoke
 // separately is nine chances to skip one. The per-validator counts come back
 // alongside so the report can group by check without re-running anything.
-func Everything(root string) (*finding.Set, []Result, error) {
+func Everything(root string, opts ...Option) (*finding.Set, []Result, error) {
 	set := &finding.Set{}
 	var results []Result
-	for _, v := range All() {
+	for _, v := range All(opts...) {
 		one, err := v.Run(root)
 		if err != nil {
 			return nil, nil, err

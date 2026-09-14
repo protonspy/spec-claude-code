@@ -464,24 +464,10 @@ func resolveRTK(root string, opts rtkLaunchOptions) *rtkLaunchReport {
 	}
 
 	if _, ok := rtk.Path(); !ok {
-		switch {
-		case opts.noInstall || opts.plan:
-			report.Reason = rtk.Bin + " is not on PATH"
-		case !rtk.Available():
-			report.Reason = fmt.Sprintf("cargo is not on PATH, so %s cannot be built", rtk.Bin)
-		case opts.yes:
-			// Asked for by flag; no question to put.
-		case opts.quiet || !interactive():
-			report.Reason = fmt.Sprintf("%s is not on PATH, and nobody is here to answer the install prompt", rtk.Bin)
-		default:
-			render.Warn(fmt.Sprintf("%s is not on PATH — it filters command output before it reaches the model", rtk.Bin))
-			render.Detail("  " + rtk.Repo)
-			// The question names the file, because consenting to an install is not
-			// consenting to an edit and the user cannot see the second one coming.
-			if !confirmInstall(promptIn, fmt.Sprintf("Build it with `%s` and add its usage block to the entry file?", rtk.InstallCmd())) {
-				report.Reason = "install declined"
-			}
-		}
+		// The same question `scc init` puts, settled in one place: a launch and a
+		// scaffold that disagreed about when cargo may run would be two answers to
+		// one question, and the one nobody tested would be the one that ran.
+		report.Reason = rtkInstallOK(rtkAsk{yes: opts.yes, noInstall: opts.noInstall, plan: opts.plan, quiet: opts.quiet})
 		if report.Reason != "" {
 			if !opts.quiet && !opts.plan {
 				render.Warn("starting without " + rtk.Bin + ": " + report.Reason)

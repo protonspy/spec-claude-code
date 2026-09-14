@@ -44,6 +44,28 @@ build: ## Build the binary locally (-> ./scc); set VERSION to stamp it
 test: ## Run tests (race + coverage)
 	go test -race -coverprofile=coverage.out ./...
 
+# test-report is the shape `scc check` asks a project for in its test gate: run the
+# suite, then print one object saying how many tests ran and how much they covered.
+#
+# It is here because scc ships that contract and a contract with no worked example
+# is one everybody implements differently. Nothing in scc runs this target — a
+# workspace records whatever command it likes — but this is the four lines it takes
+# in a Go project, and the four lines every other language needs a version of.
+#
+# The suite's own output goes to stderr so stdout carries the report and nothing
+# else; the exit status is the suite's, because a runner that swallows a failure
+# hides the thing the gate exists to catch.
+.PHONY: test-report
+test-report: ## Run the suite and print {"total": N, "coverage": P} for `scc check`
+	@set -o pipefail; \
+	go test -json -coverprofile=coverage.out ./... > .test.json 2>&1; status=$$?; \
+	total=$$(grep -c '"Action":"pass".*"Test":"' .test.json || true); \
+	cov=$$(go tool cover -func=coverage.out 2>/dev/null | awk '/^total:/{gsub("%","",$$3); print $$3}'); \
+	grep -E '"Action":"(fail|output)"' .test.json | sed -n 's/.*"Output":"\(.*\)"$$/\1/p' >&2 || true; \
+	rm -f .test.json; \
+	printf '{"total": %s, "coverage": %s}\n' "$${total:-0}" "$${cov:-0}"; \
+	exit $$status
+
 .PHONY: fmt
 fmt: ## Fail if any file is not gofmt-clean
 	@unformatted=$$(gofmt -l .); \

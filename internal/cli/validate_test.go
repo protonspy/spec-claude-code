@@ -84,7 +84,7 @@ func TestScaffoldedSkillsPassTheSkillValidator(t *testing.T) {
 func TestAFreshWorkspacePassesValidateInEveryHarness(t *testing.T) {
 	for _, h := range paths.Harnesses() {
 		root := t.TempDir()
-		if _, stderr, code := run(t, "init", "--"+h.ID, "--root", root); code != ExitOK {
+		if _, stderr, code := run(t, "init", "--no-rtk", "--"+h.ID, "--root", root); code != ExitOK {
 			t.Fatalf("%s: init: %d (%s)", h.ID, code, stderr)
 		}
 		if _, stderr, code := run(t, "spec", "new", "user-auth", "--root", root); code != ExitOK {

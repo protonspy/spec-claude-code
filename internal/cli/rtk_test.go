@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/protonspy/spec-claude-code/internal/paths"
+	"github.com/protonspy/spec-claude-code/internal/rtk"
 )
 
 // Every test here passes --no-install or puts a stub on PATH. A test that let the
@@ -242,7 +243,7 @@ func TestRTKCheckReportsFindingsAndWritesNothing(t *testing.T) {
 func TestRTKWritesOneBlockForASharedEntryFile(t *testing.T) {
 	root := t.TempDir()
 	for _, h := range []string{"--codex", "--opencode"} {
-		if _, stderr, code := run(t, "init", h, "--root", root); code != ExitOK {
+		if _, stderr, code := run(t, "init", "--no-rtk", h, "--root", root); code != ExitOK {
 			t.Fatalf("init %s: exit = %d (stderr: %s)", h, code, stderr)
 		}
 	}
@@ -317,9 +318,8 @@ func TestRTKRejectsPositionals(t *testing.T) {
 	}
 }
 
-// init --rtk is the one-command setup: scaffold, then wire RTK in. Opt-in, because
-// the block tells the agent to prefix every command with a binary the machine may
-// not have.
+// init --rtk is the one-command setup: scaffold, then wire RTK in without putting
+// the install question.
 func TestInitWithRTKSplicesTheBlock(t *testing.T) {
 	stubRTK(t)
 	root := t.TempDir()
@@ -331,17 +331,91 @@ func TestInitWithRTKSplicesTheBlock(t *testing.T) {
 	}
 }
 
-// Without the flag, init writes exactly what it wrote before RTK existed.
-func TestInitWithoutRTKLeavesTheEntryFileAlone(t *testing.T) {
-	root := initWorkspace(t)
+// With the binary already there, a bare init wires the block in: the install was
+// the part that needed asking, and it has nothing to ask.
+//
+// This is what makes a workspace wired whichever way its first session starts. `scc
+// launch` has always written the block, but an agent started by typing `claude`
+// reads an entry file that never mentions the prefix it is supposed to be using.
+func TestInitSplicesTheBlockWhenRTKIsAlreadyThere(t *testing.T) {
+	stubRTK(t)
+	root := t.TempDir()
+	if _, stderr, code := run(t, "init", "--claude", "--root", root); code != ExitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	if got := readEntry(t, root, paths.Claude.EntryFile); !strings.Contains(got, "<!-- rtk-instructions") {
+		t.Errorf("init left no block in %s with rtk on PATH", paths.Claude.EntryFile)
+	}
+}
+
+// Nothing is written when the binary is absent and nobody can be asked about
+// building it. Guidance naming a command the machine cannot run is worse than no
+// guidance: the agent tries the prefix, watches it fail, and discounts the rest of
+// the file with it.
+func TestInitWritesNoBlockWithoutTheBinary(t *testing.T) {
+	isolatedPath(t)
+	root := t.TempDir()
+	stdout, stderr, code := run(t, "init", "--claude", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want a scaffolded workspace anyway (stderr: %s)", code, stderr)
+	}
 	if got := readEntry(t, root, paths.Claude.EntryFile); strings.Contains(got, "rtk-instructions") {
-		t.Error("init wired in RTK without being asked")
+		t.Error("init wrote a block naming a binary that is not there")
+	}
+	// Said once, and it names the way to wire it in later: a step that was skipped
+	// in silence is one nobody knows to take.
+	if !strings.Contains(stdout+stderr, "rtk") {
+		t.Errorf("init never said why RTK was skipped: %q", stdout+stderr)
+	}
+}
+
+// --no-rtk is the explicit "scaffold and nothing else": no lookup, no block, no
+// report — and it contradicts --rtk rather than quietly outranking it, because a
+// flag that is accepted and ignored is how somebody spends a session believing they
+// configured something.
+func TestInitNoRTKSkipsItEntirely(t *testing.T) {
+	stubRTK(t)
+	root := t.TempDir()
+	if _, stderr, code := run(t, "init", "--claude", "--no-rtk", "--root", root); code != ExitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	if got := readEntry(t, root, paths.Claude.EntryFile); strings.Contains(got, "rtk-instructions") {
+		t.Error("--no-rtk still wired RTK in")
+	}
+	if _, _, code := run(t, "init", "--claude", "--rtk", "--no-rtk", "--root", t.TempDir()); code != ExitError {
+		t.Errorf("exit = %d, want %d for two flags that contradict each other", code, ExitError)
+	}
+}
+
+// A re-run leaves a block somebody else put there exactly as it is. Replacing one
+// is a real trade-off with a real cost, and `scc rtk` is where it is made
+// deliberately — scaffolding is not the moment to make it as a side effect.
+func TestInitKeepsAnRTKBlockThatIsAlreadyThere(t *testing.T) {
+	stubRTK(t)
+	root := t.TempDir()
+	if _, stderr, code := run(t, "init", "--claude", "--no-rtk", "--root", root); code != ExitOK {
+		t.Fatalf("init: exit = %d (stderr: %s)", code, stderr)
+	}
+	mine := rtk.Markers.Open + " v9 -->\nmine, not scc's\n" + rtk.Markers.Close + "\n"
+	entry := filepath.Join(root, paths.Claude.EntryFile)
+	raw, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if err := os.WriteFile(entry, []byte(string(raw)+"\n"+mine), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, stderr, code := run(t, "init", "--claude", "--root", root); code != ExitOK {
+		t.Fatalf("second init: exit = %d (stderr: %s)", code, stderr)
+	}
+	if got := readEntry(t, root, paths.Claude.EntryFile); !strings.Contains(got, "mine, not scc's") {
+		t.Errorf("init replaced a block it did not write:\n%s", got)
 	}
 }
 
 // The scaffold result keeps its shape so anything already parsing init --json is
-// unaffected, and "rtk" appears only when the flag was passed.
-func TestInitJSONCarriesTheRTKReportOnlyWithTheFlag(t *testing.T) {
+// unaffected, and "rtk" appears on the runs that actually wired it in.
+func TestInitJSONCarriesTheRTKReport(t *testing.T) {
 	stubRTK(t)
 	var withFlag struct {
 		Root string     `json:"root"`
@@ -361,11 +435,27 @@ func TestInitJSONCarriesTheRTKReportOnlyWithTheFlag(t *testing.T) {
 		t.Errorf("rtk report = %+v, want one file", withFlag.RTK)
 	}
 
-	stdout, stderr, code = run(t, "init", "--claude", "--json", "--root", t.TempDir())
+	// And it is absent from the run that did not: the missing key is the answer to
+	// "was this step taken", which a zero-valued report would not be.
+	stdout, stderr, code = run(t, "init", "--claude", "--no-rtk", "--json", "--root", t.TempDir())
 	if code != ExitOK {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
 	}
 	if strings.Contains(stdout, `"rtk"`) {
-		t.Errorf("init --json carries an rtk key without the flag: %q", stdout)
+		t.Errorf("init --json carries an rtk key under --no-rtk: %q", stdout)
+	}
+}
+
+// --rtk named the step, so a machine that cannot take it says so in the exit code
+// rather than scaffolding and moving on. Without the flag the same situation is a
+// status line: the workspace is finished, and RTK is the part that is not wired.
+func TestInitWithRTKFailsWhenItCannotBeBuilt(t *testing.T) {
+	isolatedPath(t)
+	_, stderr, code := run(t, "init", "--claude", "--rtk", "--root", t.TempDir())
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d with neither rtk nor cargo on PATH", code, ExitError)
+	}
+	if !strings.Contains(stderr, "cargo") {
+		t.Errorf("stderr does not say what is missing: %q", stderr)
 	}
 }

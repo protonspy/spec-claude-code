@@ -108,6 +108,31 @@ type Harness struct {
 	//
 	// Verifiable per harness: `/context` in Claude Code lists what loaded.
 	PreloadsRules bool
+
+	// SettingsSeg is the file under Dir where this harness reads its own hooks —
+	// the ones that fire inside a session rather than inside git — or "" when it
+	// has no such surface.
+	//
+	// Claude Code is the only one today: `.claude/settings.json` carries a
+	// `hooks` object keyed by event, a command hook is handed the event as JSON
+	// on stdin, and what it prints on stdout comes back to the agent. That is a
+	// place to put a check that git hooks cannot reach, because a commit is not
+	// the first moment a finding exists — the end of the turn that wrote it is.
+	//
+	// A field rather than a `switch h.ID` for the usual reason, and a sharper one
+	// here: the other two are not missing a file scc could write, they have no
+	// mechanism that would read it. An empty value is a capability this harness
+	// does not have, which is different from a path scc has not decided on.
+	SettingsSeg string
+}
+
+// Settings is the harness's own settings file under root, or "" when this
+// harness has no in-session hook surface.
+func (h Harness) Settings(root string) string {
+	if h.SettingsSeg == "" {
+		return ""
+	}
+	return filepath.Join(root, h.Dir, h.SettingsSeg)
 }
 
 // Format is the dialect a harness's subagent definitions are written in.
@@ -136,6 +161,7 @@ var (
 		ID: "claude", Label: "Claude Code", Bin: "claude", Dir: ClaudeDir, EntryFile: "CLAUDE.md",
 		AgentsSeg: "agents", AgentFormat: FormatMarkdown,
 		SkillsSeg: "skills", CommandsSeg: "commands", RulesSeg: "rules",
+		SettingsSeg:   "settings.json",
 		PreloadsRules: true,
 	}
 	Codex = Harness{

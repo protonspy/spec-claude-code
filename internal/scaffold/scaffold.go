@@ -106,6 +106,10 @@ func Apply(root string, opts Options) (*Result, error) {
 	}
 
 	next := manifest.New(opts.SCCVersion, h)
+	// The project's own state — the test command, its floor, anything a newer scc
+	// recorded — survives a scaffold run that rebuilds everything else from the
+	// template set.
+	next.CarryOver(prior)
 	for _, f := range assets.Workspace(h) {
 		pristine, err := assets.Render(h, f)
 		if err != nil {
