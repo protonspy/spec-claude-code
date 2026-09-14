@@ -36,7 +36,7 @@ Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc i
 | `check\|check set\|check skip` | The delivery gate: this project's own build, format, lint and test commands, run in that order and judged. A gate the project does not have is skipped once and then stays quiet. |
 | `hooks install\|check\|remove` | Hooks that run the validators without anybody remembering to — git's (`scc validate` before a commit, the message checked as it is written, `scc validate --pr --checks` before a push) and the harness's own (findings and undelivered work handed back to the agent at the end of a turn). `init` writes both; anything scc did not write is left alone. |
 | `rtk` | Wires in [RTK](https://github.com/rtk-ai/rtk) after the fact: installs it if missing, then splices its usage block into the entry file. |
-| `graph build|sync|query|explore|scope` | The workspace's symbol graph, via [CodeGraph](https://github.com/colbymchenry/codegraph). `scope` narrows it to certain trees — one graph per directory, since CodeGraph indexes a single root at a time. |
+| `graph build\|sync\|query\|explore\|scope` | The workspace's symbol graph, via [CodeGraph](https://github.com/colbymchenry/codegraph). `scope` narrows it to certain trees — one graph per directory, since CodeGraph indexes a single root at a time. |
 | `launch` | Starts the harness with the workspace's symbol graph and RTK block current — and, with `--jail`, inside a sandbox. |
 
 ### Two kinds of hook, and only one of them refuses
