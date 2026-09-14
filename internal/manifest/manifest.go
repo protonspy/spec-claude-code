@@ -94,6 +94,12 @@ type Manifest struct {
 	Lint   string
 	Format string
 
+	// Codegraph is the trees this workspace indexes, relative and
+	// slash-separated, or empty for the whole thing. Each one gets its own graph:
+	// CodeGraph indexes a single root at a time and cannot filter one graph down to
+	// a set of directories, so a scope is N graphs rather than one narrowed.
+	Codegraph []string
+
 	// MinCoverage is the coverage floor in percent. Zero means the default,
 	// because every manifest written before this key existed has no value and
 	// "absent" has to keep meaning the same thing as "unset".
@@ -113,6 +119,7 @@ const (
 	keySCC         = "scc"
 	keyHarness     = "harness"
 	keyCheck       = "check"
+	keyCodegraph   = "codegraph"
 	keyBuild       = "build"
 	keyTest        = "test"
 	keyLint        = "lint"
@@ -324,6 +331,16 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	if err := putJSON(out, keyCheck, check); err != nil {
 		return nil, err
 	}
+	// The graph's scope, on the same terms as the gate's base: always written, so
+	// the key is findable before anybody needs it, and empty meaning the whole
+	// workspace — which is what every workspace had before scoping existed.
+	scope := m.Codegraph
+	if scope == nil {
+		scope = []string{}
+	}
+	if err := putJSON(out, keyCodegraph, scope); err != nil {
+		return nil, err
+	}
 	files := m.Files
 	if files == nil {
 		files = []Entry{} // an empty manifest serializes as [], never null
@@ -387,6 +404,12 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		}
 		delete(raw, keyMinCoverage)
 	}
+	if v, ok := raw[keyCodegraph]; ok {
+		if err := json.Unmarshal(v, &m.Codegraph); err != nil {
+			return fmt.Errorf("field %q: %w", keyCodegraph, err)
+		}
+		delete(raw, keyCodegraph)
+	}
 	if v, ok := raw[keyFiles]; ok {
 		if err := json.Unmarshal(v, &m.Files); err != nil {
 			return fmt.Errorf("field %q: %w", keyFiles, err)
@@ -418,6 +441,7 @@ func (m *Manifest) CarryOver(prior *Manifest) {
 		*dst = *theirs[key]
 	}
 	m.MinCoverage = prior.MinCoverage
+	m.Codegraph = append([]string(nil), prior.Codegraph...)
 	m.extra = cloneRaw(prior.extra)
 	if len(m.extra) == 0 {
 		m.extra = nil

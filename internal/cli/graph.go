@@ -38,6 +38,8 @@ func runGraph(args []string) int {
 		return runGraphStatus(args[1:])
 	case "query":
 		return runGraphQuery(args[1:])
+	case "scope":
+		return runGraphScope(args[1:])
 	case "explore":
 		return runGraphExplore(args[1:])
 	default:
@@ -72,15 +74,31 @@ func runGraphBuild(args []string) int {
 		return ExitError
 	}
 
-	cmd := codegraph.InitArgs()
-	switch {
-	case *force:
-		cmd = codegraph.IndexArgs()
-	case codegraph.Indexed(target):
-		render.Info("a graph is already there; rebuilding it incrementally — pass --force for a full re-index")
-		cmd = codegraph.SyncArgs()
+	roots, ok := loadScope(target, false)
+	if !ok {
+		return ExitError
 	}
-	return graphExec(bin, target, cmd)
+	// Decided per root rather than once: in a scoped workspace one tree can have a
+	// graph and another not, and a single answer for both would either re-index what
+	// was current or incrementally update what does not exist yet.
+	code := ExitOK
+	for _, r := range roots {
+		if len(roots) > 1 {
+			render.Info(fmt.Sprintf("── %s ──", r.Rel))
+		}
+		cmd := codegraph.InitArgs()
+		switch {
+		case *force:
+			cmd = codegraph.IndexArgs()
+		case r.Indexed():
+			render.Info("a graph is already there; rebuilding it incrementally — pass --force for a full re-index")
+			cmd = codegraph.SyncArgs()
+		}
+		if c := graphExec(bin, r.Dir, cmd); c != ExitOK {
+			code = c
+		}
+	}
+	return code
 }
 
 func runGraphSync(args []string) int {
@@ -98,10 +116,11 @@ func runGraphSync(args []string) int {
 	if !ok {
 		return ExitError
 	}
-	if !requireGraph(target) {
+	roots, ok := loadScope(target, false)
+	if !ok || !requireGraphs(roots) {
 		return ExitError
 	}
-	return graphExec(bin, target, codegraph.SyncArgs())
+	return graphFan(bin, roots, codegraph.SyncArgs())
 }
 
 // runGraphStatus reports what the graph holds. --check turns the same question
@@ -129,18 +148,32 @@ func runGraphStatus(args []string) int {
 		// Deliberately no binary lookup and no subprocess: --check answers whether
 		// this workspace has a graph, and a CI runner without CodeGraph installed
 		// still has a correct answer to that.
-		indexed := codegraph.Indexed(target)
+		roots, ok := loadScope(target, *jsonOut)
+		if !ok {
+			return ExitError
+		}
+		indexed := true
+		for _, r := range roots {
+			if !r.Indexed() {
+				indexed = false
+			}
+		}
 		if *jsonOut {
 			if c := emitJSON(struct {
-				Indexed bool   `json:"indexed"`
-				Dir     string `json:"dir"`
-			}{indexed, codegraph.Dir}); c != ExitOK {
+				Indexed bool             `json:"indexed"`
+				Dir     string           `json:"dir"`
+				Roots   []codegraph.Root `json:"roots"`
+			}{indexed, codegraph.Dir, roots}); c != ExitOK {
 				return c
 			}
-		} else if indexed {
-			render.OK("the workspace has a graph in " + codegraph.Dir)
 		} else {
-			render.Warn(fmt.Sprintf("no graph in %s; run `%s graph build`", codegraph.Dir, prog()))
+			for _, r := range roots {
+				if r.Indexed() {
+					render.OK(fmt.Sprintf("%-28s has a graph in %s", r.Rel, codegraph.Dir))
+					continue
+				}
+				render.Warn(fmt.Sprintf("%-28s no graph; run `%s graph build`", r.Rel, prog()))
+			}
 		}
 		if !indexed {
 			return ExitFindings
@@ -152,10 +185,14 @@ func runGraphStatus(args []string) int {
 	if !ok {
 		return ExitError
 	}
-	if !requireGraph(target) {
+	roots, ok := loadScope(target, *jsonOut)
+	if !ok || !requireGraphs(roots) {
 		return ExitError
 	}
-	return graphExec(bin, target, codegraph.StatusArgs(*jsonOut))
+	if *jsonOut && len(roots) > 1 {
+		return graphFanJSON(bin, roots, codegraph.StatusArgs(true))
+	}
+	return graphFan(bin, roots, codegraph.StatusArgs(*jsonOut))
 }
 
 func runGraphQuery(args []string) int {
@@ -177,10 +214,14 @@ func runGraphQuery(args []string) int {
 	if !ok {
 		return ExitError
 	}
-	if !requireGraph(target) {
+	roots, ok := loadScope(target, *jsonOut)
+	if !ok || !requireGraphs(roots) {
 		return ExitError
 	}
-	return graphExec(bin, target, codegraph.QueryArgs(query, *kind, *limit, *jsonOut))
+	if *jsonOut && len(roots) > 1 {
+		return graphFanJSON(bin, roots, codegraph.QueryArgs(query, *kind, *limit, true))
+	}
+	return graphFan(bin, roots, codegraph.QueryArgs(query, *kind, *limit, *jsonOut))
 }
 
 // runGraphExplore is the question worth asking: the relevant symbols' source and
@@ -203,10 +244,11 @@ func runGraphExplore(args []string) int {
 	if !ok {
 		return ExitError
 	}
-	if !requireGraph(target) {
+	roots, ok := loadScope(target, false)
+	if !ok || !requireGraphs(roots) {
 		return ExitError
 	}
-	return graphExec(bin, target, codegraph.ExploreArgs(query))
+	return graphFan(bin, roots, codegraph.ExploreArgs(query))
 }
 
 // graphQueryArg takes the search terms. Joined rather than required to be one
@@ -275,18 +317,6 @@ func ensureCodeGraph(opts graphInstall) (string, bool) {
 	return p, true
 }
 
-// requireGraph refuses to query a workspace that was never indexed, naming the
-// command that fixes it. CodeGraph's own error for this is about a missing
-// database, which is true and unhelpful.
-func requireGraph(root string) bool {
-	if codegraph.Indexed(root) {
-		return true
-	}
-	render.Err(fmt.Sprintf("this workspace has no graph in %s", codegraph.Dir))
-	render.Detail(fmt.Sprintf("  build it with: %s graph build", prog()))
-	return false
-}
-
 // graphExec runs CodeGraph with this terminal attached.
 //
 // A child's non-zero exit becomes scc's 1: `scc graph` is a wrap, not a launcher,
@@ -318,10 +348,23 @@ Subcommands:
   status    Show what the graph holds (--check exits 2 when there is none)
   query     Search symbols by name (--kind, --limit)
   explore   Relevant symbols' source plus the call paths between them
+  scope     Which trees get indexed — show | set <dir>… | clear
 
-The graph lives in %s/ and belongs to CodeGraph: scc never tracks it in the
-manifest and "%s update" never touches it.
+By default the whole workspace is one graph. A scope narrows that:
+
+  %s graph scope set backend/src frontend/src
+
+**A scope is one graph per directory, not one graph filtered.** CodeGraph
+indexes a single root at a time — no command takes two paths and none has an
+include flag — so each scoped directory gets its own %s/ inside it, and
+build, sync, status, query and explore all answer once per root. A trailing
+/* is accepted and means the same as the directory; an interior glob such as
+packages/*/src is expanded to the directories it matches.
+
+The graph belongs to CodeGraph: scc never tracks it in the manifest and
+"%s update" never touches it. Only the scope is scc's, recorded beside the
+delivery gate's commands.
 
   %s
-`, render.Bold(prog()), prog(), codegraph.Dir, prog(), codegraph.Repo)
+`, render.Bold(prog()), prog(), prog(), codegraph.Dir, prog(), codegraph.Repo)
 }

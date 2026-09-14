@@ -522,9 +522,13 @@ type graphReport struct {
 	// Action is what scc did: built | synced | current | skipped | failed.
 	Action string `json:"action"`
 	// Indexed is whether the workspace had a graph before this launch.
-	Indexed bool   `json:"indexed"`
-	Path    string `json:"path,omitempty"`
-	Version string `json:"version,omitempty"`
+	Indexed bool `json:"indexed"`
+	// Roots is the trees indexed, which is the whole workspace unless a scope was
+	// recorded. Reported because "the graph is current" means something different
+	// when it is three graphs.
+	Roots   []codegraph.Root `json:"roots,omitempty"`
+	Path    string           `json:"path,omitempty"`
+	Version string           `json:"version,omitempty"`
 	// Blocks is what happened to the CodeGraph usage block in each entry file:
 	// added | present | replaced | missing. Empty when nothing was written, which
 	// is every run where the binary is not there — a block telling the agent to run
@@ -625,31 +629,52 @@ func resolveGraph(root string, opts graphOptions) *graphReport {
 	// leaves the agent knowing the command that rebuilds one.
 	report.Blocks = spliceGraphBlock(root, opts)
 
-	args, action, doing := codegraph.InitArgs(), graphBuilt, "building the symbol graph — the first index takes a while"
-	if report.Indexed {
-		args, action, doing = codegraph.SyncArgs(), graphSynced, "refreshing the symbol graph"
+	// One index per scoped tree. A workspace that recorded no scope has exactly
+	// one root — itself — so this is the same single index it always was.
+	roots, ok := loadScope(root, opts.quiet)
+	if !ok {
+		report.Action, report.Reason = graphSkipped, "the recorded graph scope matches nothing here"
+		warnNoGraph(report, opts)
+		return report
 	}
-	if !opts.quiet {
-		render.Info(codegraph.Bin + " " + doing)
-	}
+	report.Roots = roots
+
 	// The indexer's own output goes to stderr in both streams when the caller is
 	// emitting JSON, because stdout carries the document and nothing else.
 	out := os.Stdout
 	if opts.quiet {
 		out = os.Stderr
 	}
-	code, err := codegraph.Run(bin, root, args, out, os.Stderr)
-	switch {
-	case err != nil:
-		report.Action, report.Reason = graphFailed, err.Error()
-	case code != 0:
-		report.Action = graphFailed
-		report.Reason = fmt.Sprintf("%s %s exited %d", codegraph.Bin, args[0], code)
-	default:
-		report.Action = action
-		return report
+	for _, r := range roots {
+		args, action, doing := codegraph.InitArgs(), graphBuilt, "building the symbol graph — the first index takes a while"
+		if r.Indexed() {
+			args, action, doing = codegraph.SyncArgs(), graphSynced, "refreshing the symbol graph"
+		}
+		if !opts.quiet {
+			where := ""
+			if codegraph.Scoped(roots) {
+				where = " in " + r.Rel
+			}
+			render.Info(codegraph.Bin + " " + doing + where)
+		}
+		code, err := codegraph.Run(bin, r.Dir, args, out, os.Stderr)
+		switch {
+		case err != nil:
+			report.Action, report.Reason = graphFailed, err.Error()
+		case code != 0:
+			report.Action = graphFailed
+			report.Reason = fmt.Sprintf("%s %s exited %d in %s", codegraph.Bin, args[0], code, r.Rel)
+		default:
+			// The last root's action stands for the run. A scope where one tree was
+			// built and another synced is not worth a vocabulary of its own — what a
+			// reader wants from this field is whether indexing happened at all.
+			report.Action = action
+			continue
+		}
+		// One failed tree does not stop the others: the agent is about to start
+		// either way, and a graph over three of four trees beats none.
+		warnNoGraph(report, opts)
 	}
-	warnNoGraph(report, opts)
 	return report
 }
 
