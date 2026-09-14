@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -197,11 +198,19 @@ func counts(dir, left, right string) (int, int) {
 }
 
 // PR is what the forge knows about a pull request.
+//
+// Title and Body are here because the pull request is half of the record of a
+// change and the half no hook can reach: a commit message passes through
+// commit-msg on the machine that wrote it, and a PR body is typed straight into
+// the forge. Whatever rule binds a commit message binds this text too, so a caller
+// checking one has to be able to ask for the other.
 type PR struct {
 	Number int    `json:"number"`
 	State  string `json:"state"` // OPEN | MERGED | CLOSED, as gh spells them
 	Branch string `json:"branch"`
 	URL    string `json:"url"`
+	Title  string `json:"title,omitempty"`
+	Body   string `json:"body,omitempty"`
 }
 
 // The states gh reports, named so a caller never matches on a string literal.
@@ -218,21 +227,53 @@ const (
 // shelling out to at all. Without it, a spec whose branch has vanished is reported as
 // undetermined rather than guessed at.
 func LookPR(dir string, number int) (PR, error) {
-	out, err := run(GHBin, dir, "pr", "view", strconv.Itoa(number),
-		"--json", "number,state,headRefName,url")
+	pr, err := viewPR(dir, strconv.Itoa(number))
 	if err != nil {
 		return PR{Number: number}, err
+	}
+	return pr, nil
+}
+
+// CurrentPR asks gh about the pull request for the checked-out branch, if there
+// is one.
+//
+// A separate entry point rather than a zero value for LookPR's number, because
+// the two answer different questions: one is "what happened to the PR this spec
+// recorded", the other is "what is open in front of me right now". A branch with
+// no pull request is an error from gh and a normal answer here — the caller has
+// nothing to check, which is not the same as a failure.
+func CurrentPR(dir string) (PR, error) { return viewPR(dir, "") }
+
+// viewPR is the one `gh pr view` both entry points share. An empty arg means the
+// current branch, which is gh's own default.
+func viewPR(dir, arg string) (PR, error) {
+	args := []string{"pr", "view"}
+	if arg != "" {
+		args = append(args, arg)
+	}
+	out, err := run(GHBin, dir, append(args, "--json", "number,state,headRefName,url,title,body")...)
+	if err != nil {
+		return PR{}, err
 	}
 	var raw struct {
 		Number      int    `json:"number"`
 		State       string `json:"state"`
 		HeadRefName string `json:"headRefName"`
 		URL         string `json:"url"`
+		Title       string `json:"title"`
+		Body        string `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(out), &raw); err != nil {
-		return PR{Number: number}, err
+		return PR{}, err
 	}
-	return PR{Number: raw.Number, State: strings.ToUpper(raw.State), Branch: raw.HeadRefName, URL: raw.URL}, nil
+	return PR{
+		Number: raw.Number,
+		State:  strings.ToUpper(raw.State),
+		Branch: raw.HeadRefName,
+		URL:    raw.URL,
+		Title:  raw.Title,
+		Body:   raw.Body,
+	}, nil
 }
 
 // Commit is one commit's identity and its message in full.
@@ -338,4 +379,104 @@ func parseLog(out string) []Commit {
 		})
 	}
 	return commits
+}
+
+// HooksDir is the directory this repository runs its hooks from.
+//
+// Asked of git rather than assumed, because `.git/hooks` is only the default: a
+// repository with core.hooksPath set runs from somewhere else entirely, and a
+// worktree or a submodule keeps its git directory outside the checkout. Writing a
+// hook into a path that git does not read is the kind of failure that looks like
+// success for weeks.
+//
+// The configured path wins, resolved against the work tree the way git resolves
+// it. Absence is a normal answer here as everywhere else in this package: a
+// directory that is not a repository has no hooks directory, which is not an
+// error to propagate.
+func HooksDir(dir string) (string, error) {
+	if p, err := run(Bin, dir, "config", "--get", "core.hooksPath"); err == nil && p != "" {
+		return absolute(dir, p), nil
+	}
+	out, err := run(Bin, dir, "rev-parse", "--git-path", "hooks")
+	if err != nil {
+		return "", err
+	}
+	if out == "" {
+		return "", ErrUnavailable
+	}
+	return absolute(dir, out), nil
+}
+
+// absolute resolves a path git reported relative to the directory it was asked
+// in. git answers with forward slashes on every platform, which filepath handles.
+func absolute(dir, p string) string {
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	return filepath.Join(dir, p)
+}
+
+// Undelivered is what git alone can say about work that is finished and still on
+// this machine.
+//
+// Alone is the operative word. Everything here is answered from refs that are
+// already in the repository — no fetch, no `gh`, no network — because the caller
+// is a hook that runs at the end of every turn, and a check that cost a network
+// round trip per turn is a check somebody turns off. That bounds what it can
+// know: `origin/<branch>` is as current as the last fetch, so this reports what
+// this checkout has not sent, which is the question, rather than what the forge
+// has, which is not.
+type Undelivered struct {
+	Branch string `json:"branch"`
+	Base   string `json:"base"`
+	// Ahead is the commits this branch has added to its base.
+	Ahead int `json:"ahead"`
+	// Unpushed is how many of those `origin/<branch>` does not have. Equal to
+	// Ahead when the branch has never been pushed at all.
+	Unpushed int `json:"unpushed"`
+	// Pushed says a remote-tracking ref exists, which is what separates "nothing
+	// to push" from "never left this machine".
+	Pushed bool `json:"pushed"`
+}
+
+// Any reports whether there is work here worth saying anything about.
+func (u Undelivered) Any() bool { return u.Ahead > 0 && u.Unpushed > 0 }
+
+// Undelivered answers "is there finished work that has not left this machine".
+//
+// Absence is a normal answer, never an error to propagate — the same line this
+// package holds everywhere else. No git, no repository, a detached HEAD, or a
+// checkout sitting on its own base branch all come back as an empty answer,
+// because each of those is a real state and none of them is a failure of the
+// caller that asked.
+func UndeliveredWork(dir string) Undelivered {
+	if !Found(Bin) || !IsRepo(dir) {
+		return Undelivered{}
+	}
+	branch, err := CurrentBranch(dir)
+	if err != nil || branch == "" {
+		return Undelivered{}
+	}
+	base := Base(dir)
+	// Standing on the base branch is not a branch of work. Reporting it would put
+	// the same line at the end of every turn in a repository whose author does not
+	// use branches, which is how a nudge becomes wallpaper.
+	if branch == base {
+		return Undelivered{Branch: branch, Base: base}
+	}
+	u := Undelivered{Branch: branch, Base: base}
+	if baseRef := ref(dir, base); baseRef != "" {
+		_, u.Ahead = counts(dir, baseRef, ref(dir, branch))
+	}
+	remote := "refs/remotes/origin/" + branch
+	if _, err := run(Bin, dir, "rev-parse", "--verify", "--quiet", remote); err != nil {
+		// Never pushed: everything this branch added is still here. A branch with no
+		// upstream and no commits of its own is still nothing to report, which Any
+		// takes care of.
+		u.Unpushed = u.Ahead
+		return u
+	}
+	u.Pushed = true
+	_, u.Unpushed = counts(dir, remote, ref(dir, branch))
+	return u
 }

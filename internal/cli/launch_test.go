@@ -645,7 +645,7 @@ func TestLaunchRejectsAnUnknownHarness(t *testing.T) {
 func TestLaunchResolvesAmbiguityByAskingOrNamingTheChoices(t *testing.T) {
 	root := t.TempDir()
 	for _, h := range []string{"--codex", "--opencode"} {
-		if _, stderr, code := run(t, "init", h, "--root", root); code != ExitOK {
+		if _, stderr, code := run(t, "init", "--no-rtk", h, "--root", root); code != ExitOK {
 			t.Fatalf("init %s: exit = %d (%s)", h, code, stderr)
 		}
 	}
@@ -679,7 +679,7 @@ func TestLaunchResolvesAmbiguityByAskingOrNamingTheChoices(t *testing.T) {
 func TestLaunchPickerOffersOnlyTheScaffoldedHarnesses(t *testing.T) {
 	root := t.TempDir()
 	for _, h := range []string{"--codex", "--opencode"} {
-		if _, stderr, code := run(t, "init", h, "--root", root); code != ExitOK {
+		if _, stderr, code := run(t, "init", "--no-rtk", h, "--root", root); code != ExitOK {
 			t.Fatalf("init %s: exit = %d (%s)", h, code, stderr)
 		}
 	}

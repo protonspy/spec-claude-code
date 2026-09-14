@@ -77,6 +77,22 @@ type Manifest struct {
 	// base is wrong and the merge silently clobbers.
 	Harness string
 
+	// Test is the shell command that runs this project's suite and prints
+	// {"total": N, "coverage": P}. Empty in a workspace that has not wired its
+	// tests up, which is a state and not a defect.
+	//
+	// It is here rather than in a config file of its own because the manifest is
+	// scc's only file and a second one would be a schema to version, read by
+	// nothing else. It is the first key in it that is *input* rather than record,
+	// which is worth knowing: everything else here is what scc wrote, and this is
+	// what the project told scc.
+	Test string
+
+	// MinCoverage is the coverage floor in percent. Zero means the default,
+	// because every manifest written before this key existed has no value and
+	// "absent" has to keep meaning the same thing as "unset".
+	MinCoverage float64
+
 	// Files are the managed entries, kept sorted by Path by every operation that
 	// mutates them.
 	Files []Entry
@@ -88,12 +104,14 @@ type Manifest struct {
 // binary would read the new key as unknown and preserve it while treating the
 // entry as absent, which is the failure this constant exists to make visible.
 const (
-	keySCC     = "scc"
-	keyHarness = "harness"
-	keyFiles   = "files"
-	keyPath    = "path"
-	keyHash    = "hash"
-	keyVersion = "version"
+	keySCC         = "scc"
+	keyHarness     = "harness"
+	keyTest        = "test"
+	keyMinCoverage = "min_coverage"
+	keyFiles       = "files"
+	keyPath        = "path"
+	keyHash        = "hash"
+	keyVersion     = "version"
 )
 
 // Hash is the content hash recorded for a managed file: SHA-256 over the
@@ -262,6 +280,19 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	if err := putJSON(out, keyHarness, m.Harness); err != nil {
 		return nil, err
 	}
+	// Omitted when unset, so a workspace that never wired its tests up keeps the
+	// manifest it already had. A key that appeared with an empty value would
+	// rewrite every manifest in existence on the next `scc init`, for nothing.
+	if m.Test != "" {
+		if err := putJSON(out, keyTest, m.Test); err != nil {
+			return nil, err
+		}
+	}
+	if m.MinCoverage > 0 {
+		if err := putJSON(out, keyMinCoverage, m.MinCoverage); err != nil {
+			return nil, err
+		}
+	}
 	files := m.Files
 	if files == nil {
 		files = []Entry{} // an empty manifest serializes as [], never null
@@ -292,6 +323,18 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		}
 		delete(raw, keyHarness)
 	}
+	if v, ok := raw[keyTest]; ok {
+		if err := json.Unmarshal(v, &m.Test); err != nil {
+			return fmt.Errorf("field %q: %w", keyTest, err)
+		}
+		delete(raw, keyTest)
+	}
+	if v, ok := raw[keyMinCoverage]; ok {
+		if err := json.Unmarshal(v, &m.MinCoverage); err != nil {
+			return fmt.Errorf("field %q: %w", keyMinCoverage, err)
+		}
+		delete(raw, keyMinCoverage)
+	}
 	if v, ok := raw[keyFiles]; ok {
 		if err := json.Unmarshal(v, &m.Files); err != nil {
 			return fmt.Errorf("field %q: %w", keyFiles, err)
@@ -300,6 +343,29 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 	}
 	m.extra = orNil(raw)
 	return nil
+}
+
+// CarryOver moves everything that belongs to the project rather than to a
+// scaffold run from the manifest that was on disk into the one about to replace
+// it: the test command, its floor, and any key a newer scc wrote that this build
+// does not know about.
+//
+// It exists because `scc init` and `scc update` both build the next manifest from
+// scratch and then fill in the file entries — which is right for the entries and
+// silently destructive for everything else. Before there was anything else in the
+// file that mattered, the only casualty was the unknown-field preservation
+// Unmarshal goes to the trouble of doing; now a re-run of `init` would throw away
+// the delivery gate's whole configuration. One method, called by both, rather
+// than a field-by-field copy in each.
+func (m *Manifest) CarryOver(prior *Manifest) {
+	if prior == nil {
+		return
+	}
+	m.Test, m.MinCoverage = prior.Test, prior.MinCoverage
+	m.extra = cloneRaw(prior.extra)
+	if len(m.extra) == 0 {
+		m.extra = nil
+	}
 }
 
 // MarshalJSON mirrors Manifest.MarshalJSON: map-built, so key order is sorted and

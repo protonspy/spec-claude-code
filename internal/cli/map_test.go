@@ -48,7 +48,7 @@ other way round.
 func mapWorkspace(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	if _, _, code := run(t, "init", "--root", root); code != ExitOK {
+	if _, _, code := run(t, "init", "--no-rtk", "--root", root); code != ExitOK {
 		t.Fatalf("init: exit %d", code)
 	}
 	dir := filepath.Join(root, "plans")

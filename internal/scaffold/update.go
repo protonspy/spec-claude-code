@@ -230,6 +230,10 @@ func ApplyUpdate(root string, h paths.Harness, plan *UpdatePlan, opts UpdateOpti
 	}
 	res := &UpdateResult{Root: root, Harness: h.ID}
 	next := manifest.New(opts.SCCVersion, h)
+	// The project's own state — the test command, its floor, anything a newer scc
+	// recorded — survives a scaffold run that rebuilds everything else from the
+	// template set.
+	next.CarryOver(prior)
 
 	rendered := map[string]string{}
 	for _, f := range assets.Workspace(h) {

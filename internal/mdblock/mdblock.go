@@ -127,3 +127,40 @@ func (m Markers) Version(doc string) string {
 	}
 	return strings.TrimSpace(rest[:end])
 }
+
+// Remove returns doc with the block taken out, and whether there was one.
+//
+// The counterpart to Splice, for the caller that installed a block and is being
+// asked to uninstall it. Everything outside the markers survives untouched, which
+// is the same promise Splice makes and matters more here: a file that carried the
+// block alongside somebody else's content is still theirs afterwards.
+//
+// The blank lines the block was sitting between go with it. A file left with a
+// growing stack of empty lines after each remove-and-splice cycle is a file that
+// records how many times the tool ran, which is not information anybody wants.
+func (m Markers) Remove(doc string) (string, bool) {
+	start := strings.Index(doc, m.Open)
+	if start < 0 {
+		return doc, false
+	}
+	rest := doc[start:]
+	end := strings.Index(rest, m.Close)
+	if end < 0 {
+		return doc, false
+	}
+	head := strings.TrimRight(doc[:start], " \t\r\n")
+	tail := strings.TrimLeft(doc[start+end+len(m.Close):], " \t\r\n")
+	eol := "\n"
+	if strings.Contains(doc, "\r\n") {
+		eol = "\r\n"
+	}
+	switch {
+	case head == "" && tail == "":
+		return "", true
+	case head == "":
+		return tail, true
+	case tail == "":
+		return head + eol, true
+	}
+	return head + eol + eol + tail, true
+}

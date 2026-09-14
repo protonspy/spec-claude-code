@@ -221,7 +221,7 @@ func TestUpdateJSONDryRunEmitsThePlan(t *testing.T) {
 func TestUpdateTargetsEveryInitializedHarness(t *testing.T) {
 	root := t.TempDir()
 	for _, h := range []paths.Harness{paths.Claude, paths.OpenCode} {
-		if _, stderr, code := run(t, "init", "--"+h.ID, "--root", root); code != ExitOK {
+		if _, stderr, code := run(t, "init", "--no-rtk", "--"+h.ID, "--root", root); code != ExitOK {
 			t.Fatalf("init --%s: %d (%s)", h.ID, code, stderr)
 		}
 	}

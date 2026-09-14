@@ -99,3 +99,55 @@ func TestCRLFScansTheSame(t *testing.T) {
 		t.Errorf("match = %q, carries a stray carriage return", got)
 	}
 }
+
+// TestTheFooterRewrittenIsStillCaught is the case that motivated the badge and
+// mention rules: a session told not to write "Generated with" writes what is
+// left, and the earlier shapes all miss it. Each of these is the harness footer
+// with one more piece taken off.
+func TestTheFooterRewrittenIsStillCaught(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		line string
+		rule string
+	}{
+		{"badge alone", "\U0001F916 [Claude Code](https://claude.com/claude-code)", RuleBadge},
+		{"badge off-site", "\U0001F916 [Claude Code](https://example.invalid/x)", RuleBadge},
+		{"badge named by target", "[the tool](https://claude.ai/code)", RuleBadge},
+		{"image badge", "![Claude](https://img.example/badge.svg)", RuleBadge},
+		{"vendor page", "https://www.anthropic.com/claude-code", RuleLink},
+		{"claude.com root", "built here: claude.com", RuleLink},
+		{"bare name under a symbol", "\U0001F916 Claude Code", RuleMention},
+		{"bare name behind a dash", "\u2014 Claude Opus 5 (1M context)", RuleMention},
+		{"bare name at the end", "via Codex", RuleMention},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hits := Scan("fix: thing\n\n" + tc.line)
+			if len(hits) != 1 {
+				t.Fatalf("got %d hits, want 1: %+v", len(hits), hits)
+			}
+			if hits[0].Rule != tc.rule {
+				t.Errorf("rule = %q, want %q", hits[0].Rule, tc.rule)
+			}
+		})
+	}
+}
+
+// TestProseThatNamesAnAssistantIsLeftAlone guards the two new rules where they
+// are weakest. The badge has to be a badge and the mention has to sit where a
+// signature sits — a list of harnesses mid-body is this project's own prose.
+func TestProseThatNamesAnAssistantIsLeftAlone(t *testing.T) {
+	for _, text := range []string{
+		"feat: x\n\nThe harnesses: Claude Code, Codex, and opencode\n\nmore prose.",
+		"feat: x\n\n- Claude Code\n- Codex\n\nBoth are scaffolded from one template set.",
+		"feat: x\n\nSee [the plan](plans/0001-thing.md) for the task list.",
+		"feat: x\n\nPorted from [csdd](https://github.com/protonspy/csdd).",
+		"docs(readme): describe the claude, codex and opencode profiles in one table",
+		// Measured against this project's own history: the phrase is there and so is
+		// the vocabulary, and the name is not what follows the phrase.
+		"docs: record the layout\n\nopencode has one AGENTS.md written by whichever ran first.",
+	} {
+		if hits := Scan(text); len(hits) != 0 {
+			t.Errorf("Scan(%q) reported %+v, want nothing", text, hits)
+		}
+	}
+}

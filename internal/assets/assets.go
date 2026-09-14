@@ -161,7 +161,22 @@ import (
 // track --here` records the branch and `--pr` the pull request; `scc spec sync` reads
 // git and the forge back into every spec. The rule pays for the paragraph by
 // tightening §8's argument, which the design doc holds in full anyway.
-const Version = "22"
+// 24: delivery.md — the tests become a number. "Full suite + lint" was the one step
+// in the sequence that nothing could check: a rule can ask for a green suite, and
+// under `autonomy: auto` nobody reads the answer. `scc test` runs the command this
+// workspace recorded and reads `{"total": N, "coverage": P}` back out of it, so the
+// claim is arithmetic against a floor rather than a sentence. Step 1 and step 2 name
+// it, and pre-push runs it, which is the moment a branch becomes a pull request. The
+// paragraph is paid for by tightening the sequential-implementation argument and the
+// review step — the reasons stay, the repetition goes.
+//
+// project.md and the init skill move with it, because the command is the agent's to
+// write and neither the rule nor the validator can write it: project.md gains the one
+// exception to "scc runs none of these", and the init skill gains the stage that
+// derives the command from the language the survey just identified. The finding says
+// what to do rather than only what is wrong — it is the one finding in the product
+// whose fix is a command line rather than an edit to the file it points at.
+const Version = "24"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.

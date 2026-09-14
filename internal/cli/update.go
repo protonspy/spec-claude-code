@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/protonspy/spec-claude-code/internal/assets"
+	"github.com/protonspy/spec-claude-code/internal/hooks"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 	"github.com/protonspy/spec-claude-code/internal/render"
 	"github.com/protonspy/spec-claude-code/internal/scaffold"
@@ -76,6 +77,7 @@ func runUpdate(args []string) int {
 	}
 	if !*jsonOut {
 		reportPlans(harnesses, plans, *force)
+		nudgeHooks(target)
 	}
 
 	pending := 0
@@ -296,4 +298,42 @@ func confirm(in io.Reader, question string) bool {
 	}
 	answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
 	return answer == "y" || answer == "yes"
+}
+
+// nudgeHooks says, once, when this build's hook script is newer than the one in
+// the repository's `.git`.
+//
+// It says it and does not fix it, which is the same line `update` holds
+// everywhere else: it reports before it acts, and the hooks are outside the
+// manifest and outside the plan the user is about to approve. Writing into a
+// repository's `.git` on the back of a "yes" that was about template files would
+// be an edit nobody agreed to.
+//
+// Nothing is said about a workspace that has no hooks at all. That is `--no-hooks`
+// or a foreign pre-commit, both of them decisions somebody already made, and an
+// update is not the moment to relitigate them.
+func nudgeHooks(root string) {
+	all, err := hooks.Look(root)
+	if err != nil {
+		return
+	}
+	var stale []string
+	for _, s := range all {
+		if s.State == hooks.Stale {
+			stale = append(stale, string(s.Stage))
+		}
+	}
+	// The harness registrations age the same way and are reported on the same
+	// terms: `scc update` says so and does not fix it, because a yes about template
+	// files is not consent to edit the harness's own settings either.
+	for _, s := range hooks.LookHarness(root) {
+		if s.State == hooks.Stale {
+			stale = append(stale, string(s.Event))
+		}
+	}
+	if len(stale) == 0 {
+		return
+	}
+	render.Warn(fmt.Sprintf("the %s hook is from an older build", strings.Join(stale, ", ")))
+	render.Detail(fmt.Sprintf("  `%s hooks install` brings it current", prog()))
 }
