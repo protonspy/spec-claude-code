@@ -37,7 +37,7 @@ Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc i
 | `hooks install\|check\|remove` | Hooks that run the validators without anybody remembering to — git's (`scc validate` before a commit, the message checked as it is written, `scc validate --pr --checks` before a push) and the harness's own (findings and undelivered work handed back to the agent at the end of a turn). `init` writes both; anything scc did not write is left alone. |
 | `rtk` | Wires in [RTK](https://github.com/rtk-ai/rtk) after the fact: installs it if missing, then splices its usage block into the entry file. |
 | `graph build\|sync\|query\|explore\|scope` | The workspace's symbol graph, via [CodeGraph](https://github.com/colbymchenry/codegraph). `scope` narrows it to certain trees — one graph per directory, since CodeGraph indexes a single root at a time. |
-| `launch` | Starts the harness with the workspace's symbol graph and RTK block current — and, with `--jail`, inside a sandbox. |
+| `launch` | Starts the harness with the workspace's symbol graph and RTK block current, **inside a sandbox by default** — ai-jail on Linux/macOS, a dev container on Windows. |
 
 ### Two kinds of hook, and only one of them refuses
 
@@ -145,12 +145,20 @@ npx @protonspy/scc launch claude --jail             # the agent, contained
 npx @protonspy/scc launch claude --jail --jail-arg --lockdown
 ```
 
-**It refuses rather than degrading.** Every other integration here starts the agent
-anyway when its binary is missing, because every other one is an enhancement. A
-sandbox is the property you asked for by name: if ai-jail is not installed, or the
-platform has no backend (Windows — use WSL2), nothing starts and it says why. An
-agent that started unjailed would hand you the confidence of containment without the
-containment.
+**On by default, and the install is the opt-in.** A sandbox nobody turns on is a
+sandbox nobody has � so ai-jail on PATH means every `scc launch` here is contained,
+and absent means one line naming what would have contained it. `--jail` is the
+demand rather than the default: asked for by name, it installs what is missing and
+**refuses to start at all** if it cannot deliver, because a false belief about
+containment is worse than a known absence of one. `--no-sandbox` is the way out.
+
+**On Windows the backend is a dev container.** ai-jail stands on Linux namespaces
+and Apple's sandbox interface and has neither there, so `scc launch` runs the agent
+through `devcontainer up` and `devcontainer exec` � no editor in the loop. It is the
+weaker of the two boundaries and scc says so on the run that gets it: a container
+does not protect the `~/.claude` credentials mounted into it, which is why WSL2 is
+still named as the better answer. `scc init` seeds `.devcontainer/` carrying scc,
+rtk, codegraph and the agent; `/scc-init` fits the image to your language.
 
 scc passes exactly the two flags that let an agent run at all — a network to reach
 its model and the credential state to authenticate — and reads even those off

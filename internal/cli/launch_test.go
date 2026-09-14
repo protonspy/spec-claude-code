@@ -1038,3 +1038,51 @@ func TestJailMapsNothingItDoesNotHaveTo(t *testing.T) {
 		t.Errorf("maps = %+v, want none for a tool the sandbox keeps", report.Maps)
 	}
 }
+
+// The sandbox is on by default, and the install is the opt-in.
+//
+// A sandbox nobody turns on is a sandbox nobody has. But a default cannot refuse
+// the way `--jail` does — nobody typed it — so an absent backend degrades to a
+// line rather than to a stopped launch, and the line names what would have
+// contained this.
+func TestSandboxIsOnByDefaultAndDegrades(t *testing.T) {
+	isolatedPath(t, "claude")
+	root := initWorkspace(t)
+	stdout, stderr, code := run(t, "launch", "--root", root, "--dry-run", "--no-graph", "--no-rtk")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want the agent to start anyway (stderr: %s)", code, stderr)
+	}
+	// Whichever backend this platform has, the run says it did not get one and
+	// names the way to have it. Silence here is how somebody spends a month
+	// believing their agent is contained.
+	said := stdout + stderr
+	if !strings.Contains(said, "sandbox") && !strings.Contains(said, "devcontainer") {
+		t.Errorf("a launch with no sandbox available said nothing about it: %q", said)
+	}
+}
+
+// --jail keeps its own contract: asked for by name, so a run that cannot deliver
+// it starts nothing. That is the difference between a demand and a default, and
+// it is why the default had to be built separately rather than by flipping a bool.
+func TestJailStillRefusesWhenAskedForByName(t *testing.T) {
+	isolatedPath(t, "claude")
+	root := initWorkspace(t)
+	_, _, code := run(t, "launch", "--root", root, "--jail", "--no-install", "--no-graph", "--no-rtk")
+	if code != ExitError {
+		t.Errorf("exit = %d, want %d — --jail refuses rather than degrading", code, ExitError)
+	}
+}
+
+// --no-sandbox is the deliberate way out, and it contradicts --jail rather than
+// quietly outranking it: a flag accepted and ignored is how somebody spends a
+// session believing they configured something.
+func TestNoSandboxOptsOutAndContradictsJail(t *testing.T) {
+	isolatedPath(t, "claude")
+	root := initWorkspace(t)
+	if _, _, code := run(t, "launch", "--root", root, "--no-sandbox", "--dry-run", "--no-graph", "--no-rtk"); code != ExitOK {
+		t.Errorf("--no-sandbox: exit = %d, want %d", code, ExitOK)
+	}
+	if _, _, code := run(t, "launch", "--root", root, "--jail", "--no-sandbox", "--no-graph", "--no-rtk"); code != ExitError {
+		t.Errorf("exit = %d, want %d for two flags that contradict each other", code, ExitError)
+	}
+}
