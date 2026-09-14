@@ -252,3 +252,60 @@ func TestFindingExitCodesMatchTheCLIContract(t *testing.T) {
 			finding.ExitOK, finding.ExitFindings, ExitOK, ExitFindings)
 	}
 }
+
+// The dev container is seeded like the knowledge base's anchors: written once,
+// tracked nowhere, never updated. It carries the agent's own toolchain because
+// every rule scc scaffolds names one of them — an agent in a container without
+// `scc` reads whole files to answer what one command would have.
+func TestInitSeedsTheDevContainer(t *testing.T) {
+	root := initWorkspace(t)
+	for _, f := range []string{"devcontainer.json", "Dockerfile"} {
+		if _, err := os.Stat(filepath.Join(root, paths.DevcontainerSeg, f)); err != nil {
+			t.Errorf("%s missing after init: %v", f, err)
+		}
+	}
+	docker, err := os.ReadFile(filepath.Join(root, paths.DevcontainerSeg, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	for _, tool := range []string{"claude-code", "scc", "codegraph", "rtk"} {
+		if !strings.Contains(string(docker), tool) {
+			t.Errorf("the image does not install %s:\n%s", tool, docker)
+		}
+	}
+	// Credentials are forwarded, never mounted. A bind of ~/.ssh would hand a
+	// compromised dependency the keys the container exists to keep away from it,
+	// which is the one change that would give the isolation away.
+	cfg, err := os.ReadFile(filepath.Join(root, paths.DevcontainerSeg, "devcontainer.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	// The mount, not the mention: the file explains at length why it does *not*
+	// bind these, and a test that matched the prose would forbid the explanation
+	// along with the thing it warns about.
+	for _, secret := range []string{"target=/home/node/.ssh", "target=/home/node/.aws", "target=/home/node/.gnupg"} {
+		if strings.Contains(string(cfg), secret) {
+			t.Errorf("the seeded config mounts a host secret (%s):\n%s", secret, cfg)
+		}
+	}
+	if !strings.Contains(string(cfg), "CLAUDE_CONFIG_DIR") || !strings.Contains(string(cfg), "GH_TOKEN") {
+		t.Errorf("the seeded config keeps neither login across rebuilds:\n%s", cfg)
+	}
+
+	// And it is the user's from the first write: a second init leaves an edited
+	// one alone, the same terms glossary.md ships on.
+	mine := "FROM scratch\n"
+	if err := os.WriteFile(filepath.Join(root, paths.DevcontainerSeg, "Dockerfile"), []byte(mine), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, stderr, code := run(t, "init", "--no-rtk", "--claude", "--root", root); code != ExitOK {
+		t.Fatalf("second init: exit = %d (stderr: %s)", code, stderr)
+	}
+	got, err := os.ReadFile(filepath.Join(root, paths.DevcontainerSeg, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != mine {
+		t.Error("a second init overwrote the project's own Dockerfile")
+	}
+}

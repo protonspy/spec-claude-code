@@ -1,0 +1,55 @@
+{
+  "name": "scc workspace",
+  "build": { "dockerfile": "Dockerfile" },
+  "remoteUser": "node",
+
+  // Claude Code's login, kept across rebuilds. Without this every rebuild signs
+  // you out: the token lives under ~/.claude, and .claude.json sits *outside*
+  // that directory unless CLAUDE_CONFIG_DIR points back into it — so the volume
+  // alone is not enough. ${devcontainerId} keeps one project's state out of
+  // another's.
+  "mounts": [
+    "source=scc-agent-config-${devcontainerId},target=/home/node/.claude,type=volume",
+
+    // Your git identity — name, email, aliases. Read-only, and not a secret:
+    // this is what makes a commit say who wrote it. Credentials are handled
+    // below, and deliberately not by mounting them.
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/home/node/.gitconfig,type=bind,readonly"
+  ],
+
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude"
+  },
+
+  // Git push and `gh` authenticate with a token forwarded from your shell, not
+  // with a mounted key.
+  //
+  // This is the one place the container's isolation is easy to give away. Binding
+  // ~/.ssh in would make push work immediately and would also hand a compromised
+  // dependency your signing keys — Anthropic's own dev container guidance says to
+  // avoid mounting host secrets and prefer "repository-scoped or short-lived
+  // tokens", and ai-jail hides ~/.ssh outright rather than mounting it. A token is
+  // scoped, expires, and is revocable from a web page; a private key is none of
+  // those.
+  //
+  // Export one before launching — `gh auth token` prints yours:
+  //   export GH_TOKEN="$(gh auth token)"
+  // An empty value is fine: commits still work, and only push and `gh` will ask.
+  //
+  // If you would rather use SSH, forward the *agent socket* rather than the keys —
+  // the container can then sign with a key it cannot read. That needs a mount of
+  // $SSH_AUTH_SOCK and SSH_AUTH_SOCK set to it, which is editor- and
+  // platform-specific enough that it is left to you.
+  "remoteEnv": {
+    "GH_TOKEN": "${localEnv:GH_TOKEN}",
+    "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
+  },
+
+  "postCreateCommand": "scc version && git config --global --add safe.directory ${containerWorkspaceFolder}",
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["anthropic.claude-code"]
+    }
+  }
+}

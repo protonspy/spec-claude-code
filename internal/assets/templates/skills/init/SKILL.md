@@ -130,18 +130,47 @@ stages so no stage inherits the previous one's findings.
    Then run `scc check` and read what it says. A gate that does not do what it claims
    is exactly as useless as no gate, and this is the one moment where fixing it costs
    nothing.
-3. **`docs/glossary.md`** — the `glossary` skill, conservatively. Every synonym listed
+3. **`.devcontainer/Dockerfile`** — fit the container to this project. `scc init`
+   seeds it with the agent's own toolchain (Claude Code, `scc`, `codegraph`, `rtk`)
+   and a placeholder for yours; what it cannot know is the language, which you have
+   just surveyed. Fill the marked block with what **`scc check` actually runs** —
+   the compiler, the package manager, the linter and the formatter you recorded in
+   step 2 — and nothing that only a human would want.
+
+   | This project | Add |
+   |---|---|
+   | Go | `golang` at the version in `go.mod`, plus `golangci-lint` if the lint gate uses it |
+   | Node / TS | the Node version in `.nvmrc` or `engines`, and the package manager the lockfile implies |
+   | Python | `python` plus `uv`/`poetry`/`pip` — whichever the lockfile is for |
+   | Rust | `rustup` with the toolchain in `rust-toolchain.toml` |
+
+   **The bar is the gate, not the language.** A container that cannot run
+   `scc check` is a container the delivery gate cannot be verified in, which is the
+   whole reason this file exists. So the test is mechanical: build it, open a shell
+   in it, and run `scc check`. If a gate fails for a missing tool, that tool belongs
+   in the Dockerfile.
+
+   This matters most on **Windows**, where it is not a convenience: ai-jail's
+   sandbox has no Windows backend, so the container is the only isolation
+   `scc launch` can give. On Linux and macOS the same file is useful and optional —
+   the kernel sandbox is what runs there.
+
+   Leave the credentials alone. The seeded `devcontainer.json` forwards a token and
+   mounts `.gitconfig` read-only on purpose; **do not add a mount for `~/.ssh` or a
+   cloud credential file**, which is the one change that would hand a compromised
+   dependency the keys the container exists to keep away from it.
+4. **`docs/glossary.md`** — the `glossary` skill, conservatively. Every synonym listed
    after `Avoid:` becomes a finding wherever it appears under `docs/`, so list one only
    where you actually saw two names used for one thing. Take terms from the domain this
    project is about, never from its framework.
-4. **`docs/wiki/`** — the `wiki` skill. One page per concept a newcomer has to hold to
+5. **`docs/wiki/`** — the `wiki` skill. One page per concept a newcomer has to hold to
    read the code, never one per directory: a wiki that mirrors the file tree *is* the
    file tree, and it goes stale faster. Link every page from `index.md` and log the run
    in `changelog.md`.
-5. **`docs/codewiki/`** — the `codewiki` skill, only where reading the code does not
+6. **`docs/codewiki/`** — the `codewiki` skill, only where reading the code does not
    tell you why it is shaped that way. Every section cites the lines it explains, and a
    citation is a promise to keep the page current, so cite the part that is stable.
-6. **`docs/adr/`** — the `adr` skill, last, and the one to be strictest about. A
+7. **`docs/adr/`** — the `adr` skill, last, and the one to be strictest about. A
    decision qualifies only when both hold: undoing it would be expensive, **and** there
    is evidence in the repository that it was taken. Number from `0001` in the order the
    history says they happened.
@@ -151,7 +180,7 @@ stages so no stage inherits the previous one's findings.
    what it was reconstructed from, and when. `status: accepted` where the code shows
    the decision in force; never `proposed` for something already built.
 
-7. **`docs/notes.md`** — the `TODO`, `FIXME`, `HACK` and aside comments already in the
+8. **`docs/notes.md`** — the `TODO`, `FIXME`, `HACK` and aside comments already in the
    code, moved into the log one line each with the file they sit on:
    `scc notes add "…" --tag <t> --path <file>`. Leave the comment where it is; this run
    does not touch code, and it goes when that file is next edited. What does not make
