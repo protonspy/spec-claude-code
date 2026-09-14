@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -316,5 +317,102 @@ func TestLoadRejectsInvalidJSON(t *testing.T) {
 	}
 	if _, found, err := Load(root, paths.Claude); err == nil {
 		t.Errorf("Load = (found %v, nil error), want an error naming the file", found)
+	}
+}
+
+// The delivery gate's base is written whether or not anybody has filled it in.
+//
+// That is the whole point of it: the four keys are the questions this project has
+// to answer, and a manifest that omitted them until they were answered would be a
+// configuration surface nobody can find. They sit in one object rather than as
+// four siblings because this file sorts its keys and `files` is most of it —
+// flat, `build` landed on line 2 and the other three on the far side of every
+// content hash in the workspace.
+func TestTheCheckBaseIsAlwaysWritten(t *testing.T) {
+	m := New("v1.0.0", paths.Claude)
+	m.Set("a.md", Hash("a"), "1")
+	b, err := m.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+	var doc struct {
+		Check map[string]any `json:"check"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("not valid JSON (%v): %s", err, b)
+	}
+	for _, k := range []string{"build", "format", "lint", "test"} {
+		v, ok := doc.Check[k]
+		if !ok {
+			t.Errorf("the base has no %q key: %s", k, b)
+			continue
+		}
+		if v != "" {
+			t.Errorf("%q = %v, want empty in a workspace that has decided nothing", k, v)
+		}
+	}
+	// The floor is the one part that stays out until it is set: it has a working
+	// default, and writing it into the base would pin every workspace to today's
+	// number while looking configured.
+	if _, ok := doc.Check["min_coverage"]; ok {
+		t.Errorf("the base pins a coverage floor nobody chose: %s", b)
+	}
+
+	// And the base sits above the file entries, which is the readability this
+	// shape exists for — `check` sorts before `files`.
+	if i, j := bytes.Index(b, []byte(`"check"`)), bytes.Index(b, []byte(`"files"`)); i < 0 || j < 0 || i > j {
+		t.Errorf("check is not above files (check at %d, files at %d)", i, j)
+	}
+}
+
+// A manifest written by v0.21.0 carried the four commands as top-level keys. It
+// is still read, and the next write moves them into the base.
+//
+// Reading the old spelling is a migration and not a format to keep: a workspace
+// that recorded its commands under the flat keys would otherwise have them
+// silently ignored by the build that moved them, which is losing somebody's
+// configuration to a tidying-up.
+func TestFlatCommandKeysAreReadAndMigrated(t *testing.T) {
+	old := `{
+  "build": "go build ./...",
+  "files": [],
+  "format": "skipped",
+  "harness": "claude",
+  "lint": "golangci-lint run",
+  "min_coverage": 92,
+  "scc": "v0.21.0",
+  "test": "make test-report"
+}`
+	var m Manifest
+	if err := json.Unmarshal([]byte(old), &m); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if m.Build != "go build ./..." || m.Format != "skipped" ||
+		m.Lint != "golangci-lint run" || m.Test != "make test-report" {
+		t.Fatalf("manifest = %+v, want the flat keys read", m)
+	}
+	if m.MinCoverage != 92 {
+		t.Errorf("min_coverage = %v, want 92", m.MinCoverage)
+	}
+
+	b, err := m.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+	// Moved, not copied: the old keys are consumed rather than preserved as
+	// unknown fields, so the file does not end up carrying both spellings with
+	// nothing to say which one wins.
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("not valid JSON (%v): %s", err, b)
+	}
+	for _, k := range []string{"build", "format", "lint", "test", "min_coverage"} {
+		if _, ok := doc[k]; ok {
+			t.Errorf("%q survived at the top level after a rewrite: %s", k, b)
+		}
+	}
+	check, _ := doc["check"].(map[string]any)
+	if check["build"] != "go build ./..." || check["min_coverage"] != 92.0 {
+		t.Errorf("check = %+v, want the migrated values", check)
 	}
 }

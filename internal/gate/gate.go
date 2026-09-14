@@ -232,9 +232,10 @@ func Save(root string, cfg Config) ([]string, error) {
 }
 
 // fromManifest and toManifest are the only places that know which manifest key
-// holds which gate. Flat keys rather than a nested object, because the manifest
-// is read by people in a diff and `"lint": "skipped"` is the whole state at a
-// glance.
+// holds which gate. The manifest groups them under `check`, so the four sit
+// together at the top of the file and `"lint": "skipped"` really is the whole
+// state at a glance — which is what flat keys promised and, once sorted around a
+// hundred-and-fifty-line `files` array, did not deliver.
 func fromManifest(m *manifest.Manifest) Config {
 	cfg := Config{Commands: map[Kind]string{}, MinCoverage: m.MinCoverage}
 	for k, v := range map[Kind]string{Build: m.Build, Test: m.Test, Lint: m.Lint, Format: m.Format} {

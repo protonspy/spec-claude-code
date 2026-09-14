@@ -112,6 +112,7 @@ type Manifest struct {
 const (
 	keySCC         = "scc"
 	keyHarness     = "harness"
+	keyCheck       = "check"
 	keyBuild       = "build"
 	keyTest        = "test"
 	keyLint        = "lint"
@@ -289,23 +290,39 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	if err := putJSON(out, keyHarness, m.Harness); err != nil {
 		return nil, err
 	}
-	// Omitted when unset, so a workspace that never wired its commands up keeps
-	// the manifest it already had. A key that appeared with an empty value would
-	// rewrite every manifest in existence on the next `scc init`, for nothing —
-	// and it would erase the distinction the empty value exists to carry, since
-	// "nobody decided" and "decided there is none" are different states.
+	// The delivery gate's base, always written and always together.
+	//
+	// One object rather than four sibling keys, because this file sorts its keys
+	// and `files` is most of it: flat, `build` landed on line 2 and its three
+	// siblings on line 170, on the far side of every content hash in the
+	// workspace. The argument for flat was that `"lint": "skipped"` is the whole
+	// state at a glance, and a hundred and seventy lines is not a glance.
+	//
+	// It is written even when empty, because the four keys *are* the base: `scc
+	// init` lays them down so the first person or agent to open the file sees the
+	// four questions this project has to answer, rather than a file that says
+	// nothing about them. An empty value costs nothing in meaning — "" and absent
+	// both read as *nobody has decided*, and the state that needed telling apart,
+	// "decided there is none", is the word `skipped`.
+	check := map[string]json.RawMessage{}
 	for key, v := range m.commands() {
-		if *v == "" {
-			continue
-		}
-		if err := putJSON(out, key, *v); err != nil {
+		if err := putJSON(check, key, *v); err != nil {
 			return nil, err
 		}
 	}
+	// The floor is the one part that stays conditional, and deliberately. The four
+	// commands are questions with no answer until somebody writes one; this has a
+	// working default, and writing it into the base would freeze that default per
+	// workspace — a later scc that raised the bar would leave every existing
+	// workspace pinned to the old number while looking configured. Absent keeps
+	// meaning "whatever scc ships", which is what a default is for.
 	if m.MinCoverage > 0 {
-		if err := putJSON(out, keyMinCoverage, m.MinCoverage); err != nil {
+		if err := putJSON(check, keyMinCoverage, m.MinCoverage); err != nil {
 			return nil, err
 		}
+	}
+	if err := putJSON(out, keyCheck, check); err != nil {
+		return nil, err
 	}
 	files := m.Files
 	if files == nil {
@@ -337,8 +354,25 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		}
 		delete(raw, keyHarness)
 	}
+	// The gate's configuration, from the `check` object — and, failing that, from
+	// the four top-level keys v0.21.0 wrote.
+	//
+	// Reading the old spelling is a migration and not a format to keep: a
+	// workspace that recorded its commands under the flat keys would otherwise
+	// have them silently ignored by the build that moved them, which is losing
+	// somebody's configuration to a tidying-up. They are consumed rather than
+	// preserved, so the next write moves them into `check` and the old keys do not
+	// linger beside the new ones saying something different.
+	inner := raw
+	if v, ok := raw[keyCheck]; ok {
+		inner = map[string]json.RawMessage{}
+		if err := json.Unmarshal(v, &inner); err != nil {
+			return fmt.Errorf("field %q: %w", keyCheck, err)
+		}
+		delete(raw, keyCheck)
+	}
 	for key, dst := range m.commands() {
-		v, ok := raw[key]
+		v, ok := inner[key]
 		if !ok {
 			continue
 		}
@@ -347,7 +381,7 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		}
 		delete(raw, key)
 	}
-	if v, ok := raw[keyMinCoverage]; ok {
+	if v, ok := inner[keyMinCoverage]; ok {
 		if err := json.Unmarshal(v, &m.MinCoverage); err != nil {
 			return fmt.Errorf("field %q: %w", keyMinCoverage, err)
 		}
