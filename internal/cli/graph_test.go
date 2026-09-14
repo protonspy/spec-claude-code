@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/protonspy/spec-claude-code/internal/manifest"
+	"github.com/protonspy/spec-claude-code/internal/paths"
 )
 
 // withGraphExec replaces the CodeGraph runner with a recorder, so the whole
@@ -230,5 +233,99 @@ func TestGraphRejectsAnUnknownSubcommand(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "nope") {
 		t.Errorf("stderr does not name the unknown subcommand: %q", stderr)
+	}
+}
+
+// The scope is recorded the way every other project decision is: through a
+// command, into the manifest, in every harness's copy.
+func TestGraphScopeRecordsAndClears(t *testing.T) {
+	root := initWorkspace(t)
+	for _, d := range []string{"backend/src", "frontend/src"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(d)), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+	}
+	// A trailing /* is how people write it, and it means the directory.
+	if _, stderr, code := run(t, "graph", "scope", "set", "backend/src/*", "frontend/src", "--root", root); code != ExitOK {
+		t.Fatalf("scope set: exit = %d (stderr: %s)", code, stderr)
+	}
+	m, found, err := manifest.Load(root, paths.Claude)
+	if err != nil || !found {
+		t.Fatalf("Load: %v (found %v)", err, found)
+	}
+	if len(m.Codegraph) != 2 {
+		t.Errorf("codegraph = %v, want both directories", m.Codegraph)
+	}
+	raw, err := os.ReadFile(paths.Claude.Manifest(root))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(raw), `"codegraph"`) {
+		t.Errorf("the manifest does not carry the scope:\n%s", raw)
+	}
+
+	// Showing it says how many graphs that is, because "scoped to two directories"
+	// and "there are two graphs" are the same fact and only the second explains
+	// why every other command answers twice.
+	stdout, stderr, code := run(t, "graph", "scope", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("scope show: exit = %d (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "backend/src") || !strings.Contains(stdout+stderr, "one graph per directory") {
+		t.Errorf("scope show does not explain itself: %q", stdout+stderr)
+	}
+
+	if _, stderr, code := run(t, "graph", "scope", "clear", "--root", root); code != ExitOK {
+		t.Fatalf("scope clear: exit = %d (stderr: %s)", code, stderr)
+	}
+	m, _, err = manifest.Load(root, paths.Claude)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(m.Codegraph) != 0 {
+		t.Errorf("codegraph = %v, want it cleared", m.Codegraph)
+	}
+}
+
+// A scope is resolved before it is written, so a typo is an error now rather
+// than an empty index later.
+func TestGraphScopeRefusesAPathThatIsNotThere(t *testing.T) {
+	root := initWorkspace(t)
+	_, stderr, code := run(t, "graph", "scope", "set", "backend/src", "--root", root)
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d for a directory that does not exist", code, ExitError)
+	}
+	if !strings.Contains(stderr, "backend/src") {
+		t.Errorf("stderr does not name what it could not find: %q", stderr)
+	}
+	// And nothing was recorded — a refused scope does not half-apply.
+	m, _, err := manifest.Load(root, paths.Claude)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(m.Codegraph) != 0 {
+		t.Errorf("codegraph = %v, want nothing recorded", m.Codegraph)
+	}
+}
+
+// The scope survives a re-scaffold, like every other thing the project owns in
+// this file.
+func TestGraphScopeSurvivesInit(t *testing.T) {
+	root := initWorkspace(t)
+	if err := os.MkdirAll(filepath.Join(root, "backend", "src"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if _, stderr, code := run(t, "graph", "scope", "set", "backend/src", "--root", root); code != ExitOK {
+		t.Fatalf("scope set: exit = %d (stderr: %s)", code, stderr)
+	}
+	if _, stderr, code := run(t, "init", "--no-rtk", "--claude", "--root", root); code != ExitOK {
+		t.Fatalf("second init: exit = %d (stderr: %s)", code, stderr)
+	}
+	m, _, err := manifest.Load(root, paths.Claude)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(m.Codegraph) != 1 || m.Codegraph[0] != "backend/src" {
+		t.Errorf("codegraph = %v, want it carried across init", m.Codegraph)
 	}
 }

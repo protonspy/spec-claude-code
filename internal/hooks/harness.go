@@ -66,21 +66,25 @@ func (e Event) Stage() Stage {
 func (e Event) Why() string {
 	switch e {
 	case SessionStart:
-		return "names what this workspace is missing, once, at the top of a session"
+		return "syncs the symbol graph and names what this workspace is missing, once"
 	case Stop:
-		return "reports `" + Prog + " validate` findings and undelivered work to the agent"
+		return "syncs the graph, then reports findings and undelivered work to the agent"
 	}
 	return ""
 }
 
-// Timeout is how long the harness may wait, in seconds. Generous for Stop, which
-// runs every validator, and short for SessionStart, which reads two files —
-// a session that hangs on scc is worse than a session that starts uninformed.
+// Timeout is how long the harness may wait, in seconds.
+//
+// Both stages sync the symbol graph before they report, so both need room for a
+// subprocess rather than for reading two files. SessionStart stays the tighter of
+// the two on purpose: a session that hangs on scc is worse than one that starts on
+// a slightly stale index, and it is also the sync `scc launch` already did for
+// every session started that way.
 func (e Event) Timeout() int {
 	if e == Stop {
-		return 60
+		return 120
 	}
-	return 15
+	return 60
 }
 
 // HarnessStatus is one event's registration as it stands in a settings file.
