@@ -50,6 +50,13 @@ const (
 	// RuleLink is a session link, a vendor's own page, or a vendor no-reply
 	// address. It is separate from the other two because it survives them: a
 	// footer rewritten by hand usually keeps the URL.
+	//
+	// A session link and a no-reply address fire wherever they sit — nobody cites
+	// either to explain a change. Any other vendor URL has to be alone on its line,
+	// because documentation lives on those hosts and an argument that cannot cite
+	// the vendor's own docs is one nobody can check. That gate costs a real miss:
+	// a bare host inside a sentence is no longer reported, which is this package's
+	// standing trade.
 	RuleLink = "assistant-link"
 	// RuleBadge is a Markdown link or image whose label or target names an
 	// assistant — the `[Claude Code](…)` half of the footer the harnesses append.
@@ -96,6 +103,14 @@ var (
 	// a bullet, a trailing stop — everything a footer keeps once the phrase in
 	// front of it is gone.
 	decoration = regexp.MustCompile(`^[\s\pP\pS]+|[\s\pP\pS]+$`)
+	// A session or a share link: a vendor URL whose path names one conversation.
+	//
+	// This is the half of the link rule that stays unconditional, wherever on the
+	// line it sits. Documentation on a vendor host is cited by ordinary technical
+	// writing — `code.claude.com/docs/…` is a source, and an argument that cannot
+	// cite the vendor's own documentation is one nobody can check. A link to
+	// somebody's session is not a source; it is the footer's surviving half.
+	session = regexp.MustCompile(`(?i)\b(?:https?://)?(?:[\w-]+\.)*(?:claude\.(?:ai|com)|chatgpt\.com|openai\.com)/(?:code/)?(?:session|share|chat|c)[/_-]\S+`)
 	// One word of a line, for the mention rule.
 	word = regexp.MustCompile(`[\p{L}\p{N}][\p{L}\p{N}.+-]*`)
 )
@@ -193,10 +208,10 @@ func scanLine(line string, last bool) (Hit, bool) {
 	if at := footer.FindStringIndex(line); at != nil && Names(line[at[1]:]) {
 		return Hit{Rule: RuleFooter, Match: strings.TrimSpace(line)}, true
 	}
-	if m := badge.FindStringSubmatch(line); m != nil && (Names(m[1]) || Names(m[2])) {
+	if m := badge.FindStringSubmatch(line); m != nil && (Names(m[1]) || Names(m[2])) && signsAlone(line, m[0]) {
 		return Hit{Rule: RuleBadge, Match: strings.TrimSpace(m[0])}, true
 	}
-	if m := link.FindString(line); m != "" {
+	if m := link.FindString(line); m != "" && (session.MatchString(m) || strings.Contains(m, "@") || signsAlone(line, m)) {
 		return Hit{Rule: RuleLink, Match: m}, true
 	}
 	if m, ok := mention(line, last); ok {
@@ -278,4 +293,30 @@ func isVersion(w string) bool {
 // here the text arrives from git, so it is done at the door.
 func normalize(text string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+}
+
+// badgeSigns gates the badge rule the way mention is gated: the badge has to be
+// the line, not a link inside a sentence.
+//
+// The rule exists for the half of the harness footer that survives when a session
+// is told not to write one — `Generated with [Claude Code](…)` loses the phrase
+// and keeps the badge, alone on its own line at the end. What it must not do is
+// fire on a **citation**, and the two are the same shape with different
+// neighbours: a signature stands by itself, a citation is embedded in prose.
+//
+// Measured on this project's own pull request, which is the worst place to find
+// out: "…and [Anthropic's own guidance](https://code.claude.com/docs/en/devcontainer)
+// warns that under --dangerously-skip-permissions…" was reported as a signature.
+// It is the opposite — it is sourcing a claim, and a technical argument that
+// cannot cite the vendor's documentation is one nobody can check. A validator
+// that fires on scc's own output is the worst bug in this product, because one
+// wrong finding teaches the reader to disbelieve the other ten.
+//
+// So: strip the badge out of the line, strip the decoration a footer keeps, and
+// require nothing else to be left. A bullet, a robot emoji, an em dash and
+// trailing punctuation are decoration; a verb is prose.
+func signsAlone(line, match string) bool {
+	rest := strings.Replace(line, match, "", 1)
+	rest = decoration.ReplaceAllString(rest, "")
+	return strings.TrimSpace(rest) == ""
 }
