@@ -11,6 +11,7 @@ import (
 
 	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/codegraph"
+	"github.com/protonspy/spec-claude-code/internal/devcontainer"
 	"github.com/protonspy/spec-claude-code/internal/headroom"
 	"github.com/protonspy/spec-claude-code/internal/jail"
 	"github.com/protonspy/spec-claude-code/internal/mdblock"
@@ -71,7 +72,8 @@ func runLaunch(args []string) int {
 		"which MCP servers Headroom may register: all | retrieve (its own only) | none")
 	contextTool := fs.Bool("headroom-context-tool", false,
 		"let Headroom set up its own CLI context tool (RTK or lean-ctx) and append its guidance to the entry file")
-	jailFlag := fs.Bool("jail", false, "start the agent inside ai-jail's sandbox; refuses to start it outside one")
+	jailFlag := fs.Bool("jail", false, "demand ai-jail's sandbox: install it if missing, and refuse to start outside one")
+	noSandbox := fs.Bool("no-sandbox", false, "start the agent on the host, outside any sandbox that is available here")
 	var jailArgs repeatable
 	fs.Var(&jailArgs, "jail-arg", "an extra `flag` for ai-jail itself, repeatable (policy otherwise lives in .ai-jail)")
 	noGraph := fs.Bool("no-graph", false, "start the agent without building or refreshing the symbol graph")
@@ -113,24 +115,38 @@ func runLaunch(args []string) int {
 		return ExitError
 	}
 
-	// The jail is settled first, and it is the one thing here that refuses. Every
-	// other integration degrades because it is an enhancement; a sandbox is a
-	// containment boundary, and a launcher that quietly started the agent outside the
-	// boundary somebody asked for would hand them the confidence of containment
-	// without the containment. So a run that cannot jail starts nothing — and it
-	// decides that before the graph is built or the entry file is touched, so a
-	// refusal leaves the workspace exactly as it found it.
+	// The sandbox is settled first, before the graph is built or the entry file is
+	// touched, so a refusal leaves the workspace exactly as it found it.
+	//
+	// **It is on by default, and the install is the opt-in.** A sandbox nobody
+	// turns on is a sandbox nobody has, and `--jail` being a flag meant the
+	// protection was reached for exactly by the people who already knew they
+	// wanted it. But a default cannot refuse the way a flag can: `--jail` refuses
+	// because somebody typed it and a false belief about containment is worse than
+	// a known absence of one, and nobody typed the default. So the presence of the
+	// binary is the consent — installed means sandbox, absent means one line
+	// saying what would have contained this and how to get it.
+	//
+	// `--jail` keeps the old contract exactly: asked for by name, so a run that
+	// cannot deliver it starts nothing. `--no-sandbox` is the deliberate way out.
 	var jailed *jailReport
-	if *jailFlag {
+	var contained *containerReport
+	switch {
+	case *noSandbox && *jailFlag:
+		render.Err("--jail and --no-sandbox contradict each other; pass one")
+		return ExitError
+	case *noSandbox:
+	case *jailFlag:
 		jailed = resolveJail(jailOptions{
-			noInstall: *noInstall,
-			yes:       *yes,
-			quiet:     *jsonOut,
-			extra:     jailArgs,
+			noInstall: *noInstall, yes: *yes, quiet: *jsonOut, extra: jailArgs,
 		})
 		if jailed == nil {
 			return ExitError
 		}
+	default:
+		jailed, contained = resolveSandbox(target, sandboxOptions{
+			noInstall: *noInstall, yes: *yes, quiet: *jsonOut, plan: *jsonOut || *dryRun, extra: jailArgs,
+		})
 	}
 
 	// --json and --dry-run both report the plan and start nothing. For --json that
@@ -185,6 +201,18 @@ func runLaunch(args []string) int {
 	// because the toolchain it maps in is not settled until the two steps above have
 	// run: a launch that just installed rtk has to map the binary it installed, and
 	// one composed before that would sandbox the agent away from it.
+	// The container is the other backend and wraps at the same point, for the same
+	// reason: whatever Headroom composed runs inside it. Nothing is mapped in the
+	// way the jail maps a toolchain — the image already carries scc, rtk and
+	// codegraph, which is why the Dockerfile installs them rather than leaving it
+	// to taste.
+	if contained != nil && contained.Wrapping {
+		cmd.Args = devcontainer.ExecArgs(target, cmd.Bin, cmd.Args)
+		cmd.Bin = devcontainer.Bin
+		cmd.Container = contained
+	} else if contained != nil {
+		cmd.Container = contained
+	}
 	if jailed != nil {
 		jailToolchain(jailed, jail.HiddenRoot(), jailTools(), *jsonOut)
 		opts := append(append([]string{}, jailed.Options...), jailed.mapArgs...)
@@ -223,14 +251,17 @@ func runLaunch(args []string) int {
 // launchCommand is both the frozen JSON shape and what the human line is printed
 // from, so the two cannot describe different commands.
 type launchCommand struct {
-	Harness  string           `json:"harness"`
-	Dir      string           `json:"dir"`
-	Bin      string           `json:"bin"`
-	Args     []string         `json:"args"`
-	Jail     *jailReport      `json:"jail,omitempty"`
-	Headroom *headroomReport  `json:"headroom,omitempty"`
-	Graph    *graphReport     `json:"graph,omitempty"`
-	RTK      *rtkLaunchReport `json:"rtk,omitempty"`
+	Harness string      `json:"harness"`
+	Dir     string      `json:"dir"`
+	Bin     string      `json:"bin"`
+	Args    []string    `json:"args"`
+	Jail    *jailReport `json:"jail,omitempty"`
+	// Container is the Windows backend: weaker than the jail, and reported apart
+	// from it so a consumer never has to infer which boundary a run got.
+	Container *containerReport `json:"container,omitempty"`
+	Headroom  *headroomReport  `json:"headroom,omitempty"`
+	Graph     *graphReport     `json:"graph,omitempty"`
+	RTK       *rtkLaunchReport `json:"rtk,omitempty"`
 }
 
 // String is the command as a person would type it. Not shell-quoted, because it

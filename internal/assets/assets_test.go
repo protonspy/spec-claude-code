@@ -617,11 +617,18 @@ func TestCommandsCarryTheirDescription(t *testing.T) {
 	}
 }
 
-// The seeds are the knowledge base's five fixed documents, at the paths every
-// validator already looks for them. A seed written anywhere else would be a file
-// nothing reads, next to the finding saying the real one is missing.
+// The seeds are the files scc lays down once and never owns: the knowledge base's
+// five fixed documents, at the paths every validator already looks for them, and the
+// dev container. A knowledge-base seed written anywhere else would be a file nothing
+// reads, next to the finding saying the real one is missing; a dev container written
+// anywhere else is one no tool that implements the spec would find.
+//
+// Sorted by destination, which is what keeps `scc init` reporting the same order on
+// every machine.
 func TestSeedsLandWhereTheValidatorsLook(t *testing.T) {
 	want := []string{
+		paths.DevcontainerSeg + "/Dockerfile",
+		paths.DevcontainerSeg + "/devcontainer.json",
 		"docs/" + paths.GlossarySeg,
 		"docs/" + paths.NotesSeg,
 		"docs/" + paths.StackSeg,

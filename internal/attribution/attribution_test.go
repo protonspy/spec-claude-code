@@ -115,7 +115,12 @@ func TestTheFooterRewrittenIsStillCaught(t *testing.T) {
 		{"badge named by target", "[the tool](https://claude.ai/code)", RuleBadge},
 		{"image badge", "![Claude](https://img.example/badge.svg)", RuleBadge},
 		{"vendor page", "https://www.anthropic.com/claude-code", RuleLink},
-		{"claude.com root", "built here: claude.com", RuleLink},
+		// Alone on the line, which is where a footer's surviving URL sits. A vendor
+		// host *inside* a sentence is now a deliberate miss: documentation lives on
+		// these domains, and this package trades a miss for a false positive every
+		// time — one wrong finding teaches the reader to disbelieve the other ten.
+		{"vendor host alone", "claude.com/claude-code", RuleLink},
+		{"session link mid-sentence", "picked up from https://claude.ai/code/session_01abc in passing", RuleLink},
 		{"bare name under a symbol", "\U0001F916 Claude Code", RuleMention},
 		{"bare name behind a dash", "\u2014 Claude Opus 5 (1M context)", RuleMention},
 		{"bare name at the end", "via Codex", RuleMention},
@@ -148,6 +153,46 @@ func TestProseThatNamesAnAssistantIsLeftAlone(t *testing.T) {
 	} {
 		if hits := Scan(text); len(hits) != 0 {
 			t.Errorf("Scan(%q) reported %+v, want nothing", text, hits)
+		}
+	}
+}
+
+// A badge inside a sentence is a citation; a badge alone on its line is a
+// signature. They are the same shape with different neighbours, and telling them
+// apart is the difference between a check people trust and one they suppress.
+//
+// The first case is real: it is a line from this project's own pull request,
+// reported as a signature by the shipped rule. A technical argument that cannot
+// cite the vendor's documentation is one nobody can check, and a validator that
+// fires on scc's own output is the worst bug in this product.
+func TestBadgeTellsACitationFromASignature(t *testing.T) {
+	citations := []string{
+		"and [Anthropic's own guidance](https://code.claude.com/docs/en/devcontainer) warns that under --dangerously-skip-permissions it does not prevent exfiltration",
+		"see [the Claude Code docs](https://code.claude.com/docs/en/hooks) for the event list",
+		"The idea and the tool are [Fábio Akita's](https://akitaonrails.com/en/2026/03/01/ai-jail), and scc integrates the binary.",
+	}
+	for _, line := range citations {
+		if hits := Scan(line); len(hits) != 0 {
+			t.Errorf("citation reported as a signature: %q → %+v", line, hits)
+		}
+	}
+
+	// And the shape it exists for still lands: the badge is the line, which is
+	// what a footer collapses to once the phrase in front of it is gone.
+	signatures := []string{
+		"[Claude Code](https://claude.com/claude-code)",
+		"🤖 [Claude Code](https://claude.com/claude-code)",
+		"— [Claude Code](https://claude.com/claude-code)",
+		"![Claude](https://claude.ai/badge.svg)",
+	}
+	for _, line := range signatures {
+		hits := Scan(line)
+		if len(hits) == 0 {
+			t.Errorf("signature not reported: %q", line)
+			continue
+		}
+		if hits[0].Rule != RuleBadge && hits[0].Rule != RuleLink {
+			t.Errorf("%q reported as %q, want the badge or the link rule", line, hits[0].Rule)
 		}
 	}
 }

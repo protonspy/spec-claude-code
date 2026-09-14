@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/manifest"
@@ -151,6 +152,13 @@ func Apply(root string, opts Options) (*Result, error) {
 		}
 		res.record(s.Rel, action)
 	}
+
+	// Sorted rather than left in the order the two loops happened to write in. That
+	// order was stable only while every seed sorted after every managed file, which
+	// stopped being true the moment a seed landed in `.devcontainer/` — and a report
+	// whose order depends on which loop ran first is one that reorders itself the
+	// next time a destination is added.
+	sort.Slice(res.Changes, func(i, j int) bool { return res.Changes[i].Path < res.Changes[j].Path })
 
 	// Entries for templates this version no longer ships are dropped: the manifest
 	// is exactly the set of files scc manages, and a stale entry would send a later

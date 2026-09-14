@@ -339,6 +339,22 @@ type Seed struct {
 // fired on the missing document.
 func Seeds() []Seed {
 	return []Seed{
+		// The dev container, on exactly the same terms as the knowledge base's
+		// anchors below: written once when absent, recorded nowhere, never updated.
+		//
+		// It is a seed rather than a managed file because a Dockerfile is a build
+		// environment, and that belongs to whoever has to debug it at three in the
+		// morning. scc has nothing to deliver to it after the first write — the
+		// image, the toolchain and the features are all this project's, and
+		// `/scc-init` is what fills them in from the language the survey found.
+		//
+		// Scaffolded on every platform even though only Windows launches through
+		// it, because the files are committed and a team is not one platform: the
+		// Linux teammate who wants a container should find one, and the Windows
+		// teammate should not have to write it.
+		{Name: "devcontainer/Dockerfile", Rel: path.Join(paths.DevcontainerSeg, "Dockerfile")},
+		{Name: "devcontainer/devcontainer.json", Rel: path.Join(paths.DevcontainerSeg, "devcontainer.json")},
+
 		{Name: "docs/glossary.md", Rel: path.Join(paths.DocsSeg, paths.GlossarySeg)},
 		{Name: "docs/notes.md", Rel: path.Join(paths.DocsSeg, paths.NotesSeg)},
 		{Name: "docs/stack.md", Rel: path.Join(paths.DocsSeg, paths.StackSeg)},
@@ -449,6 +465,7 @@ func Dirs(h paths.Harness) []string {
 		path.Join(paths.DocsSeg, paths.RawSeg),
 		path.Join(paths.DocsSeg, paths.ADRSeg),
 		path.Join(paths.DocsSeg, paths.CodewikiSeg),
+		paths.DevcontainerSeg,
 	)
 }
 

@@ -239,6 +239,11 @@ const (
 	SpecsSeg = "specs" // one directory per feature
 	PlansSeg = "plans" // one file per initiative
 	DocsSeg  = "docs"  // the knowledge base
+
+	// DevcontainerSeg is the Dev Containers directory at the project root. scc
+	// seeds it and never owns it: the spec is containers.dev's, and the image is
+	// the project's from the moment it is written.
+	DevcontainerSeg = ".devcontainer"
 )
 
 // The three artifacts of a spec, directly under specs/<feature>/. There is no
