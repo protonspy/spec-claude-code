@@ -23,9 +23,9 @@ port or one test database must be namespaced, and two green features can break t
 
 Once the last task is done:
 
-1. **`scc test` + lint** on the integrated branch — the whole suite, and its coverage
-   against this workspace's floor. Per-task runs cannot see breakage between tasks.
-2. **`scc validate --tests --pr`** — artifacts, record and coverage in one gate; `2` is not done.
+1. **`scc check`** on the integrated branch — build, format, lint and suite, in that
+   order, stopping at the first failure. Per-task runs cannot see breakage between tasks.
+2. **`scc validate --checks --pr`** — artifacts, record and the gates together; `2` is not done.
 3. **`code-review` and `security-review`** subagents on the diff, dispatched together.
    Each returns a verdict, what it checked, and findings by severity — you fix from that
    report, you do not re-review. `blocked` or any `blocker`/`critical` means the PR does
@@ -41,9 +41,9 @@ no session link, no "generated with" footer or badge, no naming of a model, vend
 harness — not in a commit message, not in a PR title or body. The `commit-msg` hook
 rejects it as you write it, `SCC_SKIP_HOOKS=1` is not the fix, `--pr` reads the PR body.
 
-**The tests are a number, not a claim.** `scc test` runs what this workspace recorded
-and reads back `{"total": N, "coverage": P}`; under the floor, or zero tests, is a
-finding. `pre-push` runs it, so a branch that cannot clear it does not become a PR.
+**The gates are commands, not claims.** `scc check` runs what this workspace recorded
+for build, format, lint and test; the last reads back `{"total": N, "coverage": P}` and
+is held to a floor. `pre-push` runs them, so what cannot clear them does not become a PR.
 
 **A branch leaves no trace in the artifacts, so record it.** `scc spec track <feature>
 --here` when you branch, `--pr <n>` when the PR opens; `scc spec sync` reads git and the

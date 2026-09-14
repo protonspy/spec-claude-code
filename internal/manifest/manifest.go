@@ -77,16 +77,22 @@ type Manifest struct {
 	// base is wrong and the merge silently clobbers.
 	Harness string
 
-	// Test is the shell command that runs this project's suite and prints
-	// {"total": N, "coverage": P}. Empty in a workspace that has not wired its
-	// tests up, which is a state and not a defect.
+	// Build, Test, Lint and Format are this project's own commands — the delivery
+	// gate's four. Empty means nobody has decided; the literal "skipped" means
+	// somebody decided this project has none, which is a real answer for a language
+	// with no formatter or no linter and has to be told apart from the first.
+	//
+	// Test is the one that also prints {"total": N, "coverage": P}.
 	//
 	// It is here rather than in a config file of its own because the manifest is
 	// scc's only file and a second one would be a schema to version, read by
 	// nothing else. It is the first key in it that is *input* rather than record,
 	// which is worth knowing: everything else here is what scc wrote, and this is
 	// what the project told scc.
-	Test string
+	Build  string
+	Test   string
+	Lint   string
+	Format string
 
 	// MinCoverage is the coverage floor in percent. Zero means the default,
 	// because every manifest written before this key existed has no value and
@@ -106,7 +112,10 @@ type Manifest struct {
 const (
 	keySCC         = "scc"
 	keyHarness     = "harness"
+	keyBuild       = "build"
 	keyTest        = "test"
+	keyLint        = "lint"
+	keyFormat      = "format"
 	keyMinCoverage = "min_coverage"
 	keyFiles       = "files"
 	keyPath        = "path"
@@ -280,11 +289,16 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	if err := putJSON(out, keyHarness, m.Harness); err != nil {
 		return nil, err
 	}
-	// Omitted when unset, so a workspace that never wired its tests up keeps the
-	// manifest it already had. A key that appeared with an empty value would
-	// rewrite every manifest in existence on the next `scc init`, for nothing.
-	if m.Test != "" {
-		if err := putJSON(out, keyTest, m.Test); err != nil {
+	// Omitted when unset, so a workspace that never wired its commands up keeps
+	// the manifest it already had. A key that appeared with an empty value would
+	// rewrite every manifest in existence on the next `scc init`, for nothing —
+	// and it would erase the distinction the empty value exists to carry, since
+	// "nobody decided" and "decided there is none" are different states.
+	for key, v := range m.commands() {
+		if *v == "" {
+			continue
+		}
+		if err := putJSON(out, key, *v); err != nil {
 			return nil, err
 		}
 	}
@@ -323,11 +337,15 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		}
 		delete(raw, keyHarness)
 	}
-	if v, ok := raw[keyTest]; ok {
-		if err := json.Unmarshal(v, &m.Test); err != nil {
-			return fmt.Errorf("field %q: %w", keyTest, err)
+	for key, dst := range m.commands() {
+		v, ok := raw[key]
+		if !ok {
+			continue
 		}
-		delete(raw, keyTest)
+		if err := json.Unmarshal(v, dst); err != nil {
+			return fmt.Errorf("field %q: %w", key, err)
+		}
+		delete(raw, key)
 	}
 	if v, ok := raw[keyMinCoverage]; ok {
 		if err := json.Unmarshal(v, &m.MinCoverage); err != nil {
@@ -361,7 +379,11 @@ func (m *Manifest) CarryOver(prior *Manifest) {
 	if prior == nil {
 		return
 	}
-	m.Test, m.MinCoverage = prior.Test, prior.MinCoverage
+	mine, theirs := m.commands(), prior.commands()
+	for key, dst := range mine {
+		*dst = *theirs[key]
+	}
+	m.MinCoverage = prior.MinCoverage
 	m.extra = cloneRaw(prior.extra)
 	if len(m.extra) == 0 {
 		m.extra = nil
@@ -421,4 +443,19 @@ func orNil(raw map[string]json.RawMessage) map[string]json.RawMessage {
 		return nil
 	}
 	return raw
+}
+
+// commands maps each command key to the field that holds it.
+//
+// One table rather than four repetitions in each of marshal, unmarshal and
+// CarryOver. Adding a fifth gate then touches this function and the key
+// constants, and nothing else — which is what stops the next one from being
+// preserved on read and dropped on a re-scaffold.
+func (m *Manifest) commands() map[string]*string {
+	return map[string]*string{
+		keyBuild:  &m.Build,
+		keyTest:   &m.Test,
+		keyLint:   &m.Lint,
+		keyFormat: &m.Format,
+	}
 }

@@ -27,10 +27,10 @@ func runValidateAll(args []string) int {
 	// `scc validate` runs on the pre-commit path.
 	withPR := fs.Bool("pr", false, "also check the pull request open on this branch — its title and body, read through gh")
 	// The other check a default run leaves off, for the same reason at a larger
-	// scale: this one runs the project's whole suite. It is the delivery gate's
-	// numeric half, so the pre-push hook passes it — the moment a branch becomes a
-	// pull request — and a bare pre-commit run never waits on a test suite.
-	withTests := fs.Bool("tests", false, "also run this workspace's test command and hold its coverage against the floor")
+	// scale: this one runs the project's compiler, linter and suite. It is the
+	// delivery gate, so the pre-push hook passes it — the moment a branch becomes a
+	// pull request — and a bare pre-commit run never waits on a build.
+	withChecks := fs.Bool("checks", false, "also run this workspace's build, format, lint and test commands")
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
@@ -48,8 +48,8 @@ func runValidateAll(args []string) int {
 	if *withPR {
 		opts = append(opts, validate.WithPR())
 	}
-	if *withTests {
-		opts = append(opts, validate.WithTests())
+	if *withChecks {
+		opts = append(opts, validate.WithChecks())
 	}
 	set, results, err := validate.Everything(target, opts...)
 	if err != nil {

@@ -1,6 +1,6 @@
 ---
 name: init
-description: Bootstrap this project's knowledge base from the code that already exists — survey the repository, then write docs/stack.md, docs/glossary.md, the wiki, the codewiki, the ADRs for decisions already taken, and the project rule's real build, test, and lint commands, and the delivery gate's test command. Use it on a workspace whose docs/ is still the four seeded anchors, when someone asks to document an existing codebase, when a repository has just been scaffolded and nothing under docs/ is filled in, or when someone runs /scc-init. Not for one page or one new decision — the wiki, glossary, stack, codewiki, and adr skills each own their own artifact, and this run is what calls them.
+description: Bootstrap this project's knowledge base from the code that already exists — survey the repository, then write docs/stack.md, docs/glossary.md, the wiki, the codewiki, the ADRs for decisions already taken, and the project rule's real build, test, and lint commands, and the delivery gate's four. Use it on a workspace whose docs/ is still the four seeded anchors, when someone asks to document an existing codebase, when a repository has just been scaffolded and nothing under docs/ is filled in, or when someone runs /scc-init. Not for one page or one new decision — the wiki, glossary, stack, codewiki, and adr skills each own their own artifact, and this run is what calls them.
 ---
 
 You fill an empty knowledge base from a repository that already exists.
@@ -75,17 +75,37 @@ stages so no stage inherits the previous one's findings.
    place somebody maintains them, then verify locally. A guessed command that exits `0`
    looks exactly like a passing suite, which is the whole reason that rule exists.
 
-   **Then record the delivery gate's test command — `scc test set "<command>"`.** This
-   one is not prose in a rule; it is run, and its answer is compared against a number.
-   `scc test` expects one JSON object anywhere in the output:
+   **Then record the same four as the delivery gate — `scc check set <gate>
+   "<command>"`.** The rule above is prose somebody reads; these are run, and their
+   answers decide whether a branch becomes a pull request. There are four gates and
+   they run in this order, stopping at the first failure:
+
+   | Gate | What it has to do | Typical source |
+   |---|---|---|
+   | `build` | the project compiles | `go build ./...`, `tsc --noEmit`, `cargo build`, `mvn -q compile` |
+   | `format` | the formatter has nothing to say — the *check*, not the rewrite | `gofmt -l .`, `prettier --check`, `black --check`, `cargo fmt --check` |
+   | `lint` | the best-practices layer | `golangci-lint run`, `eslint .`, `ruff check`, `clippy -- -D warnings` |
+   | `test` | the suite passes, and covers enough | see below |
+
+   **A language that genuinely has no such step gets `scc check skip <gate>`, once.**
+   That is a decision and it is recorded like one — the validator then stays quiet
+   about it forever. Leaving a gate unrecorded is *not* the same thing: that is a
+   decision nobody has made, and it is reported on every run until somebody makes it.
+   Skip deliberately and rarely: most languages have a formatter, and "we have no
+   linter" is usually "nobody has picked one yet", which is a finding worth keeping.
+
+   **The format gate is the check, never the rewrite.** `gofmt -w .` exits `0` having
+   silently changed the tree; the gate has to be the one that *fails* on unformatted
+   code, or it certifies every run.
+
+   The test gate asks for one thing more — a JSON object anywhere in its output:
 
    ```
    {"total": 412, "coverage": 88.4}
    ```
 
-   Nothing in scc knows how your project produces those, which is why writing this
-   command is *your* job on this run. Build it from what the survey already told you —
-   the language, the runner, and the coverage tool that is already in CI:
+   Nothing in scc knows how your project produces those, which is why writing this is
+   *your* job on this run. Build it from what the survey already told you:
 
    | Stack | Where the two numbers come from |
    |---|---|
@@ -95,21 +115,21 @@ stages so no stage inherits the previous one's findings.
    | Rust | `cargo test` for the count, `cargo llvm-cov --summary-only` for coverage |
    | Anything else | whatever CI already runs, plus three lines of shell that print the object |
 
-   **Put it in the repository, not in the manifest.** Record a target — `make
+   **Put a pipeline in the repository, not in the manifest.** Record a target — `make
    test-report`, `npm run test:report`, `./scripts/test-report.sh` — and set *that* as
    the command. A pipeline recorded inline is one nobody can run by hand, fix, or review
-   in a diff.
+   in a diff. A single command that already does the job goes in as it is.
 
    Three things to get right, because each has a failure mode that looks like success:
-   the suite's **exit status has to survive** the wrapper (a script ending in `echo`
-   returns the echo's `0` and reports a broken build as green); the report goes to
-   **stdout** and the runner's own noise to stderr; and **`total` is a real count**, not
-   a constant — zero tests with high coverage is a finding, and so is a number nobody
-   updates.
+   a wrapped command's **exit status has to survive** the wrapper (a script ending in
+   `echo` returns the echo's `0` and reports a broken build as green); the test report
+   goes to **stdout** and the runner's own noise to stderr; and **`total` is a real
+   count**, not a constant — zero tests with high coverage is a finding, and so is a
+   number nobody updates.
 
-   Then run `scc test` and read what it says. A command that does not print a report
-   yet is exactly as useless as no command, and this is the one moment where fixing it
-   costs nothing.
+   Then run `scc check` and read what it says. A gate that does not do what it claims
+   is exactly as useless as no gate, and this is the one moment where fixing it costs
+   nothing.
 3. **`docs/glossary.md`** — the `glossary` skill, conservatively. Every synonym listed
    after `Avoid:` becomes a finding wherever it appears under `docs/`, so list one only
    where you actually saw two names used for one thing. Take terms from the domain this
@@ -150,8 +170,8 @@ stages so no stage inherits the previous one's findings.
 
 ## Finishing
 
-`scc validate --tests` exits `0` — the artifacts in shape and the test command actually
-producing a report — then deliver it as ordinary work: one branch, one pull
+`scc validate --checks` exits `0` — the artifacts in shape and every gate actually
+doing what it claims — then deliver it as ordinary work: one branch, one pull
 request, `{{.Rules}}/delivery.md`.
 
 Then report **what was left unknown**, by name: the dependency nobody could justify,

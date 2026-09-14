@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/protonspy/spec-claude-code/internal/gate"
 	"github.com/protonspy/spec-claude-code/internal/manifest"
 	"github.com/protonspy/spec-claude-code/internal/paths"
-	"github.com/protonspy/spec-claude-code/internal/testrun"
 )
 
 // echoJSON is a command that prints one line on either shell scc runs. The
@@ -47,12 +47,20 @@ func failing() string {
 	return "exit 1"
 }
 
-// setTest records a command the way a user would, through the CLI, so these tests
-// exercise the path that writes the manifest rather than a hand-built file.
+// setTest records the test gate's command the way a user would, through the CLI,
+// so these tests exercise the path that writes the manifest rather than a
+// hand-built file.
 func setTest(t *testing.T, root string, args ...string) {
 	t.Helper()
-	if _, stderr, code := run(t, append([]string{"test", "set", "--root", root}, args...)...); code != ExitOK {
-		t.Fatalf("test set: exit = %d (stderr: %s)", code, stderr)
+	setGate(t, root, "test", args...)
+}
+
+// setGate records any gate, and skipGate declines one — the two states the
+// validator has to tell apart.
+func setGate(t *testing.T, root, kind string, args ...string) {
+	t.Helper()
+	if _, stderr, code := run(t, append([]string{"check", "set", kind, "--root", root}, args...)...); code != ExitOK {
+		t.Fatalf("check set %s: exit = %d (stderr: %s)", kind, code, stderr)
 	}
 }
 
@@ -110,22 +118,22 @@ func TestTheTestCommandSurvivesInitAndUpdate(t *testing.T) {
 	if _, stderr, code := run(t, "init", "--no-rtk", "--claude", "--root", root); code != ExitOK {
 		t.Fatalf("second init: exit = %d (stderr: %s)", code, stderr)
 	}
-	cfg, err := testrun.Load(root)
+	cfg, err := gate.Load(root)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Command != "make test-report" || cfg.Floor() != 92 {
+	if cfg.Command(gate.Test) != "make test-report" || cfg.Floor() != 92 {
 		t.Errorf("config = %+v (floor %v), want it carried across init", cfg, cfg.Floor())
 	}
 
 	if _, stderr, code := run(t, "update", "--root", root, "--yes"); code != ExitOK {
 		t.Fatalf("update: exit = %d (stderr: %s)", code, stderr)
 	}
-	cfg, err = testrun.Load(root)
+	cfg, err = gate.Load(root)
 	if err != nil {
 		t.Fatalf("Load after update: %v", err)
 	}
-	if cfg.Command != "make test-report" || cfg.Floor() != 92 {
+	if cfg.Command(gate.Test) != "make test-report" || cfg.Floor() != 92 {
 		t.Errorf("config = %+v (floor %v), want it carried across update", cfg, cfg.Floor())
 	}
 }
@@ -156,9 +164,10 @@ func TestTestSetWritesEveryHarnessManifest(t *testing.T) {
 // bare ✓ is what makes a gate feel arbitrary.
 func TestTestRunReportsAndPasses(t *testing.T) {
 	root := initWorkspace(t)
+	skipRest(t, root, "test")
 	setTest(t, root, echoJSON(412, "88.4"))
 
-	stdout, stderr, code := run(t, "test", "--root", root)
+	stdout, stderr, code := run(t, "check", "--root", root)
 	if code != ExitOK {
 		t.Fatalf("exit = %d, want %d (stderr: %s)", code, ExitOK, stderr)
 	}
@@ -172,9 +181,10 @@ func TestTestRunReportsAndPasses(t *testing.T) {
 // indistinguishable from "scc could not run".
 func TestTestRunReportsFindingsBelowTheFloor(t *testing.T) {
 	root := initWorkspace(t)
+	skipRest(t, root, "test")
 	setTest(t, root, echoJSON(400, "72.5"))
 
-	stdout, stderr, code := run(t, "test", "--root", root)
+	stdout, stderr, code := run(t, "check", "--root", root)
 	if code != ExitFindings {
 		t.Fatalf("exit = %d, want %d (stderr: %s)", code, ExitFindings, stderr)
 	}
@@ -192,9 +202,10 @@ func TestTestRunReportsFindingsBelowTheFloor(t *testing.T) {
 // it is the one case a naive floor would certify.
 func TestTestRunRejectsCoverageWithNoTests(t *testing.T) {
 	root := initWorkspace(t)
+	skipRest(t, root, "test")
 	setTest(t, root, echoJSON(0, "100"))
 
-	stdout, stderr, code := run(t, "test", "--root", root)
+	stdout, stderr, code := run(t, "check", "--root", root)
 	if code != ExitFindings {
 		t.Fatalf("exit = %d, want %d (stderr: %s)", code, ExitFindings, stderr)
 	}
@@ -207,19 +218,20 @@ func TestTestRunRejectsCoverageWithNoTests(t *testing.T) {
 // findings, because they are different things to go and do.
 func TestTestRunSeparatesFailureFromSilence(t *testing.T) {
 	root := initWorkspace(t)
+	skipRest(t, root, "test")
 
 	setTest(t, root, failing())
-	stdout, stderr, code := run(t, "test", "--root", root)
+	stdout, stderr, code := run(t, "check", "--root", root)
 	if code != ExitFindings {
 		t.Fatalf("failing suite: exit = %d, want %d", code, ExitFindings)
 	}
-	if !strings.Contains(stdout+stderr, "tests.failed") {
-		t.Errorf("a failing suite was not reported as one: %q", stdout+stderr)
+	if !strings.Contains(stdout+stderr, "check.failed") {
+		t.Errorf("a failing gate was not reported as one: %q", stdout+stderr)
 	}
 
 	// A suite that passes and says so in prose: green, and still no number to check.
 	setTest(t, root, echoPlain("PASS"))
-	stdout, stderr, code = run(t, "test", "--root", root)
+	stdout, stderr, code = run(t, "check", "--root", root)
 	if code != ExitFindings {
 		t.Fatalf("silent suite: exit = %d, want %d", code, ExitFindings)
 	}
@@ -232,25 +244,31 @@ func TestTestRunSeparatesFailureFromSilence(t *testing.T) {
 // which is the loudest thing in the room on a real project.
 func TestTestJSONKeepsTheSuiteOffStdout(t *testing.T) {
 	root := initWorkspace(t)
+	skipRest(t, root, "test")
 	setTest(t, root, echoJSON(10, "99"))
 
-	stdout, _, code := run(t, "test", "--root", root, "--json")
+	stdout, _, code := run(t, "check", "--root", root, "--json")
 	if code != ExitOK {
 		t.Fatalf("exit = %d, want %d", code, ExitOK)
 	}
 	var report struct {
-		Command  string  `json:"command"`
-		Total    int     `json:"total"`
-		Coverage float64 `json:"coverage"`
-		Floor    float64 `json:"floor"`
-		Passed   bool    `json:"passed"`
-		Count    int     `json:"count"`
+		Gates   []gate.Result `json:"gates"`
+		Skipped []string      `json:"skipped"`
+		Passed  bool          `json:"passed"`
+		Count   int           `json:"count"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
 		t.Fatalf("stdout is not valid JSON (%v): %q", err, stdout)
 	}
-	if report.Total != 10 || report.Coverage != 99 || report.Floor != 86 {
-		t.Errorf("report = %+v, want the numbers and the floor", report)
+	// One gate ran and three were declined, and the document says which — "clean"
+	// and "nothing ran" are different answers and a consumer has to be able to
+	// tell them apart.
+	if len(report.Gates) != 1 || len(report.Skipped) != 3 {
+		t.Fatalf("report = %+v, want one gate run and three declined", report)
+	}
+	got := report.Gates[0]
+	if got.Kind != gate.Test || got.Total != 10 || got.Coverage != 99 || got.Floor != 86 {
+		t.Errorf("gate = %+v, want the numbers and the floor", got)
 	}
 	if !report.Passed || report.Count != 0 {
 		t.Errorf("report = %+v, want a clean pass", report)
@@ -261,22 +279,23 @@ func TestTestJSONKeepsTheSuiteOffStdout(t *testing.T) {
 // file — the same reason `scc notes add` exists.
 func TestTestSetRecordsTheFloor(t *testing.T) {
 	root := initWorkspace(t)
+	skipRest(t, root, "test")
 	setTest(t, root, "--min", "95", echoJSON(100, "90"))
 
-	_, _, code := run(t, "test", "--root", root)
+	_, _, code := run(t, "check", "--root", root)
 	if code != ExitFindings {
 		t.Fatalf("exit = %d, want %d — 90%% is under a 95%% floor", code, ExitFindings)
 	}
 	// And a --min with no command raises the floor on the command already there.
 	setTest(t, root, "--min", "80")
-	if _, stderr, code := run(t, "test", "--root", root); code != ExitOK {
+	if _, stderr, code := run(t, "check", "--root", root); code != ExitOK {
 		t.Fatalf("exit = %d, want %d under an 80%% floor (stderr: %s)", code, ExitOK, stderr)
 	}
 }
 
 func TestTestSetRejectsAFloorThatIsNotAPercentage(t *testing.T) {
 	root := initWorkspace(t)
-	if _, _, code := run(t, "test", "set", "--root", root, "--min", "180", "make test"); code != ExitError {
+	if _, _, code := run(t, "check", "set", "test", "--root", root, "--min", "180", "make test"); code != ExitError {
 		t.Errorf("exit = %d, want %d for a floor over 100", code, ExitError)
 	}
 }
@@ -286,34 +305,97 @@ func TestTestShowAndClear(t *testing.T) {
 	root := initWorkspace(t)
 	setTest(t, root, "make test-report")
 
-	stdout, _, code := run(t, "test", "show", "--root", root)
+	stdout, _, code := run(t, "check", "show", "--root", root)
 	if code != ExitOK || !strings.Contains(stdout, "make test-report") {
 		t.Errorf("show: exit = %d, stdout = %q", code, stdout)
 	}
-	if _, stderr, code := run(t, "test", "clear", "--root", root); code != ExitOK {
+	if _, stderr, code := run(t, "check", "clear", "test", "--root", root); code != ExitOK {
 		t.Fatalf("clear: exit = %d (stderr: %s)", code, stderr)
 	}
-	cfg, err := testrun.Load(root)
+	cfg, err := gate.Load(root)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Configured() {
+	if cfg.Any() {
 		t.Errorf("config = %+v, want it cleared", cfg)
 	}
 }
 
 // Running the suite when there is no suite recorded is a usage error, not a
 // finding: somebody typed the command that runs the tests and there are none to
-// run. The same state under `scc validate --tests` is a finding, because there it
+// run. The same state under `scc validate --checks` is a finding, because there it
 // is an answer about the workspace.
 func TestTestRunWithoutACommandIsAUsageError(t *testing.T) {
 	root := initWorkspace(t)
-	_, stderr, code := run(t, "test", "--root", root)
+	// Naming a gate that is not recorded is a usage error: somebody typed the
+	// command that runs it and there is nothing to run.
+	_, stderr, code := run(t, "check", "test", "--root", root)
 	if code != ExitError {
 		t.Fatalf("exit = %d, want %d", code, ExitError)
 	}
-	if !strings.Contains(stderr, "test set") {
-		t.Errorf("stderr does not say how to fix it: %q", stderr)
+	if !strings.Contains(stderr, "check set") || !strings.Contains(stderr, "check skip") {
+		t.Errorf("stderr does not offer both ways out: %q", stderr)
+	}
+
+	// Reached through the pipeline the same state is a finding, because there the
+	// question is about the workspace rather than about a command that could not
+	// do as it was asked.
+	_, _, code = run(t, "check", "--root", root)
+	if code != ExitFindings {
+		t.Errorf("exit = %d, want %d for the whole pipeline", code, ExitFindings)
+	}
+}
+
+// A gate somebody declined is silence — that is the whole difference between a
+// project with no formatter and a project that forgot to say what its formatter
+// is, and it is what keeps the gate usable in a language that has neither.
+func TestSkippedGatesAreSilent(t *testing.T) {
+	root := initWorkspace(t)
+	for _, k := range gate.Kinds() {
+		skipGate(t, root, string(k))
+	}
+	stdout, stderr, code := run(t, "validate", "--root", root, "--checks")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d with every gate declined (stderr: %s)", code, ExitOK, stderr)
+	}
+	if strings.Contains(stdout+stderr, "not-configured") {
+		t.Errorf("a declined gate was reported as undecided: %q", stdout+stderr)
+	}
+
+	// And clearing one puts it back to undecided, which is not the same thing:
+	// the validator asks about it again.
+	if _, stderr, code := run(t, "check", "clear", "lint", "--root", root); code != ExitOK {
+		t.Fatalf("check clear: exit = %d (stderr: %s)", code, stderr)
+	}
+	stdout, stderr, code = run(t, "validate", "--root", root, "--checks")
+	if code != ExitFindings {
+		t.Fatalf("exit = %d, want %d once a gate is undecided again", code, ExitFindings)
+	}
+	if !strings.Contains(stdout+stderr, "no lint command is recorded") {
+		t.Errorf("the cleared gate was not reported: %q", stdout+stderr)
+	}
+}
+
+// The pipeline stops at the first gate that fails. A lint report over a broken
+// build is derived noise, and the minutes spent producing it are minutes nobody
+// gets back.
+func TestThePipelineStopsAtTheFirstFailure(t *testing.T) {
+	root := initWorkspace(t)
+	marker := filepath.Join(root, "lint-ran.txt")
+	setGate(t, root, "build", failing())
+	setGate(t, root, "lint", "echo ran > "+filepath.ToSlash(marker))
+	skipGate(t, root, "format")
+	skipGate(t, root, "test")
+
+	stdout, stderr, code := run(t, "check", "--root", root)
+	if code != ExitFindings {
+		t.Fatalf("exit = %d, want %d (stderr: %s)", code, ExitFindings, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "the build gate") {
+		t.Errorf("the failing gate was not named: %q", stdout+stderr)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("a later gate ran after the build failed")
 	}
 }
 
@@ -322,6 +404,7 @@ func TestTestRunWithoutACommandIsAUsageError(t *testing.T) {
 // minute per commit is a gate somebody turns off — taking the other ten with it.
 func TestValidateRunsTheSuiteOnlyWhenAsked(t *testing.T) {
 	root := initWorkspace(t)
+	skipRest(t, root, "test")
 	// A command that leaves a trace, so "did it run" is a question about the
 	// filesystem rather than about stdout.
 	marker := filepath.Join(root, "ran.txt")
@@ -334,14 +417,14 @@ func TestValidateRunsTheSuiteOnlyWhenAsked(t *testing.T) {
 		t.Error("a bare `scc validate` ran the test suite")
 	}
 
-	// --tests asks for it, and then the command runs — and reports, since this one
+	// --checks asks for it, and then the command runs — and reports, since this one
 	// prints no report of its own.
-	stdout, stderr, code := run(t, "validate", "--root", root, "--tests")
+	stdout, stderr, code := run(t, "validate", "--root", root, "--checks")
 	if code != ExitFindings {
-		t.Fatalf("validate --tests: exit = %d, want %d (stderr: %s)", code, ExitFindings, stderr)
+		t.Fatalf("validate --checks: exit = %d, want %d (stderr: %s)", code, ExitFindings, stderr)
 	}
 	if _, err := os.Stat(marker); err != nil {
-		t.Errorf("--tests did not run the command: %v", err)
+		t.Errorf("--checks did not run the command: %v", err)
 	}
 	if !strings.Contains(stdout+stderr, "tests") {
 		t.Errorf("the tests validator is missing from the report: %q", stdout+stderr)
@@ -354,11 +437,31 @@ func TestValidateRunsTheSuiteOnlyWhenAsked(t *testing.T) {
 // coverage gate.
 func TestValidateTestsReportsAMissingCommand(t *testing.T) {
 	root := initWorkspace(t)
-	stdout, stderr, code := run(t, "validate", "--root", root, "--tests")
+	stdout, stderr, code := run(t, "validate", "--root", root, "--checks")
 	if code != ExitFindings {
 		t.Fatalf("exit = %d, want %d", code, ExitFindings)
 	}
-	if !strings.Contains(stdout+stderr, "tests.not-configured") {
-		t.Errorf("a missing test command was not reported: %q", stdout+stderr)
+	if !strings.Contains(stdout+stderr, "check.not-configured") {
+		t.Errorf("a gate nobody has decided on was not reported: %q", stdout+stderr)
+	}
+}
+
+// skipGate declines a gate, which is the answer for a language with no formatter
+// or no linter.
+func skipGate(t *testing.T, root, kind string) {
+	t.Helper()
+	if _, stderr, code := run(t, "check", "skip", kind, "--root", root); code != ExitOK {
+		t.Fatalf("check skip %s: exit = %d (stderr: %s)", kind, code, stderr)
+	}
+}
+
+// skipRest declines every gate but one, so a test about that gate is not drowned
+// in findings about the other three.
+func skipRest(t *testing.T, root, keep string) {
+	t.Helper()
+	for _, k := range gate.Kinds() {
+		if string(k) != keep {
+			skipGate(t, root, string(k))
+		}
 	}
 }

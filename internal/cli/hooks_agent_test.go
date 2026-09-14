@@ -206,7 +206,7 @@ func TestSessionStartAsksForTheTestCommand(t *testing.T) {
 		t.Fatalf("exit = %d, want %d — a harness hook never blocks", code, ExitOK)
 	}
 	ctx := additionalContext(t, stdout)
-	if !strings.Contains(ctx, "test set") || !strings.Contains(ctx, "coverage") {
+	if !strings.Contains(ctx, "check set") || !strings.Contains(ctx, "coverage") {
 		t.Errorf("additionalContext does not instruct: %q", ctx)
 	}
 
@@ -226,6 +226,7 @@ func TestSessionStartAsksForTheTestCommand(t *testing.T) {
 // a refusal: a hook that can stop a turn can also loop one.
 func TestStopReportsFindingsWithoutBlocking(t *testing.T) {
 	root := initWorkspace(t)
+	skipRest(t, root, "test")
 	setTest(t, root, echoJSON(10, "99"))
 	if _, stderr, code := run(t, "plan", "new", "broken", "--root", root); code != ExitOK {
 		t.Fatalf("plan new: exit = %d (stderr: %s)", code, stderr)

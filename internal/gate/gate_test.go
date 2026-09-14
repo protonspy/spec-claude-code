@@ -1,4 +1,4 @@
-package testrun
+package gate
 
 import (
 	"io"
@@ -79,14 +79,75 @@ func TestFloorDefaults(t *testing.T) {
 	}
 }
 
-func TestConfigured(t *testing.T) {
+// A gate nobody recorded and a gate somebody declined are different states, and
+// keeping them apart is the whole reason Skipped is a word rather than an absent
+// key: one is "decide this", the other is "already decided, there is none".
+func TestRecordedDeclinedDecided(t *testing.T) {
 	for _, c := range []struct {
-		cmd  string
-		want bool
-	}{{"", false}, {"   ", false}, {"make test", true}} {
-		if got := (Config{Command: c.cmd}).Configured(); got != c.want {
-			t.Errorf("Configured(%q) = %v, want %v", c.cmd, got, c.want)
+		cmd                                string
+		recorded, declined, decided, anyOf bool
+	}{
+		{"", false, false, false, false},
+		{"   ", false, false, false, false},
+		{"make lint", true, false, true, true},
+		{Skipped, false, true, true, true},
+	} {
+		cfg := Config{Commands: map[Kind]string{Lint: c.cmd}}
+		if got := cfg.Recorded(Lint); got != c.recorded {
+			t.Errorf("Recorded(%q) = %v, want %v", c.cmd, got, c.recorded)
 		}
+		if got := cfg.Declined(Lint); got != c.declined {
+			t.Errorf("Declined(%q) = %v, want %v", c.cmd, got, c.declined)
+		}
+		if got := cfg.Decided(Lint); got != c.decided {
+			t.Errorf("Decided(%q) = %v, want %v", c.cmd, got, c.decided)
+		}
+		if got := cfg.Any(); got != c.anyOf {
+			t.Errorf("Any() with lint %q = %v, want %v", c.cmd, got, c.anyOf)
+		}
+	}
+}
+
+// The gates run build-first, then cheapest to dearest. The order is the pipeline,
+// so it is worth pinning: a lint report over a broken build is derived noise, and
+// a suite that runs before a format check spends minutes to learn nothing.
+func TestKindsRunInPipelineOrder(t *testing.T) {
+	want := []Kind{Build, Format, Lint, Test}
+	got := Kinds()
+	if len(got) != len(want) {
+		t.Fatalf("Kinds() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Kinds()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	for _, k := range got {
+		if k.What() == "" {
+			t.Errorf("%s has no line describing it", k)
+		}
+		if _, err := ParseKind(strings.ToUpper(string(k))); err != nil {
+			t.Errorf("ParseKind(%q): %v", k, err)
+		}
+	}
+	if _, err := ParseKind("vibes"); err == nil {
+		t.Error("ParseKind accepted a gate that does not exist")
+	}
+}
+
+// Only the test gate is judged on a report. A compiler that exits 0 has said
+// everything it has to say, and holding it to a coverage floor it never prints
+// would fail every build.
+func TestOnlyTheTestGateIsJudgedOnItsReport(t *testing.T) {
+	res, err := Run(t.TempDir(), Lint, Config{Commands: map[Kind]string{Lint: echoPlain("no issues")}}, io.Discard)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Reported {
+		t.Errorf("result = %+v, want no report parsed for a non-test gate", res)
+	}
+	if !res.Passed() {
+		t.Errorf("result = %+v, want a clean lint run to pass", res)
 	}
 }
 
@@ -97,7 +158,7 @@ func TestConfigured(t *testing.T) {
 func TestRunReadsTheCommandsAnswer(t *testing.T) {
 	root := t.TempDir()
 
-	res, err := Run(root, Config{Command: echo(`{"total": 3, "coverage": 90}`)}, io.Discard)
+	res, err := Run(root, Test, Config{Commands: map[Kind]string{Test: echo(`{"total": 3, "coverage": 90}`)}}, io.Discard)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -109,7 +170,7 @@ func TestRunReadsTheCommandsAnswer(t *testing.T) {
 	}
 
 	// A failing suite is a Result and not an error: it answered the question.
-	res, err = Run(root, Config{Command: fail()}, io.Discard)
+	res, err = Run(root, Test, Config{Commands: map[Kind]string{Test: fail()}}, io.Discard)
 	if err != nil {
 		t.Fatalf("Run on a failing command: %v", err)
 	}
@@ -121,7 +182,7 @@ func TestRunReadsTheCommandsAnswer(t *testing.T) {
 	}
 
 	// So is one that ran fine and printed nothing scc can read.
-	res, err = Run(root, Config{Command: echo("PASS")}, io.Discard)
+	res, err = Run(root, Test, Config{Commands: map[Kind]string{Test: echo("PASS")}}, io.Discard)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -137,7 +198,7 @@ func TestRunReadsTheCommandsAnswer(t *testing.T) {
 // which is stderr everywhere in the product, because stdout carries the document.
 func TestRunWritesTheOutputWhereItIsTold(t *testing.T) {
 	var out strings.Builder
-	if _, err := Run(t.TempDir(), Config{Command: echo("hello from the suite")}, &out); err != nil {
+	if _, err := Run(t.TempDir(), Test, Config{Commands: map[Kind]string{Test: echo("hello from the suite")}}, &out); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !strings.Contains(out.String(), "hello from the suite") {
@@ -148,7 +209,7 @@ func TestRunWritesTheOutputWhereItIsTold(t *testing.T) {
 // A command that cannot even be recorded is an error rather than a silent pass:
 // exiting 0 for a gate that never ran is the one outcome this must not produce.
 func TestRunRefusesAnEmptyCommand(t *testing.T) {
-	if _, err := Run(t.TempDir(), Config{}, io.Discard); err == nil {
+	if _, err := Run(t.TempDir(), Test, Config{}, io.Discard); err == nil {
 		t.Error("Run with no command returned no error")
 	}
 }
@@ -157,16 +218,16 @@ func TestRunRefusesAnEmptyCommand(t *testing.T) {
 // place — most of all the one about zero tests, which is the shape of a suite that
 // was deleted rather than written.
 func TestPassedNeedsEveryClause(t *testing.T) {
-	ok := Result{Reported: true, Report: Report{Total: 10, Coverage: 90}, Floor: 86}
+	ok := Result{Kind: Test, Reported: true, Report: Report{Total: 10, Coverage: 90}, Floor: 86}
 	if !ok.Passed() {
 		t.Fatal("a clean run did not pass")
 	}
 	for name, r := range map[string]Result{
-		"failing suite": {ExitCode: 1, Reported: true, Report: Report{Total: 10, Coverage: 90}, Floor: 86},
-		"timed out":     {TimedOut: true, Reported: true, Report: Report{Total: 10, Coverage: 90}, Floor: 86},
-		"no report":     {Report: Report{Total: 10, Coverage: 90}, Floor: 86},
-		"no tests":      {Reported: true, Report: Report{Total: 0, Coverage: 100}, Floor: 86},
-		"under floor":   {Reported: true, Report: Report{Total: 10, Coverage: 85.9}, Floor: 86},
+		"failing suite": {Kind: Test, ExitCode: 1, Reported: true, Report: Report{Total: 10, Coverage: 90}, Floor: 86},
+		"timed out":     {Kind: Test, TimedOut: true, Reported: true, Report: Report{Total: 10, Coverage: 90}, Floor: 86},
+		"no report":     {Kind: Test, Report: Report{Total: 10, Coverage: 90}, Floor: 86},
+		"no tests":      {Kind: Test, Reported: true, Report: Report{Total: 0, Coverage: 100}, Floor: 86},
+		"under floor":   {Kind: Test, Reported: true, Report: Report{Total: 10, Coverage: 85.9}, Floor: 86},
 	} {
 		if r.Passed() {
 			t.Errorf("%s passed the gate: %+v", name, r)
@@ -174,7 +235,7 @@ func TestPassedNeedsEveryClause(t *testing.T) {
 	}
 	// Exactly at the floor is a pass. 86 percent has to mean "at least 86", or the
 	// number in the documentation is not the number in the code.
-	at := Result{Reported: true, Report: Report{Total: 10, Coverage: 86}, Floor: 86}
+	at := Result{Kind: Test, Reported: true, Report: Report{Total: 10, Coverage: 86}, Floor: 86}
 	if !at.Passed() {
 		t.Error("coverage exactly at the floor did not pass")
 	}
@@ -216,7 +277,7 @@ func fail() string {
 // runs the wrong thing and reports success. The fix is a raw command line on that
 // platform, and this is what holds it in place.
 func TestRunPassesQuotesThroughUnmangled(t *testing.T) {
-	res, err := Run(t.TempDir(), Config{Command: echo(`{"total": 2, "coverage": 99}`)}, io.Discard)
+	res, err := Run(t.TempDir(), Test, Config{Commands: map[Kind]string{Test: echo(`{"total": 2, "coverage": 99}`)}}, io.Discard)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -226,4 +287,37 @@ func TestRunPassesQuotesThroughUnmangled(t *testing.T) {
 	if !res.Reported || res.Total != 2 {
 		t.Errorf("result = %+v, want the report the command printed", res)
 	}
+}
+
+// echoPlain prints one line and exits 0 on either shell.
+func echoPlain(s string) string { return echo(s) }
+
+// A command that writes to both streams has its report read anyway.
+//
+// os/exec copies stdout and stderr on separate goroutines, so the capture buffer
+// is written concurrently. Measured before it was locked: a test command that
+// printed its report to stdout and one line to stderr came back with the report
+// gone, and the gate reported `tests.no-report` on a command that had printed
+// one. This is the regression test, and it is also what the race detector needs
+// in order to have two writers to complain about.
+func TestRunCapturesBothStreams(t *testing.T) {
+	both := twoStreams(`{"total": 120, "coverage": 91.2}`, "running tests...")
+	res, err := Run(t.TempDir(), Test, Config{Commands: map[Kind]string{Test: both}}, io.Discard)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.Reported || res.Total != 120 || res.Coverage != 91.2 {
+		t.Fatalf("result = %+v, want the report parsed out of the interleaved output", res)
+	}
+	if !strings.Contains(res.Tail, "running tests") {
+		t.Errorf("tail = %q, want the stderr line kept too", res.Tail)
+	}
+}
+
+// twoStreams prints one line to stdout and one to stderr, on either shell.
+func twoStreams(out, err string) string {
+	if runtime.GOOS == "windows" {
+		return "echo " + err + " 1>&2 & echo " + out
+	}
+	return "printf '%s\n' '" + err + "' >&2; printf '%s\n' '" + out + "'"
 }

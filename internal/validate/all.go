@@ -32,15 +32,15 @@ func All(opts ...Option) []Validator {
 // There are two, and both are behind it for the same reason: cost. `scc validate`
 // sits on the pre-commit path, where a gate that costs a second per commit is a
 // gate somebody turns off and then none of the others run either. WithPR goes to
-// the network; WithTests runs the project's whole suite. Everything else here
+// the network; WithChecks runs the project's compiler, linter and suite. Everything else here
 // reads files that are already on disk, and the bar for adding a third option is
 // exactly that — a check that is cheap belongs in base(), where nobody has to
 // remember it.
 type Option func(*options)
 
 type options struct {
-	pr    bool
-	tests bool
+	pr     bool
+	checks bool
 }
 
 // WithPR adds the pull-request check: the title and body of the PR open on this
@@ -48,11 +48,12 @@ type options struct {
 // `scc validate --pr`, which are the two moments the pull request exists.
 func WithPR() Option { return func(o *options) { o.pr = true } }
 
-// WithTests adds the delivery gate's numeric half: the project's own test command,
-// run, with its coverage held against the floor. Off by default, on under `scc
-// validate --tests` and in the pre-push hook of a workspace that recorded a
-// command — the moment a branch becomes a pull request.
-func WithTests() Option { return func(o *options) { o.tests = true } }
+// WithChecks adds the delivery gate: the project's own build, format, lint and
+// test commands, run, with the suite's coverage held against the floor. Off by
+// default, on under `scc validate --checks` and in the pre-push hook of a
+// workspace that has decided something — the moment a branch becomes a pull
+// request.
+func WithChecks() Option { return func(o *options) { o.checks = true } }
 
 func extra(opts []Option) []Validator {
 	var o options
@@ -60,10 +61,10 @@ func extra(opts []Option) []Validator {
 		fn(&o)
 	}
 	var out []Validator
-	// Tests before pr: it is the slow one, and a run that is going to fail on
-	// coverage should say so before it spends a network round trip on the forge.
-	if o.tests {
-		out = append(out, Validator{Name: "tests", Run: Tests})
+	// Checks before pr: they are the slow ones, and a run that is going to fail on
+	// a broken build should say so before it spends a network round trip on the forge.
+	if o.checks {
+		out = append(out, Validator{Name: "checks", Run: Checks})
 	}
 	if o.pr {
 		out = append(out, Validator{Name: "pr", Run: AttributionPR})

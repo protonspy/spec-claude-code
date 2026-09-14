@@ -80,8 +80,8 @@ func Run(args []string) int {
 		return runSkill(args[1:])
 	case "validate":
 		return runValidateAll(args[1:])
-	case "test":
-		return runTest(args[1:])
+	case "check":
+		return runCheck(args[1:])
 	case "hooks":
 		return runHooks(args[1:])
 	default:
@@ -130,7 +130,7 @@ Commands:
   notes     The project's note log in docs/notes.md — add | find | show | tags | paths | rm
   skill     Agent Skills conformance — validate
   validate  Run every applicable validator; exit 2 on findings
-  test      The suite as a number the delivery gate checks — run | set | show | clear
+  check     The delivery gate — build, format, lint, test: run | set | skip | show
   hooks     Git hooks that run the validators — install | check | remove
   version   Print the version
   help      Show this help

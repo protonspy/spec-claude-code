@@ -32,9 +32,9 @@ Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc i
 | `spec new\|list\|show\|delete\|validate` | The three-artifact vehicle for work whose *what* and *how* need settling first. |
 | `plan new\|list\|delete\|validate` | One file, for everything else: a checklist, a decomposition into specs, or both. |
 | `skill validate` | Conformance to the published [Agent Skills](https://agentskills.io/specification) spec. |
-| `validate` | Every applicable validator, one exit code, one JSON document. `--pr` also reads the pull request open on this branch; `--tests` also runs this project's suite. |
-| `test\|test set\|test show` | The suite as a number: run the command this project recorded, read `{"total": N, "coverage": P}` back out of it, and hold the coverage against a floor. |
-| `hooks install\|check\|remove` | Hooks that run the validators without anybody remembering to — git's (`scc validate` before a commit, the message checked as it is written, `scc validate --pr --tests` before a push) and the harness's own (findings and undelivered work handed back to the agent at the end of a turn). `init` writes both; anything scc did not write is left alone. |
+| `validate` | Every applicable validator, one exit code, one JSON document. `--pr` also reads the pull request open on this branch; `--checks` also runs this project's build, format, lint and test commands. |
+| `check\|check set\|check skip` | The delivery gate: this project's own build, format, lint and test commands, run in that order and judged. A gate the project does not have is skipped once and then stays quiet. |
+| `hooks install\|check\|remove` | Hooks that run the validators without anybody remembering to — git's (`scc validate` before a commit, the message checked as it is written, `scc validate --pr --checks` before a push) and the harness's own (findings and undelivered work handed back to the agent at the end of a turn). `init` writes both; anything scc did not write is left alone. |
 | `rtk` | Wires in [RTK](https://github.com/rtk-ai/rtk) after the fact: installs it if missing, then splices its usage block into the entry file. |
 | `launch` | Starts the harness with the workspace's symbol graph and RTK block current — and, with `--jail`, inside a sandbox. |
 
@@ -46,8 +46,8 @@ wires both places a check can run without anybody remembering it:
 
 | | Where | What it does |
 |---|---|---|
-| **git** | `.git/hooks` | `pre-commit` runs `scc validate`, `commit-msg` reads the message being written, `pre-push` runs `scc validate --pr --tests`. These **refuse** — a commit is a decision with a natural place to stand in front of. |
-| **harness** | `.claude/settings.json` | `SessionStart` says once that no test command is recorded; `Stop` hands `scc validate` findings and undelivered work back to the agent at the end of a turn — the moment they are cheapest to fix. |
+| **git** | `.git/hooks` | `pre-commit` runs `scc validate`, `commit-msg` reads the message being written, `pre-push` runs `scc validate --pr --checks`. These **refuse** — a commit is a decision with a natural place to stand in front of. |
+| **harness** | `.claude/settings.json` | `SessionStart` says once that this workspace has recorded no commands; `Stop` hands `scc validate` findings and undelivered work back to the agent at the end of a turn — the moment they are cheapest to fix. |
 
 The harness hooks **report and never refuse**: a hook that can stop a turn can also
 loop one. They **never push and never open a PR** either — the Stop hook says the
@@ -61,35 +61,44 @@ today; Codex and opencode have no mechanism that would read one. scc splices int
 `settings.json` beside whatever else is there, never rewrites a file it cannot
 parse, and `scc hooks remove` takes back exactly its own entries.
 
-### The tests, as a number
+### The delivery gate — build, format, lint, test
 
 "Full suite + lint" was the one step in the delivery sequence nothing could check. A
-rule can ask for a green suite and for tests that mean something; under
-`autonomy: auto` nobody reads the answer. So the project records one command, that
-command prints one object, and scc does arithmetic:
+rule can ask for a green build, a clean linter and tests that mean something; under
+`autonomy: auto` nobody reads the answer. So the project records one command per
+gate, and scc runs them:
 
 ```bash
-npx @protonspy/scc test set "make test-report"   # once, in the repo's own idiom
-npx @protonspy/scc test                          # {"total": 412, "coverage": 88.4}
-npx @protonspy/scc validate --tests              # the gate; exit 2 under the floor
+npx @protonspy/scc check set build "go build ./..."   # once, in the repo's own idiom
+npx @protonspy/scc check set test  "make test-report"
+npx @protonspy/scc check skip format                 # this language has no formatter
+npx @protonspy/scc check                            # build, format, lint, test — in order
+npx @protonspy/scc validate --checks                # the gate; exit 2 on findings
 ```
 
-The command has to print `{"total": N, "coverage": P}` somewhere in its output and
-keep the suite's exit status. Anything can produce it — `go test` piped through a
-script, `jest --coverage --json`, `pytest --cov` — because scc never learns how your
-project tests itself. That is what keeps the check deterministic: it is a comparison,
-not a judgment. `Makefile`'s own `test-report` target is the worked example.
+Each gate is judged by its exit status, and they run **build → format → lint → test**,
+stopping at the first failure: a lint report over a broken build is derived noise.
+scc never learns how your project builds or tests itself, which is what keeps the
+check deterministic — it is a comparison, not a judgment.
 
-`total` is there because coverage alone can be true of a suite that does not exist:
-zero tests at 100% is a finding, not a pass. **The floor is 86%** unless the workspace
-records another (`--min`), and the command lives in `<harness>/scc-manifest.json` — no
-second config file.
+**A gate your language does not have is skipped once**, and then it is silent
+forever. That is a decision, recorded like one; a gate left *unrecorded* is a
+decision nobody has made, and it is reported until somebody makes it. The two states
+have to stay apart, or the gate either nags every project without a linter or goes
+quiet about every project that forgot one.
 
-It runs where it is worth its cost. A bare `scc validate` never touches your suite; the
-`pre-push` hook does, which is where a branch becomes a pull request. Writing the
-command is the agent's job — `/scc-init` derives it from the project's language, and
-both "no command" and "the command printed no report" are findings that say what to
-record rather than only what is wrong.
+The **test** gate asks for one thing more — `{"total": N, "coverage": P}` anywhere in
+its output, with the suite's exit status preserved. Anything can produce it: `go test`
+piped through a script, `jest --coverage --json`, `pytest --cov`. `Makefile`'s own
+`test-report` target is the worked example. `total` is there because coverage alone
+can be true of a suite that does not exist: zero tests at 100% is a finding, not a
+pass. **The floor is 86%** unless the workspace records another (`--min`).
+
+The commands live in `<harness>/scc-manifest.json` — no second config file. They run
+where they are worth their cost: a bare `scc validate` never touches them; the
+`pre-push` hook does, which is where a branch becomes a pull request. Writing them is
+the agent's job — `/scc-init` derives them from the project's language, and every
+"no command recorded" finding says what to record *and* how to decline it.
 
 ### RTK, from `init` onward
 
@@ -175,7 +184,7 @@ one-source-of-truth, skill conformance, wiki link/orphan graph, ADR numbering an
 superseding, glossary vocabulary drift, dependencies missing from `docs/stack.md`,
 codewiki citations that no longer resolve, and an assistant's signature in the commits
 this branch added. On request: the pull request's own title and body (`--pr`), and the
-test report against its coverage floor (`--tests`).
+build, format, lint and test gates, with the suite held to its coverage floor (`--checks`).
 
 What deliberately is **not** checked: your source code. scc never parses it, so it
 cannot tell you the code honors what the artifact says — that stays the orchestrator's

@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/protonspy/spec-claude-code/internal/finding"
+	"github.com/protonspy/spec-claude-code/internal/gate"
 	"github.com/protonspy/spec-claude-code/internal/git"
 	"github.com/protonspy/spec-claude-code/internal/hooks"
-	"github.com/protonspy/spec-claude-code/internal/testrun"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
 
@@ -98,23 +98,25 @@ func emitHook(stage hooks.Stage, lines []string) int {
 // sessionStartContext is what a workspace says about itself before any work is
 // done on it.
 //
-// One thing, and only when it is true: there is no working test command. That is
-// the gap the agent is the only one who can close — it depends on this project's
-// runner and coverage tool, scc cannot derive it, and the moment to say so is
-// before the session picks up a task rather than at the push that fails.
+// One thing, and only when it is true: this workspace has decided nothing about
+// its own commands. That is the gap the agent is the only one who can close — the
+// commands depend on this project's toolchain, scc cannot derive them, and the
+// moment to say so is before the session picks up a task rather than at the push
+// that fails.
 func sessionStartContext(root string) []string {
 	if !workspace.IsWorkspace(root) {
 		return nil
 	}
-	cfg, err := testrun.Load(root)
-	if err != nil || cfg.Configured() {
+	cfg, err := gate.Load(root)
+	if err != nil || cfg.Any() {
 		return nil
 	}
 	return []string{
-		"scc: this workspace records no test command, so the delivery gate has no number to check.",
-		fmt.Sprintf("Record one with `%s test set \"<command>\"`, built from this project's own test", prog()),
-		`runner and coverage tool. It has to print {"total": N, "coverage": P} on stdout and keep`,
-		fmt.Sprintf("the suite's exit status. `%s test help` has the rest.", prog()),
+		"scc: this workspace records no build, format, lint or test command, so the delivery gate has nothing to run.",
+		fmt.Sprintf("Record them with `%s check set <gate> \"<command>\"`, built from this project's own toolchain;", prog()),
+		fmt.Sprintf("`%s check skip <gate>` is the answer for a step this project genuinely does not have.", prog()),
+		`The test gate has to print {"total": N, "coverage": P} on stdout and keep the suite's exit status.`,
+		fmt.Sprintf("`%s check help` has the rest.", prog()),
 	}
 }
 

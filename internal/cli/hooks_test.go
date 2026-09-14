@@ -224,6 +224,7 @@ func TestHooksInstallRefusesOutsideARepository(t *testing.T) {
 // uninstalls takes the other ten validators with it.
 func TestPrePushRunsTheSuiteAndPreCommitDoesNot(t *testing.T) {
 	root := gitWorkspace(t)
+	skipRest(t, root, "test")
 	marker := filepath.Join(root, "ran.txt")
 	setTest(t, root, "echo ran > "+filepath.ToSlash(marker))
 

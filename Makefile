@@ -44,8 +44,8 @@ build: ## Build the binary locally (-> ./scc); set VERSION to stamp it
 test: ## Run tests (race + coverage)
 	go test -race -coverprofile=coverage.out ./...
 
-# test-report is the shape `scc test` asks a project for: run the suite, then print
-# one object saying how many tests ran and how much of the code they covered.
+# test-report is the shape `scc check` asks a project for in its test gate: run the
+# suite, then print one object saying how many tests ran and how much they covered.
 #
 # It is here because scc ships that contract and a contract with no worked example
 # is one everybody implements differently. Nothing in scc runs this target — a
@@ -56,7 +56,7 @@ test: ## Run tests (race + coverage)
 # else; the exit status is the suite's, because a runner that swallows a failure
 # hides the thing the gate exists to catch.
 .PHONY: test-report
-test-report: ## Run the suite and print {"total": N, "coverage": P} for `scc test`
+test-report: ## Run the suite and print {"total": N, "coverage": P} for `scc check`
 	@set -o pipefail; \
 	go test -json -coverprofile=coverage.out ./... > .test.json 2>&1; status=$$?; \
 	total=$$(grep -c '"Action":"pass".*"Test":"' .test.json || true); \

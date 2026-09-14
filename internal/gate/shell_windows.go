@@ -1,6 +1,6 @@
 //go:build windows
 
-package testrun
+package gate
 
 import (
 	"context"

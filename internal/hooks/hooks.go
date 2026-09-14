@@ -109,7 +109,7 @@ func (s Stage) Why() string {
 	case CommitMsg:
 		return "checks the message being written for an assistant's signature"
 	case PrePush:
-		return "runs `" + Prog + " validate --pr --tests` before the branch is pushed"
+		return "runs `" + Prog + " validate --pr --checks` before the branch is pushed"
 	case StageSessionStart:
 		return SessionStart.Why()
 	case StageStop:

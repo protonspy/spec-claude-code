@@ -9,9 +9,9 @@ import (
 
 	"github.com/protonspy/spec-claude-code/internal/attribution"
 	"github.com/protonspy/spec-claude-code/internal/finding"
+	"github.com/protonspy/spec-claude-code/internal/gate"
 	"github.com/protonspy/spec-claude-code/internal/hooks"
 	"github.com/protonspy/spec-claude-code/internal/render"
-	"github.com/protonspy/spec-claude-code/internal/testrun"
 	"github.com/protonspy/spec-claude-code/internal/validate"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
@@ -379,8 +379,8 @@ func gateFindings(root string, pr bool) (*finding.Set, error) {
 			// gate was asked for by name; here it is a default, and a default that
 			// blocked work over configuration nobody chose would be scc deciding how
 			// somebody else's project is tested.
-			if cfg, err := testrun.Load(root); err == nil && cfg.Configured() {
-				opts = append(opts, validate.WithTests())
+			if cfg, err := gate.Load(root); err == nil && cfg.Any() {
+				opts = append(opts, validate.WithChecks())
 			}
 		}
 		set, _, err := validate.Everything(root, opts...)
