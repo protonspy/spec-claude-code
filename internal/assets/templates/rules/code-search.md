@@ -4,13 +4,20 @@ This workspace keeps a symbol graph of its own code, in `.codegraph/`, rebuilt
 whenever `scc launch` starts an agent. It exists so a structural question costs one
 call instead of a grep and six reads.
 
-Reach for it **first**, when the question is about structure:
+**Grep and the graph answer different questions, and each is bad at the other's.**
+Sort by what you are actually asking:
 
-| The question | Ask |
-|---|---|
-| Where does this behavior live, and what calls what? | `codegraph_explore`, or `scc graph explore "<question>"` |
-| What breaks if I change this symbol? | `scc graph impact <symbol>` |
-| Who calls this / what does it call? | `scc graph query <name>`, `callers`, `callees` |
+| You are asking | Use | Because |
+|---|---|---|
+| Where is this exact text — a string, a flag, an error message, an import? | grep | The graph indexes symbols, not text. Grep is exact, instant, and never stale. |
+| Who calls this? What does it call? | `scc graph query <name>`, `callers`, `callees` | Grep finds the name; only the graph knows which occurrences are calls. |
+| What breaks if I change this? | `scc graph impact <symbol>` | Grep cannot answer this at all. Reading files to answer it costs a dozen reads and still misses one. |
+| Where does this *concept* live? | `scc graph explore "<question>"` | The concept has no single spelling to grep for. |
+
+The tell is whether your question names a **string** or a **relationship**. A string
+is grep's, and reaching for the graph there is the long way round. A relationship is
+the graph's, and grepping for it is how a session ends up reading fifteen files to
+answer what one call would have.
 
 Read files directly when the question is about *this exact text* — a line you are
 editing, a diff you are reviewing, a file you have just written. The graph is a map;
@@ -28,19 +35,19 @@ of it is in the graph: not the glossary, not the wiki, not an ADR, not a `design
 Plans and specs are not in it either, and they have their own index — see
 [artifacts.md](artifacts.md), which is the same rule for the other corpus.
 
-That matters more here than it would elsewhere, because this project deliberately
-keeps the *why* out of the code. A question the graph answers well — "where is this
-implemented" — is a different question from the one the knowledge base answers —
-"why is it like this, and what was ruled out". Asking the graph the second kind gets
-you a confident answer about the wrong thing. See [knowledge-base.md](knowledge-base.md)
-for where that half lives.
+That matters here because this project keeps the *why* out of the code. "Where is
+this implemented" is the graph's question; "why is it like this, and what was ruled
+out" is the knowledge base's, and asking the graph the second kind gets a confident
+answer about the wrong thing — see [knowledge-base.md](knowledge-base.md).
 
 ## When it is not there
 
-A missing or stale graph is never a reason to stop. `scc launch` builds it on a best
-effort and starts the agent either way, so a session may legitimately have none —
-CodeGraph is not installed, the index failed, or someone passed `--no-graph`.
+A missing graph is never a reason to stop: `scc launch` builds it on a best effort and
+starts the agent either way, so a session may legitimately have none. Fall back to
+ordinary reading and say nothing about it. If a query contradicts the file in front of
+you, the file wins and the index is stale.
 
-Fall back to ordinary reading and say nothing about it. If a graph query returns
-something that contradicts the file in front of you, the file wins and the index is
-stale: `scc graph sync`.
+**Staleness is the one failure worth a reflex**: a stale graph answers confidently
+about code that changed, which is worse than no graph. scc syncs at the top of a
+session and before a push, so you start and finish current — in between, run
+`scc graph sync` after writing code you are then going to search.

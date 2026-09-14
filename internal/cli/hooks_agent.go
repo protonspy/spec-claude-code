@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/gate"
 	"github.com/protonspy/spec-claude-code/internal/git"
@@ -43,6 +44,11 @@ func runAgentStage(root string, stage hooks.Stage, in io.Reader) int {
 	// the harness is entitled to a reader that consumes its input rather than one
 	// that leaves a pipe half-full.
 	_, _ = io.Copy(io.Discard, in)
+
+	// Both stages, before anything else: the graph is brought current at the two
+	// moments that bookend a task. See syncGraph — it is silent, and it is the one
+	// thing here that changes the workspace rather than reporting on it.
+	syncGraph(root)
 
 	var lines []string
 	switch stage {
@@ -200,4 +206,52 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return s
+}
+
+// syncGraph brings every scoped graph up to date, silently.
+//
+// This is the deterministic half of the staleness problem, and it is deliberately
+// not a rule. A stale graph answers confidently about code that changed, which is
+// worse than no graph — and "remember to sync" is exactly the kind of instruction
+// this product exists to stop relying on. So it runs where scc controls the
+// moment rather than where the agent has to remember: at the top of a session,
+// and at the end of every turn that just wrote code.
+//
+// The two moments are the bookends of a task. SessionStart covers the session
+// that did not come through `scc launch` — the one `scc launch` was already
+// handling, and the gap it left. Stop covers the rest: the agent has just edited
+// the tree, and the next turn is exactly when a query about what it wrote would
+// otherwise be answered from an index taken before the edit.
+//
+// **Silent on every outcome.** There is no binary, there is no graph, CodeGraph
+// failed — all of them end in a session that carries on, and a line about
+// plumbing at the end of every turn is context the agent pays for and cannot act
+// on. What a stale or missing graph costs is already in the rule; what this does
+// is make it rare.
+func syncGraph(root string) {
+	if !workspace.IsWorkspace(root) {
+		return
+	}
+	bin, ok := codegraph.Path()
+	if !ok {
+		return
+	}
+	scope, err := scopeOf(root)
+	if err != nil {
+		return
+	}
+	roots, _ := codegraph.Roots(root, scope)
+	for _, r := range roots {
+		// Only a tree that already has a graph. Building one from a hook would turn
+		// the end of a turn into the first full index of a large repository, which
+		// is a minute nobody asked for — `scc launch` and `scc graph build` are
+		// where that decision is made deliberately.
+		if !r.Indexed() {
+			continue
+		}
+		// Output discarded rather than forwarded: stdout belongs to the hook's own
+		// JSON document, and CodeGraph's progress bars are not an event the agent
+		// needs. A failure is a stale graph, which the rule already covers.
+		_, _ = codegraph.Run(bin, r.Dir, codegraph.SyncArgs(), io.Discard, io.Discard)
+	}
 }

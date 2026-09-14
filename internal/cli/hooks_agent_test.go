@@ -293,3 +293,42 @@ func additionalContext(t *testing.T, stdout string) string {
 	}
 	return doc.Specific.AdditionalContext
 }
+
+// Both hook stages sync the symbol graph. That is the deterministic half of the
+// staleness problem: a stale graph answers confidently about code that changed,
+// and "remember to sync" is the kind of instruction this product exists to stop
+// relying on. The two moments bookend a task — the top of a session, and the end
+// of every turn that just wrote code.
+func TestBothStagesSyncTheGraph(t *testing.T) {
+	root := initWorkspace(t)
+	for _, stage := range []string{"session-start", "stop"} {
+		// No CodeGraph on PATH and no graph on disk: the sync is a no-op and the
+		// stage still answers. Degrading silently is the contract — a line about
+		// plumbing at the end of every turn is context the agent cannot act on.
+		isolatedPath(t)
+		if _, stderr, code := run(t, "hooks", "run", stage, "--root", root); code != ExitOK {
+			t.Errorf("%s: exit = %d, want %d without CodeGraph (stderr: %s)", stage, code, ExitOK, stderr)
+		}
+	}
+}
+
+// The harness is told how long to wait, and both stages now run a subprocess
+// rather than reading two files. A timeout shorter than the work is a hook the
+// harness kills halfway.
+func TestHookTimeoutsLeaveRoomForTheSync(t *testing.T) {
+	root := initWorkspace(t)
+	events := hookEvents(t, root)
+	for _, e := range hooks.Events() {
+		entries, _ := events[string(e)].([]any)
+		if len(entries) != 1 {
+			t.Fatalf("%s: entries = %+v", e, entries)
+		}
+		entry, _ := entries[0].(map[string]any)
+		inner, _ := entry["hooks"].([]any)
+		first, _ := inner[0].(map[string]any)
+		timeout, _ := first["timeout"].(float64)
+		if int(timeout) != e.Timeout() || timeout < 60 {
+			t.Errorf("%s timeout = %v, want %d and room for a subprocess", e, timeout, e.Timeout())
+		}
+	}
+}
