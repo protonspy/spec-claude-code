@@ -194,7 +194,23 @@ import (
 // call paths between the relevant symbols, which is what `impact` was promising — and
 // name lookups to `query`, with the flags it actually takes. Four rows before and
 // four after, so the budget is untouched.
-const Version = "26"
+// 27: ladder.md — a rule for how much code a task gets. Fourteen rules governed which
+// vehicle carries the work, how a task is tested, what a finished one owes and what
+// gets written down afterwards; none governed the size of the thing being built.
+// caveman.md is the nearest neighbour and it says so itself — it is the register the
+// answer is written in, not the code. So the ladder: reuse before stdlib before the
+// platform before a dependency this project already carries, and two of those rungs
+// are a command here rather than a discipline, because `scc graph explore` and
+// `docs/stack.md` are already the recorded answer.
+//
+// Two boundaries are the reason it is safe to ship on by default. The carve-outs —
+// trust-boundary validation, data-loss error handling, security, accessibility — are
+// the half that separates lazy from careless, and nothing in the set had them. And
+// the requirement is not a rung: a spec decides whether a thing exists, so building
+// less than R1.2 says is the one failure this rule could cause, and it ships looking
+// like a clean diff. A deliberate ceiling is a note with a tag rather than a comment,
+// which notes.md had already argued for everything except this case.
+const Version = "27"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -263,6 +279,7 @@ func Workspace(h paths.Harness) []File {
 		"autonomy.md",
 		"prior-art.md",
 		"methodology.md",
+		"ladder.md",
 		"tasks.md",
 		"verification.md",
 		"delivery.md",
