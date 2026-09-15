@@ -309,3 +309,81 @@ func TestInitSeedsTheDevContainer(t *testing.T) {
 		t.Error("a second init overwrote the project's own Dockerfile")
 	}
 }
+
+// The two seeded files describe one container between them, and the one thing
+// neither can state alone is the user. devcontainer.json names it as remoteUser
+// and mounts the agent's credentials into that home; the Dockerfile drops to it
+// to install the npm half of the toolchain — and a base image that does not
+// create it fails the build on the first of those layers, which is how
+// `FROM devcontainers/base:ubuntu` (user `vscode`, and no npm at all) shipped
+// under a config that said `node` everywhere.
+//
+// No Docker here: this is the agreement between the two files, which is what
+// actually drifted, and it is worth catching in a test that runs in
+// milliseconds rather than in a build that takes ten minutes.
+func TestTheSeededContainerAgreesOnOneUser(t *testing.T) {
+	root := initWorkspace(t)
+	read := func(name string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(root, paths.DevcontainerSeg, name))
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", name, err)
+		}
+		return string(b)
+	}
+	docker, cfg := read("Dockerfile"), read("devcontainer.json")
+
+	var conf struct {
+		RemoteUser string   `json:"remoteUser"`
+		Mounts     []string `json:"mounts"`
+	}
+	if err := json.Unmarshal([]byte(stripJSONComments(cfg)), &conf); err != nil {
+		t.Fatalf("the seeded devcontainer.json does not parse: %v", err)
+	}
+	if conf.RemoteUser == "" {
+		t.Fatal("the seeded devcontainer.json names no remoteUser")
+	}
+	home := "/home/" + conf.RemoteUser + "/"
+	for _, m := range conf.Mounts {
+		if i := strings.Index(m, "target=/home/"); i >= 0 && !strings.Contains(m[i:], "target="+home) {
+			t.Errorf("mount targets a home other than remoteUser %q: %s", conf.RemoteUser, m)
+		}
+	}
+	for _, line := range strings.Split(docker, "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 3 && f[0] == "RUN" && f[1] == "su" && f[2] != conf.RemoteUser {
+			t.Errorf("the Dockerfile installs as %q but remoteUser is %q: %s", f[2], conf.RemoteUser, line)
+		}
+	}
+
+	// And the base has to be able to run what the file runs as that user. Three
+	// of the four agent tools ship on npm, and a devcontainer *feature* cannot
+	// supply node here — features are layered on after this Dockerfile has
+	// already run — so the image itself must carry it.
+	if !strings.Contains(docker, "npm install") {
+		t.Fatal("the seeded Dockerfile no longer installs the npm half of the toolchain")
+	}
+	var from string
+	for _, line := range strings.Split(docker, "\n") {
+		if f := strings.Fields(line); len(f) >= 2 && f[0] == "FROM" {
+			from = f[1]
+			break
+		}
+	}
+	if !strings.Contains(from, "node") {
+		t.Errorf("the base image %q carries no node, but the Dockerfile runs npm install", from)
+	}
+}
+
+// stripJSONComments drops the // comments devcontainer.json is allowed to carry,
+// so encoding/json can read a file whose whole explanation lives in them.
+func stripJSONComments(s string) string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "//") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
