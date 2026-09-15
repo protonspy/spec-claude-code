@@ -34,7 +34,7 @@ Installed globally (`npm i -g @protonspy/scc`) the same commands are just `scc i
 | `skill validate` | Conformance to the published [Agent Skills](https://agentskills.io/specification) spec. |
 | `validate` | Every applicable validator, one exit code, one JSON document. `--pr` also reads the pull request open on this branch; `--checks` also runs this project's build, format, lint and test commands. |
 | `check\|check set\|check skip` | The delivery gate: this project's own build, format, lint and test commands, run in that order and judged. A gate the project does not have is skipped once and then stays quiet. |
-| `hooks install\|check\|remove` | Hooks that run the validators without anybody remembering to — git's (`scc validate` before a commit, the message checked as it is written, `scc validate --pr --checks` before a push) and the harness's own (findings and undelivered work handed back to the agent at the end of a turn). `init` writes both; anything scc did not write is left alone. |
+| `hooks install\|check\|remove` | Hooks that run the validators without anybody remembering to — git's (`scc validate` before a commit, the message checked as it is written, `scc validate --pr --checks` before a push) and the harness's own (findings, drift and undelivered work handed back to the agent, and a prompt that names an artifact routed through the map). `init` writes both; anything scc did not write is left alone. |
 | `rtk` | Wires in [RTK](https://github.com/rtk-ai/rtk) after the fact: installs it if missing, then splices its usage block into the entry file. |
 | `graph build\|sync\|query\|explore\|scope` | The workspace's symbol graph, via [CodeGraph](https://github.com/colbymchenry/codegraph). `scope` narrows it to certain trees — one graph per directory, since CodeGraph indexes a single root at a time. |
 | `launch` | Starts the harness with the workspace's symbol graph and RTK block current, **inside a sandbox by default** — ai-jail on Linux/macOS, a dev container on Windows. |
@@ -48,7 +48,7 @@ wires both places a check can run without anybody remembering it:
 | | Where | What it does |
 |---|---|---|
 | **git** | `.git/hooks` | `pre-commit` runs `scc validate`, `commit-msg` reads the message being written, `pre-push` runs `scc validate --pr --checks`. These **refuse** — a commit is a decision with a natural place to stand in front of. |
-| **harness** | `.claude/settings.json` | `SessionStart` says once that this workspace has recorded no commands; `Stop` hands `scc validate` findings and undelivered work back to the agent at the end of a turn — the moment they are cheapest to fix. |
+| **harness** | `.claude/settings.json` | `SessionStart` says once that this workspace has recorded no commands; `UserPromptSubmit` says how to read an artifact the prompt named, and nothing otherwise; `Stop` hands back `scc validate` findings, methodology drift and undelivered work at the end of a turn — the moment they are cheapest to fix. |
 
 The harness hooks **report and never refuse**: a hook that can stop a turn can also
 loop one. They **never push and never open a PR** either — the Stop hook says the
@@ -56,9 +56,16 @@ branch has commits that never left the machine, and the agent pushes in its next
 turn, in the open, where you can still stop it. Publishing on an event nobody is
 watching is not a thing scc does on your behalf.
 
+**Drift is the half no validator can reach**, because none of them reads source: code
+changed on this branch with no box ticked, a `TODO` left behind, commits sitting on the
+base branch. Each is a line only when it is true, measured against the branch rather
+than a session snapshot, so nothing is remembered between turns.
+
 They cost nothing a turn cannot afford: no network, no test suite, and silence when
-there is nothing to say. Only a harness with a hook surface gets them — Claude Code
-today; Codex and opencode have no mechanism that would read one. scc splices into
+there is nothing to say — a clean branch draws no line at all, and `UserPromptSubmit`
+runs no subprocess, because it sits between your keystroke and the agent starting.
+Only a harness with a hook surface gets them — Claude Code today;
+Codex and opencode have no mechanism that would read one. scc splices into
 `settings.json` beside whatever else is there, never rewrites a file it cannot
 parse, and `scc hooks remove` takes back exactly its own entries.
 
