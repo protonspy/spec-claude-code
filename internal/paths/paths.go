@@ -109,6 +109,37 @@ type Harness struct {
 	// Verifiable per harness: `/context` in Claude Code lists what loaded.
 	PreloadsRules bool
 
+	// SubagentsInheritRules is the same question one level down: does a subagent
+	// this harness spawns arrive with the methodology already in context, or does
+	// it start without the rules the session it was spawned from is following?
+	//
+	// It is recorded because the answer decides whether scc needs a stage it does
+	// not currently have. A harness that drops the rules at the subagent boundary
+	// has a hole nothing else can cover — the subagent writes code under none of
+	// the methodology, and the main session, which has the rules, only ever sees
+	// the result. ponytail assumes exactly that and re-injects its skill on every
+	// subagent start. scc does not, and this field is why: for Claude Code the
+	// answer is yes, so the stage would re-send ~26KB the agent already has.
+	//
+	// Claude Code, from its own documentation on what loads at subagent startup: a
+	// non-fork subagent's initial context carries every level of the CLAUDE.md
+	// hierarchy the main conversation loads, project rules included. The built-in
+	// Explore and Plan agents are the documented exception and skip it — and they
+	// are read-only search and planning agents whose results come back to a main
+	// conversation that does have the rules, which is the documentation's own
+	// argument for why most rules need not reach the subagent itself.
+	//
+	// For Codex and opencode this is false and says less than it looks like it
+	// does: nothing preloads RulesSeg there in the first place, so a subagent is
+	// not missing something the main session had. The entry file's instruction to
+	// read a rule when its concern is live is what covers both, and neither
+	// harness has a SettingsSeg to register a stage in even if it did not.
+	//
+	// TestNoHarnessNeedsASubagentStage is what turns this from a note into a gate:
+	// a harness that has a hook surface and does not deliver the rules to its
+	// subagents fails the build, naming the stage that would have to be built.
+	SubagentsInheritRules bool
+
 	// SettingsSeg is the file under Dir where this harness reads its own hooks —
 	// the ones that fire inside a session rather than inside git — or "" when it
 	// has no such surface.
@@ -163,6 +194,9 @@ var (
 		SkillsSeg: "skills", CommandsSeg: "commands", RulesSeg: "rules",
 		SettingsSeg:   "settings.json",
 		PreloadsRules: true,
+		// Yes, and documented as such: a non-fork subagent inherits the whole
+		// CLAUDE.md hierarchy, project rules included.
+		SubagentsInheritRules: true,
 	}
 	Codex = Harness{
 		ID: "codex", Label: "Codex", Bin: "codex", Dir: CodexDir, EntryFile: "AGENTS.md",
