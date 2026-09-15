@@ -184,7 +184,17 @@ import (
 // derives the command from the language the survey just identified. The finding says
 // what to do rather than only what is wrong — it is the one finding in the product
 // whose fix is a command line rather than an edit to the file it points at.
-const Version = "25"
+// 26: code-search.md — the table named three commands that do not exist. `scc graph`
+// dispatches build | sync | status | query | scope | explore, and the rule sent the
+// agent to `impact`, `callers` and `callees`, every one of which fails on first use.
+// That is exactly the failure the CodeGraph usage block is withheld until launch to
+// avoid: guidance naming a command the machine cannot run costs the file its
+// credibility, and an agent that has watched one line fail discounts the rest of it.
+// Relationship questions route to `explore`, the one command that answers them — the
+// call paths between the relevant symbols, which is what `impact` was promising — and
+// name lookups to `query`, with the flags it actually takes. Four rows before and
+// four after, so the budget is untouched.
+const Version = "26"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
