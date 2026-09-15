@@ -21,6 +21,7 @@
 package git
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -495,12 +496,18 @@ type Change struct {
 
 // diffLimits bound what a caller running at the end of every turn may pay.
 //
-// The cap is not tuned, it is a ceiling: a branch that has touched two thousand
-// files is a branch where a per-file report has already stopped being readable,
-// and the honest failure is to stop counting rather than to spend a second of
+// The caps are not tuned, they are ceilings: a branch that has touched two
+// thousand files is a branch where a per-file report has already stopped being
+// readable, and the honest failure is to stop counting rather than to spend a
+// second of every turn proving it.
+//
+// maxUntrackedBytes is the one that bounds a file nobody chose. A tracked binary
+// never reaches the reader — git says "Binary files … differ" and emits no hunk —
+// but an untracked, un-ignored blob is whatever the working tree happens to hold.
 const (
-	maxChangedFiles = 400
-	maxAddedLines   = 4000
+	maxChangedFiles   = 400
+	maxAddedLines     = 4000
+	maxUntrackedBytes = 1 << 20 // 1 MiB
 )
 
 // Changed is what this branch has done to the tree, compared against base.
@@ -537,7 +544,24 @@ func Changed(dir, base string) ([]Change, error) {
 	// -U0 so only the changed lines come back: context lines are unchanged text,
 	// and a caller scanning for what this branch introduced must not be handed
 	// three lines of somebody else's file on either side of every hunk.
+	//
+	// The prefixes are pinned because they are *configuration*, and this parser
+	// reads them. `diff.mnemonicPrefix` makes a working-tree diff say `+++ w/…`
+	// and `diff.noprefix` makes it say `+++ …`; under either one, nothing matches
+	// `+++ b/`, every file header is missed, and Changed returns nothing at all —
+	// silently, forever, for anybody who has that in their ~/.gitconfig. A drift
+	// stage that is invisibly inert is worse than one that is absent.
+	//
+	// --relative is the other half of the same idea. Without it `git diff` reports
+	// paths from the repository root while `git ls-files --others` reports them
+	// from the working directory, so one slice would carry two different bases.
+	// Everything downstream classifies paths against `plans/`, `specs/` and
+	// `docs/` *relative to the workspace* — which is dir, which is the working
+	// directory here — so cwd-relative is the base that answers the question, and
+	// a workspace sitting in a subdirectory of a larger repository stops
+	// misreading every one of its own artifacts as source.
 	out, err := run(Bin, dir, "diff", "--no-color", "--no-ext-diff", "-U0",
+		"--src-prefix=a/", "--dst-prefix=b/", "--relative",
 		"--diff-filter=d", against, "--")
 	if err != nil {
 		// A range git cannot resolve, a repository mid-rebase. Nothing to report,
@@ -554,13 +578,47 @@ func Changed(dir, base string) ([]Change, error) {
 		if len(changes) >= maxChangedFiles {
 			break
 		}
-		raw, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(p)))
-		if err != nil {
+		added, ok := readUntracked(filepath.Join(dir, filepath.FromSlash(p)))
+		if !ok {
 			continue
 		}
-		changes = append(changes, Change{Path: p, Added: splitLines(string(raw))})
+		changes = append(changes, Change{Path: p, Added: added})
 	}
 	return changes, nil
+}
+
+// readUntracked reads a new file as its added lines, or declines.
+//
+// Three guards, and every one of them is about a file nobody chose to hand this
+// function. A tracked binary never reaches here — git reports "Binary files …
+// differ" and emits no hunk — but an untracked, un-ignored blob is whatever the
+// working tree happens to contain: a database dump, a video, a build output the
+// project forgot to ignore. Reading it whole and splitting it into strings, at
+// the end of every turn, is a cost the caller never agreed to.
+//
+// So: stat first and skip anything large, refuse anything that is not a regular
+// file, and stop at the same line ceiling parseDiff obeys — which the const block
+// advertised as the limit while this path quietly ignored it.
+func readUntracked(path string) ([]string, bool) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxUntrackedBytes {
+		return nil, false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	// A NUL byte is the cheap, conventional "this is not text" test, and it is the
+	// one git itself uses. Scanning a binary for a marker finds nothing and costs
+	// everything.
+	if bytes.IndexByte(raw, 0) >= 0 {
+		return nil, false
+	}
+	lines := splitLines(string(raw))
+	if len(lines) > maxAddedLines {
+		lines = lines[:maxAddedLines]
+	}
+	return lines, true
 }
 
 // untracked is the files git can see and is not tracking, on git's own terms.
@@ -582,20 +640,33 @@ func parseDiff(out string) []Change {
 	var changes []Change
 	var cur *Change
 	lines := 0
+	// inHunk is what makes a header a header. Inside a hunk every line carries a
+	// +/-/space prefix, so an added line whose own text begins with "++ b/" is
+	// rendered as "+++ b/…" and is indistinguishable from a file header when
+	// lines are matched one at a time — which is how a file could name itself
+	// anything it liked, and take the following added lines with it.
+	//
+	// `diff --git ` cannot be spoofed the same way: inside a hunk that content
+	// arrives as `+diff --git `, prefix and all. So it is the one anchor here, and
+	// everything else is read relative to it.
+	inHunk := false
 	for _, line := range splitLines(out) {
 		switch {
-		case strings.HasPrefix(line, "+++ b/"):
+		case strings.HasPrefix(line, "diff --git "):
+			inHunk, cur = false, nil
+		case !inHunk && strings.HasPrefix(line, "@@"):
+			inHunk = true
+		case !inHunk && strings.HasPrefix(line, "+++ b/"):
 			if len(changes) >= maxChangedFiles {
-				cur = nil
 				continue
 			}
 			changes = append(changes, Change{Path: strings.TrimPrefix(line, "+++ b/")})
 			cur = &changes[len(changes)-1]
-		case strings.HasPrefix(line, "+++ "):
+		case !inHunk && strings.HasPrefix(line, "+++ "):
 			// /dev/null: a deletion, already excluded by --diff-filter=d, and a
 			// header shape worth not mistaking for a path called "/dev/null".
 			cur = nil
-		case cur != nil && strings.HasPrefix(line, "+") && lines < maxAddedLines:
+		case inHunk && cur != nil && strings.HasPrefix(line, "+") && lines < maxAddedLines:
 			cur.Added = append(cur.Added, strings.TrimPrefix(line, "+"))
 			lines++
 		}
