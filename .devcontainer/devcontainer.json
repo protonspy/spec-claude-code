@@ -45,7 +45,12 @@
     "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
   },
 
-  "postCreateCommand": "scc version && git config --global --add safe.directory ${containerWorkspaceFolder}",
+  // Just a smoke test that the agent's toolchain is on PATH. Nothing here writes
+  // git config: ~/.gitconfig is the read-only bind above, and `git config --global`
+  // against it fails with "Device or resource busy" — which failed postCreate, which
+  // failed `devcontainer up`, which dropped the launch back onto the host outside any
+  // sandbox at all. safe.directory is set in the image instead, with --system.
+  "postCreateCommand": "scc version",
 
   "customizations": {
     "vscode": {

@@ -387,3 +387,63 @@ func stripJSONComments(s string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// The seeded container has to actually come up, and the first version of it did not:
+// postCreateCommand ran `git config --global --add safe.directory`, ~/.gitconfig is
+// the read-only bind that carries your identity in, and git failed with "Device or
+// resource busy". That failed postCreate, which failed `devcontainer up`, which
+// dropped `scc launch` back onto the host — a run that reported a sandbox and started
+// the agent outside one. The setting belongs in the image, where nothing is read-only.
+func TestTheSeededContainerDoesNotWriteTheMountedGitConfig(t *testing.T) {
+	root := initWorkspace(t)
+	seg := filepath.Join(root, paths.DevcontainerSeg)
+
+	cfg, err := os.ReadFile(filepath.Join(seg, "devcontainer.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	// The mount is what makes the write fail, so the test asserts both halves: a
+	// seed that stopped binding .gitconfig could write it again safely.
+	if !strings.Contains(string(cfg), "target=/home/node/.gitconfig") {
+		t.Fatal("the seeded config no longer binds .gitconfig; this test's premise is gone")
+	}
+	for _, line := range strings.Split(string(cfg), "\n") {
+		if !strings.Contains(line, "postCreateCommand") {
+			continue
+		}
+		if strings.Contains(line, "git config --global") {
+			t.Errorf("postCreateCommand writes the read-only .gitconfig bind:\n%s", line)
+		}
+	}
+
+	docker, err := os.ReadFile(filepath.Join(seg, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(docker), "git config --system --add safe.directory") {
+		t.Errorf("the image never marks the bind-mounted workspace safe, so git refuses it:\n%s", docker)
+	}
+}
+
+// And it marks the workspace safe without marking everything safe. `safe.directory`
+// is git's guard against a differently-owned repository whose .git carries a config
+// or a hook that runs on the next ordinary command; this container forwards GH_TOKEN
+// and mounts the agent's credential volume, so a bare `*` would hand those to the
+// next crafted .git in a dependency tree.
+func TestTheSeededContainerDoesNotDisableGitsOwnershipCheckWholesale(t *testing.T) {
+	root := initWorkspace(t)
+	docker, err := os.ReadFile(filepath.Join(root, paths.DevcontainerSeg, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	for _, line := range strings.Split(string(docker), "\n") {
+		if !strings.Contains(line, "safe.directory") || strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		for _, wildcard := range []string{"safe.directory '*'", `safe.directory "*"`, "safe.directory *"} {
+			if strings.Contains(line, wildcard) {
+				t.Errorf("the image trusts every repository in the container:\n%s", line)
+			}
+		}
+	}
+}

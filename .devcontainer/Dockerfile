@@ -36,6 +36,25 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends gh \
  && rm -rf /var/lib/apt/lists/*
 
+# The workspace is a bind mount from the host, so its files arrive owned by a uid
+# this container does not have, and git refuses a repository it thinks belongs to
+# somebody else — the ownership check that exists because a differently-owned .git
+# can carry a config or a hook that runs on the next ordinary git command
+# (CVE-2022-24765). Scoped to where devcontainers mount a workspace and no further:
+# this container forwards GH_TOKEN and mounts the agent's credential volume, so a
+# bare `*` here would hand the next crafted .git in a dependency tree exactly those.
+#
+# Set in the image rather than in postCreateCommand, and that is forced from both
+# ends: --global writes ~/.gitconfig, which is the read-only bind that carries your
+# identity in ("Device or resource busy", which failed postCreate, `devcontainer up`
+# and the whole sandbox, back onto the host), while --system writes /etc/gitconfig,
+# which postCreate's non-root user cannot. The build runs as root and can.
+#
+# The path is a literal because ${containerWorkspaceFolder} is not resolved at build
+# time. A workspace mounted somewhere else gets git's ordinary ownership message and
+# one `git config --global --add safe.directory <path>` to run — visible, not silent.
+RUN git config --system --add safe.directory '/workspaces/*'
+
 # RTK is the slow layer: it is a Rust build, so this installs a toolchain, builds
 # one binary and throws the toolchain away. Delete this block if you would rather
 # have fast rebuilds than filtered command output — nothing else depends on it,
@@ -50,7 +69,6 @@ RUN export CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup \
  && "$CARGO_HOME/bin/cargo" install --git https://github.com/rtk-ai/rtk --locked \
  && install -m 0755 "$CARGO_HOME/bin/rtk" /usr/local/bin/rtk \
  && rm -rf "$CARGO_HOME" "$RUSTUP_HOME"
-
 # The project toolchain — exactly what `scc check` runs, and nothing a human would
 # merely like to have. The four recorded gates are `go build ./...`,
 # `golangci-lint fmt --diff`, `golangci-lint run` and `go run -C tools ./testreport`,
@@ -87,14 +105,12 @@ RUN curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-${TARGETARCH}.tar
  && rm /tmp/go.tgz /tmp/go.tgz.sha256 \
  && ln -sf /usr/local/go/bin/go /usr/local/bin/go \
  && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
-
 # `go install` at a pinned version rather than the upstream install script: the
 # version is the one CI enforces, and piping a remote script into a shell is a thing
 # this project declines to do on somebody's behalf (see docs/stack.md). GOBIN puts
 # the binary where every shell looks, as above.
 RUN GOBIN=/usr/local/bin go install \
       github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_VERSION}
-
 # The module and build caches under the node user's home, since that is who runs the
 # gate; a root-owned cache is the failure that looks like a network problem the first
 # time the agent runs `go build`.
