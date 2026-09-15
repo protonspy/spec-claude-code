@@ -1,0 +1,102 @@
+# A starting point, not a base image — this file is yours from the moment it is
+# written. scc scaffolds it once and never updates it, the way it seeds docs/.
+#
+# `/scc-init` adjusts it to this project: the language toolchain, the package
+# manager, and whatever the delivery gate's commands actually need. A container
+# that cannot run `scc check` is a container the gate cannot be verified in, which
+# defeats the point of having one.
+#
+# The base is node-shaped whatever the project is written in, and that is about
+# the *agent's* toolchain rather than the project's: three of the four tools below
+# ship on npm, so an image without node cannot install them — and features cannot
+# supply it either, since they are layered on after this file has already run.
+# A Go or Python project installs its own toolchain at the bottom and is none the
+# worse for the node underneath.
+FROM mcr.microsoft.com/devcontainers/javascript-node:22
+
+# The agent's own toolchain. Every one of these is named by something scc
+# scaffolds, which is the whole reason they are here rather than left to taste:
+# the rules answer questions with `scc`, the entry file tells the agent to prefix
+# commands with `rtk`, and `code-search.md` tells it to ask `codegraph` before
+# reading files. An agent inside a container missing them discovers that one
+# failed command at a time and falls back to reading whole files — the exact cost
+# this methodology exists to remove.
+#
+# As `node` rather than as root, because this image puts that user's global prefix
+# (/usr/local/share/npm-global) on PATH and a root install would land somewhere
+# the agent does not look.
+RUN su node -c "npm install -g \
+      @anthropic-ai/claude-code \
+      @protonspy/scc \
+      @colbymchenry/codegraph"
+
+# `gh` — the delivery flow opens the pull request with it, and `scc validate --pr`
+# reads the PR body through it.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/*
+
+# RTK is the slow layer: it is a Rust build, so this installs a toolchain, builds
+# one binary and throws the toolchain away. Delete this block if you would rather
+# have fast rebuilds than filtered command output — nothing else depends on it,
+# and `scc launch` will simply report that rtk is not here.
+#
+# Built under /tmp and installed into /usr/local/bin rather than into a home
+# directory: that way the binary is on PATH for every user and every kind of
+# shell, instead of only an interactive one that has sourced a .bashrc.
+RUN export CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup \
+ && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --profile minimal --no-modify-path \
+ && "$CARGO_HOME/bin/cargo" install --git https://github.com/rtk-ai/rtk --locked \
+ && install -m 0755 "$CARGO_HOME/bin/rtk" /usr/local/bin/rtk \
+ && rm -rf "$CARGO_HOME" "$RUSTUP_HOME"
+
+# The project toolchain — exactly what `scc check` runs, and nothing a human would
+# merely like to have. The four recorded gates are `go build ./...`,
+# `golangci-lint fmt --diff`, `golangci-lint run` and `go run -C tools ./testreport`,
+# so this block is Go plus golangci-lint and stops there. A container that cannot
+# run `scc check` is a container the delivery gate cannot be verified in.
+#
+# The Go version tracks CI's pin rather than go.mod's directive: go.mod says 1.25.0
+# and `.github/workflows/ci.yml` builds with 1.25.13, deliberately ahead of it, for
+# the GO-2026-6088 encoding/xml fix the pom reader reaches through xml.Unmarshal.
+# Keep the two in step.
+ARG GO_VERSION=1.25.13
+ARG GOLANGCI_VERSION=v2.12.2
+# TARGETARCH is supplied by BuildKit, so one Dockerfile serves amd64 and arm64
+# hosts — which matters here, where an Apple-silicon laptop and an x86 CI runner
+# build the same file.
+ARG TARGETARCH
+#
+# Symlinked into /usr/local/bin rather than left on an ENV PATH, for the same reason
+# rtk is installed there: a login shell sources /etc/profile, which rebuilds PATH
+# from scratch and discards every ENV set in this file. A tool reachable only
+# through ENV is a tool `bash -lc` cannot find — measured, and exactly how
+# `scc check` failed with `go: not found` in a container that had Go installed.
+#
+# The tarball is checksum-verified before it is extracted. Be honest about what
+# that buys: the digest comes from the same host as the archive, so it catches a
+# truncated download or a bad mirror, not a compromised dl.google.com. It is a
+# cheap check and this file already reasons about supply chain elsewhere, so
+# leaving it out would be inconsistent rather than principled.
+RUN curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" -o /tmp/go.tgz \
+ && curl -fsSL "https://dl.google.com/go/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz.sha256" -o /tmp/go.tgz.sha256 \
+ && echo "$(cat /tmp/go.tgz.sha256)  /tmp/go.tgz" | sha256sum -c - \
+ && rm -rf /usr/local/go \
+ && tar -C /usr/local -xzf /tmp/go.tgz \
+ && rm /tmp/go.tgz /tmp/go.tgz.sha256 \
+ && ln -sf /usr/local/go/bin/go /usr/local/bin/go \
+ && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+
+# `go install` at a pinned version rather than the upstream install script: the
+# version is the one CI enforces, and piping a remote script into a shell is a thing
+# this project declines to do on somebody's behalf (see docs/stack.md). GOBIN puts
+# the binary where every shell looks, as above.
+RUN GOBIN=/usr/local/bin go install \
+      github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_VERSION}
+
+# The module and build caches under the node user's home, since that is who runs the
+# gate; a root-owned cache is the failure that looks like a network problem the first
+# time the agent runs `go build`.
+ENV GOPATH=/home/node/go
+RUN mkdir -p /home/node/go && chown -R node:node /home/node/go

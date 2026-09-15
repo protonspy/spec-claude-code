@@ -40,3 +40,7 @@ go.work.sum
 /dist/
 /artifacts/
 npm/dist/
+
+# CodeGraph's symbol index. Not an scc artifact: it is CodeGraph's schema on
+# CodeGraph's schedule, rebuilt by `scc launch`, and it is machine-specific.
+/.codegraph/

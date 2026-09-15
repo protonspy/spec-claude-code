@@ -30,3 +30,12 @@ linters:
       - linters:
           - staticcheck
         text: "S1016"
+
+# Formatters are a separate stage in the v2 schema, and enabling gofmt here is what
+# gives the delivery gate a portable `format` command: `golangci-lint fmt --diff`
+# exits non-zero on a diff, where a bare `gofmt -l .` lists the offending files and
+# still exits 0 — a format gate that certifies every run. One binary invocation with
+# no shell operators, so the same string works under `sh -c` and `cmd /c`.
+formatters:
+  enable:
+    - gofmt
