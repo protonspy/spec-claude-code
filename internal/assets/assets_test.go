@@ -1058,9 +1058,15 @@ func (e errNoSuchRule) Error() string {
 // uses wherever a change is cheap to make and expensive to make by accident.
 func TestTheTemplateVersionMovesWithTheTemplates(t *testing.T) {
 	// Bump Version, then replace this with the digest the failure prints.
-	const fingerprint = "80c48c375fd5ec7511fc7f01b3409f1515c6bbd4fe4f113c6f8581e22eca7dec"
+	const fingerprint = "d8eb76d69f2b335b93f20d492661f882e80ad7815d7a863a27c2631db05a7504"
 
 	sum := sha256.New()
+	// Version goes into the hash, and without it this test does not do the job its
+	// own name claims. The rendered templates never mention it, so a fingerprint
+	// over content alone is satisfied by pasting the new digest and leaving the
+	// version where it was — which is exactly the drift this exists to stop.
+	// Hashed in, bumping it is the only way to make the test green again.
+	_, _ = fmt.Fprintf(sum, "version=%s\x00", Version)
 	for _, h := range paths.Harnesses() {
 		files := Workspace(h)
 		sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })

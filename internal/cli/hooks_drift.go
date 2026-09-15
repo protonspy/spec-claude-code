@@ -232,7 +232,8 @@ func markerIn(line string) string {
 func openerAt(line string) int {
 	best := -1
 	for _, o := range inlineOpeners {
-		if i := strings.Index(line, o); i >= 0 && (best < 0 || i < best) {
+		i := scanOpener(line, o)
+		if i >= 0 && (best < 0 || i < best) {
 			best = i
 		}
 	}
@@ -256,6 +257,30 @@ func boundary(s string, i int) bool {
 	}
 	c := s[i]
 	return !(c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
+}
+
+// scanOpener finds a comment opener that actually opens a comment.
+//
+// The `//` inside `https://` is the case that matters, and it defeated the whole
+// point of requiring an opener in the first place: `url := "https://host/TODO"`
+// contains no annotation at all, and reporting one is precisely the false
+// positive that teaches a reader to skip every line this stage prints. A `//`
+// preceded by `:` is a scheme separator, not a comment.
+//
+// Only `//` really needs the guard, but it is applied to every inline opener
+// because a rule with one exception is a rule somebody has to remember.
+func scanOpener(line, opener string) int {
+	for at := 0; ; {
+		i := strings.Index(line[at:], opener)
+		if i < 0 {
+			return -1
+		}
+		i += at
+		if i == 0 || line[i-1] != ':' {
+			return i
+		}
+		at = i + 1
+	}
 }
 
 // artifactPath reports whether a path is one the methodology tracks progress in:
@@ -328,11 +353,50 @@ func shortened(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, p := range in {
 		dir, file := path.Split(p)
-		if dir == "" {
-			out = append(out, p)
-			continue
+		if dir != "" {
+			p = path.Base(strings.TrimSuffix(dir, "/")) + "/" + file
 		}
-		out = append(out, path.Base(strings.TrimSuffix(dir, "/"))+"/"+file)
+		out = append(out, safeForReport(p))
+	}
+	return out
+}
+
+// reportedPathMax is how much of a path may reach the agent's context.
+const reportedPathMax = 80
+
+// safeForReport makes a path safe to print into text the agent reads as scc's
+// own output.
+//
+// Belt to the braces `parseDiff` already provides. Everything in this report is
+// derived from the contents of a repository, which scc has no reason to trust —
+// a clone is somebody else's data — and it is handed to the agent on a channel
+// that looks like scc speaking. So a path is rendered as one thing on one line:
+// no control characters, no newline that could start a line of its own, and a
+// length cap, so the worst a hostile name can do is take up its own parenthetical
+// and look odd.
+//
+// It never rejects, because a name this mangles is still a file the agent should
+// hear about. Reporting a scrubbed path beats reporting nothing.
+func safeForReport(p string) string {
+	var b strings.Builder
+	for _, r := range p {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// C0 and DEL: invisible in a terminal and in the agent's transcript
+			// alike, which is exactly what makes them worth dropping here.
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if len(out) > reportedPathMax {
+		out = out[:reportedPathMax] + "…"
+	}
+	if out == "" {
+		return "(unnamed)"
 	}
 	return out
 }
