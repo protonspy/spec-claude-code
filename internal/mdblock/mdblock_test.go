@@ -82,3 +82,67 @@ func TestSpliceRefusesAnUnclosedBlock(t *testing.T) {
 		t.Error("Splice accepted a closing marker with no opening one")
 	}
 }
+
+// A document that documents the markers is not a document carrying the block. This
+// repository's own entry file writes both of RTK's markers in one sentence of prose,
+// which made Splice read that sentence as the block and stand ready to replace it,
+// and made Block report a block that was never spliced — so `scc launch` skipped the
+// RTK wiring it believed was already done.
+func TestMarkersInProseAreNotTheBlock(t *testing.T) {
+	prose := "scc uses RTK's own markers: `<!-- alpha v1 -->` … `<!-- /alpha -->`, verified.\n"
+
+	if got := alpha.Block(prose); got != "" {
+		t.Errorf("Block found a block in prose: %q", got)
+	}
+	out, action, err := alpha.Splice(prose, alphaBlock, false)
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	if action != Added {
+		t.Errorf("action = %q, want %q", action, Added)
+	}
+	if !strings.Contains(out, prose) {
+		t.Errorf("Splice overwrote the sentence:\n%s", out)
+	}
+	if !strings.Contains(out, alphaBlock) {
+		t.Errorf("Splice did not append the block:\n%s", out)
+	}
+	if back, had := alpha.Remove(out); !had || !strings.Contains(back, prose) {
+		t.Errorf("Remove took the prose with it (had = %v):\n%s", had, back)
+	}
+}
+
+// The other half of the same defect, and the one that was actually reported: an entry
+// file naming only the opening marker — in a code span, in a sentence about what the
+// markers are — was read as malformed, so the block was never written at all.
+func TestAnOpeningMarkerInACodeSpanIsNotMalformed(t *testing.T) {
+	prose := "Its markers are scc's own — `<!-- alpha v1 -->` — which is deliberate.\n"
+
+	out, action, err := alpha.Splice(prose, alphaBlock, false)
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	if action != Added {
+		t.Errorf("action = %q, want %q", action, Added)
+	}
+	if !strings.Contains(out, prose) {
+		t.Errorf("Splice overwrote the sentence:\n%s", out)
+	}
+}
+
+// A fenced example is the same case one construct over: a README showing the block it
+// documents must not be mistaken for a workspace carrying it.
+func TestAFencedExampleIsNotTheBlock(t *testing.T) {
+	doc := "# Docs\n\n```\n" + alphaBlock + "\n```\n"
+
+	if got := alpha.Version(doc); got != "" {
+		t.Errorf("Version read a fenced example: %q", got)
+	}
+	out, action, err := alpha.Splice(doc, alphaBlock, false)
+	if err != nil || action != Added {
+		t.Fatalf("action = %q, err = %v", action, err)
+	}
+	if !strings.Contains(out, "```\n"+alphaBlock+"\n```") {
+		t.Errorf("Splice rewrote the fenced example:\n%s", out)
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/protonspy/spec-claude-code/internal/mdblock"
+	"github.com/protonspy/spec-claude-code/internal/mdscan"
 )
 
 // Repo is where the binary is built from. RTK is a Rust program distributed as
@@ -71,9 +72,15 @@ var foreigners = []Foreign{
 }
 
 // ForeignBlock reports the other tool's RTK block in doc, if there is one.
+//
+// Over mdscan.Mask rather than doc, for the reason mdblock measures there: a file
+// that *documents* the other tool's marker — in a code span, in a fenced example —
+// is not a file carrying its block, and reporting one sends the reader to
+// `headroom unwrap` to remove something nobody wrote.
 func ForeignBlock(doc string) (Foreign, bool) {
+	masked := mdscan.Mask(doc)
 	for _, f := range foreigners {
-		if strings.Contains(doc, f.Open) {
+		if strings.Contains(masked, f.Open) {
 			return f, true
 		}
 	}

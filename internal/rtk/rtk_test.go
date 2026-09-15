@@ -261,3 +261,19 @@ func tail(s string) string {
 	}
 	return s
 }
+
+// A file that names Headroom's marker in a sentence is not a file carrying Headroom's
+// block. Reported, it sends the reader to `headroom unwrap` to remove something nobody
+// wrote — measured on this repository's own CLAUDE.md, which explains the marker pair
+// in the paragraph about why scc passes --no-context-tool.
+func TestASentenceAboutHeadroomsMarkerIsNotHeadroomsBlock(t *testing.T) {
+	doc := "behind its own marker pair, `<!-- headroom:rtk-instructions -->`, which scc's do not match.\n"
+
+	if f, ok := ForeignBlock(doc); ok {
+		t.Errorf("ForeignBlock reported %s's block in a sentence about it", f.Tool)
+	}
+	fenced := "```\n<!-- headroom:rtk-instructions -->\n```\n"
+	if f, ok := ForeignBlock(fenced); ok {
+		t.Errorf("ForeignBlock reported %s's block in a fenced example", f.Tool)
+	}
+}

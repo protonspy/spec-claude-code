@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/protonspy/spec-claude-code/internal/mdscan"
 	"github.com/protonspy/spec-claude-code/internal/textutil"
 )
 
@@ -46,6 +47,35 @@ const (
 	Replaced Action = "replaced"
 )
 
+// span returns the half-open range of the block in doc, markers included.
+//
+// It is the one place any of this package decides where the block is, because four
+// methods that answered that question separately were four chances to disagree — and
+// the answer is not "where the markers are". A document that *documents* the markers
+// writes them in a sentence or shows them in a fenced example, and both of those were
+// read as a block: this repository's own entry file names RTK's opening and closing
+// markers in one line of prose, which made Splice stand ready to replace that
+// sentence, and names scc's CodeGraph opener alone, which made the whole file look
+// malformed so the block was never written.
+//
+// So the search runs over mdscan.Mask — fences and code spans blanked, HTML comments
+// kept, every byte offset preserved — and the result indexes the original.
+//
+// start is -1 when doc carries no opening marker; end is -1 when it carries one with
+// no close, which is malformed rather than blockless.
+func (m Markers) span(doc string) (start, end int) {
+	masked := mdscan.Mask(doc)
+	start = strings.Index(masked, m.Open)
+	if start < 0 {
+		return -1, -1
+	}
+	rel := strings.Index(masked[start:], m.Close)
+	if rel < 0 {
+		return start, -1
+	}
+	return start, start + rel + len(m.Close)
+}
+
 // Splice returns doc with block present exactly once, and what it had to do to get
 // there.
 //
@@ -58,7 +88,8 @@ const (
 //
 // A document carrying an opening marker with no closing one is malformed rather than
 // blockless, and it is an error: appending a second block there would leave the file
-// with two openings and one close, which no tool could then update.
+// with two openings and one close, which no tool could then update. A marker written
+// inside a code span or a fenced example is neither — see span.
 func (m Markers) Splice(doc, block string, keep bool) (string, Action, error) {
 	block = strings.TrimRight(textutil.NormalizeNewlines(block), "\n")
 	eol := "\n"
@@ -67,9 +98,9 @@ func (m Markers) Splice(doc, block string, keep bool) (string, Action, error) {
 		block = strings.ReplaceAll(block, "\n", "\r\n")
 	}
 
-	start := strings.Index(doc, m.Open)
+	start, end := m.span(doc)
 	if start < 0 {
-		if strings.Contains(doc, m.Close) {
+		if strings.Contains(mdscan.Mask(doc), m.Close) {
 			return "", "", fmt.Errorf("found %s with no opening marker", m.Close)
 		}
 		trimmed := strings.TrimRight(doc, " \t\r\n")
@@ -78,17 +109,13 @@ func (m Markers) Splice(doc, block string, keep bool) (string, Action, error) {
 		}
 		return trimmed + eol + eol + block + eol, Added, nil
 	}
-
-	rest := doc[start:]
-	end := strings.Index(rest, m.Close)
 	if end < 0 {
 		return "", "", fmt.Errorf("found %s with no closing %s", m.Open+" …", m.Close)
 	}
-	end += len(m.Close)
-	if keep || rest[:end] == block {
+	if keep || doc[start:end] == block {
 		return doc, Present, nil
 	}
-	return doc[:start] + block + doc[start+end:], Replaced, nil
+	return doc[:start] + block + doc[end:], Replaced, nil
 }
 
 // Block returns the marker-delimited block in doc, markers included, or "" when doc
@@ -98,16 +125,11 @@ func (m Markers) Splice(doc, block string, keep bool) (string, Action, error) {
 // written — the entry file is preloaded into every request of the session, so the
 // size of a block is the thing worth comparing when two of them say the same words.
 func (m Markers) Block(doc string) string {
-	start := strings.Index(doc, m.Open)
-	if start < 0 {
+	start, end := m.span(doc)
+	if start < 0 || end < 0 {
 		return ""
 	}
-	rest := doc[start:]
-	end := strings.Index(rest, m.Close)
-	if end < 0 {
-		return ""
-	}
-	return rest[:end+len(m.Close)]
+	return doc[start:end]
 }
 
 // Version reports what the opening marker in doc claims — "v2" for
@@ -116,16 +138,16 @@ func (m Markers) Block(doc string) string {
 // Advisory: it is printed so a run that left a block alone says which one it left,
 // and never compared. Version ordering belongs to whoever defines the block.
 func (m Markers) Version(doc string) string {
-	start := strings.Index(doc, m.Open)
-	if start < 0 {
+	start, end := m.span(doc)
+	if start < 0 || end < 0 {
 		return ""
 	}
-	rest := doc[start+len(m.Open):]
-	end := strings.Index(rest, "-->")
-	if end < 0 {
+	rest := doc[start+len(m.Open) : end]
+	stop := strings.Index(rest, "-->")
+	if stop < 0 {
 		return ""
 	}
-	return strings.TrimSpace(rest[:end])
+	return strings.TrimSpace(rest[:stop])
 }
 
 // Remove returns doc with the block taken out, and whether there was one.
@@ -139,17 +161,12 @@ func (m Markers) Version(doc string) string {
 // growing stack of empty lines after each remove-and-splice cycle is a file that
 // records how many times the tool ran, which is not information anybody wants.
 func (m Markers) Remove(doc string) (string, bool) {
-	start := strings.Index(doc, m.Open)
-	if start < 0 {
-		return doc, false
-	}
-	rest := doc[start:]
-	end := strings.Index(rest, m.Close)
-	if end < 0 {
+	start, end := m.span(doc)
+	if start < 0 || end < 0 {
 		return doc, false
 	}
 	head := strings.TrimRight(doc[:start], " \t\r\n")
-	tail := strings.TrimLeft(doc[start+end+len(m.Close):], " \t\r\n")
+	tail := strings.TrimLeft(doc[end:], " \t\r\n")
 	eol := "\n"
 	if strings.Contains(doc, "\r\n") {
 		eol = "\r\n"

@@ -299,3 +299,44 @@ func TestLineIsOneBasedAndSafe(t *testing.T) {
 		t.Error("out-of-range Line() did not return empty")
 	}
 }
+
+func TestMaskProseHidesExamplesAndKeepsComments(t *testing.T) {
+	doc := "Prose about `<!-- rtk-instructions v2 -->` and its close.\n" +
+		"```\n<!-- fenced-marker -->\n```\n" +
+		"<!-- real-marker v1 -->\nbody\n<!-- /real-marker -->\n"
+
+	got := Mask(doc)
+
+	if len(got) != len(doc) {
+		t.Fatalf("Mask changed the length: %d, want %d", len(got), len(doc))
+	}
+	for _, hidden := range []string{"rtk-instructions", "fenced-marker"} {
+		if strings.Contains(got, hidden) {
+			t.Errorf("Mask left %q visible:\n%s", hidden, got)
+		}
+	}
+	for _, kept := range []string{"<!-- real-marker v1 -->", "<!-- /real-marker -->", "body"} {
+		if !strings.Contains(got, kept) {
+			t.Errorf("Mask hid %q, which is not an example:\n%s", kept, got)
+		}
+	}
+	if i := strings.Index(got, "<!-- real-marker v1 -->"); i != strings.Index(doc, "<!-- real-marker v1 -->") {
+		t.Errorf("Mask moved the marker to %d, want %d", i, strings.Index(doc, "<!-- real-marker v1 -->"))
+	}
+}
+
+func TestMaskProsePreservesCRLFOffsets(t *testing.T) {
+	doc := "a `<!-- x -->` b\r\n<!-- y -->\r\n"
+
+	got := Mask(doc)
+
+	if len(got) != len(doc) {
+		t.Fatalf("Mask changed the length: %d, want %d", len(got), len(doc))
+	}
+	if strings.Contains(got, "<!-- x -->") {
+		t.Errorf("Mask left the code span visible: %q", got)
+	}
+	if i := strings.Index(got, "<!-- y -->"); i != strings.Index(doc, "<!-- y -->") {
+		t.Errorf("Mask moved the marker to %d, want %d", i, strings.Index(doc, "<!-- y -->"))
+	}
+}
