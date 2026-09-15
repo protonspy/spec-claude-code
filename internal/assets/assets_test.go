@@ -491,11 +491,17 @@ func TestAgentProseIsSafeToEmbedInTOML(t *testing.T) {
 	}
 }
 
-// Every skill in Skills() — knowledge and workflow alike — ships a SKILL.md in every
-// harness, and its slash command wherever the harness has a command surface. The two
-// are derived from one list so they cannot drift, and this is the assertion that
-// keeps the derivation honest — including for Codex, where the answer is
-// deliberately no commands at all.
+// Every skill in Skills() ships a SKILL.md in every harness, and is reachable as a
+// slash command wherever the harness has one at all — by a command file scc writes,
+// or by the harness turning the skill into one by itself.
+//
+// Two harnesses answer that differently and both are deliberate. Claude Code
+// registers a skill as `/<name>` unaided, so a command file beside it is a second
+// entry point for one thing and a second description preloaded into every request.
+// Codex has no project-level command surface to write into. What the assertion
+// holds is the property underneath both: a skill the user cannot invoke by name is
+// a skill only the model can reach, and the `scc-` prefix on the name is what keeps
+// `/scc-init` from being Claude Code's own `/init`.
 func TestEverySkillShipsWithItsCommand(t *testing.T) {
 	for _, h := range paths.Harnesses() {
 		skills, commands := map[string]bool{}, map[string]bool{}
@@ -514,7 +520,7 @@ func TestEverySkillShipsWithItsCommand(t *testing.T) {
 			t.Fatalf("%s: %d skills, want %d", h.ID, len(skills), len(all))
 		}
 		wantCommands := len(all)
-		if h.CommandsSeg == "" {
+		if h.CommandsSeg == "" || h.SkillsAreCommands {
 			wantCommands = 0
 		}
 		if len(commands) != wantCommands {
@@ -524,8 +530,15 @@ func TestEverySkillShipsWithItsCommand(t *testing.T) {
 			if !skills[name] {
 				t.Errorf("%s: %s is in Skills() and ships no SKILL.md", h.ID, name)
 			}
-			if wantCommands > 0 && !commands[commandPrefix+name] {
-				t.Errorf("%s: %s ships no %s%s command", h.ID, name, commandPrefix, name)
+			if wantCommands > 0 && !commands[name] {
+				t.Errorf("%s: %s ships no command", h.ID, name)
+			}
+			// Whatever the route, the name the user types is the same one — and it
+			// is prefixed, because an unprefixed `init` is a slash command the
+			// harness may already define.
+			if !strings.HasPrefix(name, SkillPrefix) {
+				t.Errorf("%s: skill %q is not namespaced; /%s can collide with the harness's own",
+					h.ID, name, name)
 			}
 		}
 	}
@@ -1062,7 +1075,7 @@ func (e errNoSuchRule) Error() string {
 // uses wherever a change is cheap to make and expensive to make by accident.
 func TestTheTemplateVersionMovesWithTheTemplates(t *testing.T) {
 	// Bump Version, then replace this with the digest the failure prints.
-	const fingerprint = "32ec486ca64c66ba775896f352adf72c33cf50256770a4eb9e4b8480140d93f8"
+	const fingerprint = "fcd82bf91a559baa6c72268203627cc74c0e4a8839f1febe636641ff6a0d5aa2"
 
 	sum := sha256.New()
 	// Version goes into the hash, and without it this test does not do the job its

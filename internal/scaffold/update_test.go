@@ -128,7 +128,7 @@ func TestApplyUpdateBringsTheTreeCurrent(t *testing.T) {
 	applyTo(t, root, paths.OpenCode, false)
 	rel := ".opencode/rules/routing.md"
 	writeManaged(t, root, paths.OpenCode, rel, "# an older template\n", true)
-	missing := ".opencode/skills/wiki/SKILL.md"
+	missing := ".opencode/skills/scc-wiki/SKILL.md"
 	if err := os.Remove(filepath.Join(root, filepath.FromSlash(missing))); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
@@ -264,8 +264,12 @@ func TestApplyUpdateAddsASkillTheWorkspacePredates(t *testing.T) {
 		var rels []string
 		for _, skill := range assets.Skills() {
 			rels = append(rels, path.Join(h.Dir, h.SkillsSeg, skill, "SKILL.md"))
-			if h.CommandsSeg != "" {
-				rels = append(rels, path.Join(h.Dir, h.CommandsSeg, "scc-"+skill+".md"))
+			// Only where scc writes one. A harness that turns a skill into a slash
+			// command by itself gets no command file, and asserting on one here
+			// would be this test insisting on a file the product deliberately
+			// stopped shipping.
+			if h.CommandsSeg != "" && !h.SkillsAreCommands {
+				rels = append(rels, path.Join(h.Dir, h.CommandsSeg, skill+".md"))
 			}
 		}
 		m, _, err := manifest.Load(root, h)

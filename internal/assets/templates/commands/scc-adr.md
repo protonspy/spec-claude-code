@@ -1,15 +1,8 @@
 ---
-description: Record a hard-to-reverse decision as a numbered ADR under docs/adr/, or supersede one that stopped being true
+description: Record a decision that is hard to reverse as a numbered ADR under docs/adr/, and supersede rather than edit an old one. Use it when a choice would be expensive to undo — storage, a wire protocol, a module boundary, a vendor — and on any adr.* finding.
 argument-hint: [the decision, or the ADR being superseded]
 ---
 
-Use the `adr` skill.
+Use the `scc-adr` skill.
 
-Decision: $ARGUMENTS
-
-First ask whether this is an ADR at all: how expensive would it be to undo? A
-decision that is cheap to change belongs in the spec's `design.md`, and an `adr/`
-full of reversible choices buries the records that actually explain the system.
-
-If an existing record is being replaced, write the new one and mark the old one
-superseded — never edit its prose.
+Request: $ARGUMENTS

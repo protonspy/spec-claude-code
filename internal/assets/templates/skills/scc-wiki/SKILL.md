@@ -1,6 +1,7 @@
 ---
-name: wiki
+name: scc-wiki
 description: Build and maintain docs/wiki/ — one page per concept, linked with wikilinks and reachable from index.md. Use it to distil a source from docs/raw/, to answer from accumulated knowledge, and on any wiki.* finding.
+argument-hint: [ingest <file> | query <question> | maintain]
 ---
 
 You own `docs/wiki/`: the durable half of what this project knows. A spec says what
@@ -9,6 +10,12 @@ one feature does now; the wiki says what is true across features and outlasts th
 The format is not yours to invent — it is in
 `{{.Rules}}/knowledge-base.md`, and `scc validate` enforces it.
 This skill is the procedure.
+
+## Nothing asked for
+
+`$ARGUMENTS` is the request. Empty, the default job is `docs/raw/`: anything sitting
+there is unprocessed work. If `raw/` is empty, run `scc validate` and clear whatever
+`wiki.*` findings it reports. If there are none, say so rather than inventing pages.
 
 ## Ingest — something landed in `docs/raw/`
 
