@@ -27,9 +27,9 @@ func runValidation(subject string, args []string, fn func(root string, rest []st
 	fs.SetOutput(os.Stderr)
 	root := addRoot(fs)
 	jsonOut := addJSON(fs)
-	rest, err := parseFlags(fs, args)
+	rest, err := parseFlags(fs, helpWord(args))
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	target, ok := resolveRoot(*root)
 	if !ok || !requireWorkspace(target) {

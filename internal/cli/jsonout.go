@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"os"
 
 	"github.com/protonspy/spec-claude-code/internal/render"
 )
@@ -19,14 +20,28 @@ func addJSON(fs *flag.FlagSet) *bool {
 	return fs.Bool("json", false, jsonFlagHelp)
 }
 
-// emitJSON writes v as indented JSON to stdout and returns the exit code.
+// emitJSON writes v as JSON to stdout and returns the exit code.
 //
 // stdout carries nothing but the JSON document: diagnostics go to stderr (see
 // package render), so a caller can pipe stdout straight into jq while still
 // seeing warnings on the terminal. A marshal failure is the tool's own bug, so
 // it reports on stderr and exits 1 rather than emitting half a document.
+//
+// Indented for a person, compact for everything else — the same test render
+// already makes about color, and for the same reason. The indentation is there to
+// be read, and the overwhelming reader of a `--json` document here is an agent
+// that pays for every byte of it: measured on a six-task plan, `map tasks --json`
+// is 2198 bytes indented and about a third of that is leading whitespace, against
+// 599 bytes for the human listing of the same tasks. A terminal still gets the
+// readable form, so nothing anybody looks at changes.
 func emitJSON(v any) int {
-	b, err := json.MarshalIndent(v, "", "  ")
+	var b []byte
+	var err error
+	if isTerminal(os.Stdout) {
+		b, err = json.MarshalIndent(v, "", "  ")
+	} else {
+		b, err = json.Marshal(v)
+	}
 	if err != nil {
 		render.Err(fmt.Sprintf("could not encode JSON output: %v", err))
 		return ExitError

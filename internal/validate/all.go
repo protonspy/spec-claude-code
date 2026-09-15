@@ -24,7 +24,21 @@ type Validator struct {
 // workspace with findings. That is what lets the aggregate command run unconditionally
 // instead of asking the user which validators apply.
 func All(opts ...Option) []Validator {
-	return append(base(), extra(opts)...)
+	var o options
+	for _, fn := range opts {
+		fn(&o)
+	}
+	out := base()
+	if o.noAttribution {
+		kept := out[:0]
+		for _, v := range out {
+			if v.Name != "attribution" {
+				kept = append(kept, v)
+			}
+		}
+		out = kept
+	}
+	return append(out, extra(opts)...)
 }
 
 // Option turns on a check that a default run leaves off.
@@ -39,9 +53,22 @@ func All(opts ...Option) []Validator {
 type Option func(*options)
 
 type options struct {
-	pr     bool
-	checks bool
+	pr            bool
+	checks        bool
+	noAttribution bool
 }
+
+// WithoutAttribution drops the history check from the run.
+//
+// It exists for the Stop hook, which may only carry what the next turn can
+// resolve. Every other validator reports something an edit fixes; a signature in a
+// commit this branch has already made comes out with a rebase, so the line would
+// re-appear at the end of every turn for the life of the branch and never clear —
+// which is the exact shape of the loop the Stop stage was fixed for once already.
+// The commit-msg hook catches a signature at the one moment it is still a file,
+// `scc validate` reports it whenever somebody asks, and pre-push holds the branch.
+// Nothing is lost by leaving it out of the one place it cannot be acted on.
+func WithoutAttribution() Option { return func(o *options) { o.noAttribution = true } }
 
 // WithPR adds the pull-request check: the title and body of the PR open on this
 // branch, read through `gh`. Off by default, on in the pre-push hook and under

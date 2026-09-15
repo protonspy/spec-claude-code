@@ -232,6 +232,47 @@ func TestResolveRefusesEscape(t *testing.T) {
 	}
 }
 
+// A path that exists outside the workspace resolves to nothing.
+//
+// Resolve accepts a path relative to the working directory, which is what makes
+// `scc map show tasks.md` work from inside a spec directory — and, before this,
+// what made `scc patch append ../outside.md L3 --text X` write to a file outside
+// the repository and exit 0. An address reaches scc from a file the agent read as
+// readily as from the user, so an escape is reachable without anybody typing it.
+func TestResolveRefusesAFileOutsideTheWorkspace(t *testing.T) {
+	root, _ := writeWorkspace(t)
+	outside := filepath.Join(filepath.Dir(root), "outside.md")
+	if err := os.WriteFile(outside, []byte("# outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range []string{outside, "../outside.md", filepath.Join("..", "outside.md")} {
+		got, err := Resolve(root, arg)
+		if err == nil {
+			t.Errorf("Resolve(%q) = %v, want an error", arg, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), "outside the workspace") {
+			t.Errorf("Resolve(%q): %v, want it to name the boundary", arg, err)
+		}
+	}
+}
+
+// The boundary has to hold on a root that is itself a symlink, which every
+// t.TempDir() on macOS is (/var → /private/var). A lexical comparison alone would
+// call every artifact in the workspace an escape.
+func TestWithinFollowsSymlinks(t *testing.T) {
+	root, planPath := writeWorkspace(t)
+	if !Within(root, planPath) {
+		t.Errorf("Within(%q, %q) = false, want true", root, planPath)
+	}
+	if Within(root, filepath.Join(filepath.Dir(root), "elsewhere.md")) {
+		t.Error("Within accepted a sibling of the workspace")
+	}
+	if !Within(root, root) {
+		t.Error("Within rejected the root itself")
+	}
+}
+
 func sameFile(a, b string) (bool, error) {
 	ai, err := os.Stat(a)
 	if err != nil {

@@ -1,6 +1,6 @@
 ---
 name: prd
-description: Turn an initiative that spans more than one feature into a plan under plans/ — a short header, a checklist of tasks, and references to the specs that will be built separately. Use it when someone arrives with a PRD, a roadmap item, an epic, or a rough idea too large for one spec, and the first job is to find out what it actually decomposes into. For a single feature whose shape is already clear, skip this and run `scc spec new`.
+description: Turn an initiative spanning more than one feature into a plan under plans/: a short header, a checklist, and references to the specs built separately. Use it for a PRD, a roadmap item, an epic, or an idea too large for one spec.
 ---
 
 You take an initiative that is too big for one spec and turn it into a plan: one

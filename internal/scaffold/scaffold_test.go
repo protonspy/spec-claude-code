@@ -372,7 +372,7 @@ func TestStaleManifestEntriesAreDropped(t *testing.T) {
 func TestApplyRestoresADeletedFile(t *testing.T) {
 	root := t.TempDir()
 	apply(t, root, false)
-	rel := ".claude/agents/code-review.md"
+	rel := ".claude/agents/scc-code-review.md"
 	if err := os.Remove(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestApplyRestoresADeletedFile(t *testing.T) {
 	if res.Created != 1 {
 		t.Errorf("created = %d, want 1", res.Created)
 	}
-	want := renderRel(t, ".claude/agents/code-review.md")
+	want := renderRel(t, ".claude/agents/scc-code-review.md")
 	if got := read(t, root, rel); got != want {
 		t.Error("the deleted file was not restored from the template")
 	}
@@ -451,8 +451,8 @@ func TestASecondHarnessLeavesTheFirstAlone(t *testing.T) {
 	if got := workspace.Harnesses(root); len(got) != 2 {
 		t.Errorf("initialized harnesses = %v, want two", got)
 	}
-	read(t, root, ".codex/agents/code-review.toml")
-	read(t, root, ".opencode/agent/code-review.md")
+	read(t, root, ".codex/agents/scc-code-review.toml")
+	read(t, root, ".opencode/agent/scc-code-review.md")
 }
 
 func splitLines(s string) []string {

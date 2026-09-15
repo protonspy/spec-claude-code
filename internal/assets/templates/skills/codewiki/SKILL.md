@@ -1,6 +1,6 @@
 ---
 name: codewiki
-description: Narrate an area of this codebase into docs/codewiki/, where every section cites the exact lines it explains. Use it when a subsystem is hard to enter cold and the code does not say why it is shaped that way, when someone asks for onboarding notes or an architecture walkthrough, and when `scc validate` reports codewiki.* findings — a citation that no longer resolves, one that runs past the end of its file, or a section that cites nothing at all.
+description: Narrate an area of this codebase into docs/codewiki/, every section citing the lines it explains. Use it when a subsystem is hard to enter cold, when someone asks for an architecture walkthrough, and on any codewiki.* finding.
 ---
 
 You write prose that explains code, and every section of it points at the lines it

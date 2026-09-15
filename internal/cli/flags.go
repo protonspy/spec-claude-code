@@ -1,34 +1,92 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/protonspy/spec-claude-code/internal/render"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
 
-// parseFlags parses args and returns the positionals, allowing them to appear
-// before the flags as well as after.
+// parseFlags parses args and returns the positionals, wherever they sit among the
+// flags.
 //
 // Go's flag package stops parsing at the first non-flag argument, so
 // `scc spec new user-auth --json` would otherwise read "--json" as a second
 // positional and silently ignore the flag. Every user and every agent writes the
-// name first, so this is not a preference: leading positionals are collected, the
-// remainder is parsed, and anything left over is appended.
+// name first, so collecting the leading positionals and parsing the rest is the
+// minimum. It is not enough on its own: a flag *after* a positional stops the
+// parse just as dead, and the measured result was `scc notes add --tag gotcha
+// "text" --path internal/x` writing "--path internal/x" into the note as prose,
+// with no path recorded and exit 0. Silently misfiling an argument is worse than
+// rejecting it, so this alternates — peel positionals, parse flags, repeat — until
+// nothing is left.
+//
+// A bare `--` ends scc's own arguments. Everything after it is a positional
+// verbatim, even spelled like a flag, which is what makes a literal `--text -x`
+// reachable at all.
 func parseFlags(fs *flag.FlagSet, args []string) ([]string, error) {
+	var verbatim []string
+	for i, a := range args {
+		if a == "--" {
+			args, verbatim = args[:i], args[i+1:]
+			break
+		}
+	}
 	var positionals []string
-	i := 0
-	for i < len(args) && !strings.HasPrefix(args[i], "-") {
-		positionals = append(positionals, args[i])
-		i++
+	for len(args) > 0 {
+		i := 0
+		for i < len(args) && !isFlag(args[i]) {
+			positionals = append(positionals, args[i])
+			i++
+		}
+		if err := fs.Parse(args[i:]); err != nil {
+			return nil, err
+		}
+		// flag stops at the first argument it does not recognize as a flag, which
+		// by isFlag's definition is one this loop will consume — so the next pass
+		// always makes progress and this terminates.
+		args = fs.Args()
 	}
-	if err := fs.Parse(args[i:]); err != nil {
-		return nil, err
+	return append(positionals, verbatim...), nil
+}
+
+// isFlag reports whether flag would treat this argument as one.
+//
+// It matches flag's own test rather than approximating it with a "-" prefix,
+// because the two disagree on exactly the argument that would hang the loop above:
+// a bare "-" looks like a flag and is parsed as a positional.
+func isFlag(a string) bool {
+	return len(a) > 1 && a[0] == '-'
+}
+
+// helpWord rewrites a lone `help` positional into the flag that prints the usage.
+//
+// `scc validate help` is what somebody types having just typed `scc map help` and
+// `scc check help`, which work because those commands have a subcommand to
+// dispatch on. A leaf command has none, so the word arrived as a stray positional
+// and the answer was "validate takes no arguments, got \"help\"" — correct, exit
+// 1, and no use to anybody.
+func helpWord(args []string) []string {
+	if len(args) == 1 && args[0] == "help" {
+		return []string{"-h"}
 	}
-	return append(positionals, fs.Args()...), nil
+	return args
+}
+
+// exitFor turns a parse failure into a command's exit code.
+//
+// `--help` is not a failure. flag reports it as one because it has nothing else to
+// return, but the user got exactly what they asked for, and exit 1 there says the
+// command could not run — which an agent branching on the 0/1/2 contract reads as
+// a broken command rather than as the help it just printed.
+func exitFor(err error) int {
+	if errors.Is(err, flag.ErrHelp) {
+		return ExitOK
+	}
+	return ExitError
 }
 
 // rootFlagHelp is the single wording every command shows for --root, for the same

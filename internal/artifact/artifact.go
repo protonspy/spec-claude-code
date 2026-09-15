@@ -450,17 +450,31 @@ func (a *Artifact) Prose(from, to int) string {
 // that exists relative to the working directory, a bare plan name, and a bare
 // feature name — which resolves to all three of that spec's files, because a spec
 // is three files and asking to map one is asking to map the spec.
+//
+// Every one of those has to land inside the workspace. The working-directory form
+// is what makes `scc map show tasks.md` work from inside a spec directory, and
+// without the boundary it is also what made `scc patch append ../../secrets.env`
+// work from anywhere — measured, exit 0, file written, "no validator for this
+// artifact" as the only sign. An address arrives from a file the agent read as
+// readily as from the user, so the guard belongs here rather than in one handler.
 func Resolve(root, arg string) ([]string, error) {
 	if arg == "" {
 		return nil, fmt.Errorf("no artifact named")
 	}
 	clean := filepath.FromSlash(strings.TrimSuffix(arg, "/"))
+	escapes := false
 	for _, cand := range []string{filepath.Join(root, clean), clean} {
 		if abs, err := filepath.Abs(cand); err == nil {
 			if info, err := os.Stat(abs); err == nil && info.Mode().IsRegular() {
-				return []string{abs}, nil
+				if Within(root, abs) {
+					return []string{abs}, nil
+				}
+				escapes = true
 			}
 		}
+	}
+	if escapes {
+		return nil, fmt.Errorf("%q is outside the workspace at %s", arg, root)
 	}
 	if err := workspace.SafeName(arg, "artifact"); err == nil {
 		if p := paths.Plan(root, arg); isFile(p) {
@@ -493,6 +507,36 @@ func Resolve(root, arg string) ([]string, error) {
 		}
 	}
 	return nil, fmt.Errorf("no artifact %q under %s/ or %s/", arg, paths.PlansSeg, paths.SpecsSeg)
+}
+
+// Within reports whether target sits inside root. It is the boundary between an
+// artifact address and the rest of the filesystem.
+//
+// Symlinks are evaluated on both sides before the comparison, because a temporary
+// directory is itself a symlink on macOS (/var → /private/var) and a purely
+// lexical test would call every file under one an escape. Where a side cannot be
+// evaluated its cleaned absolute path is used, which still catches the `..` that
+// this exists for.
+func Within(root, target string) bool {
+	r, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	t, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	if p, err := filepath.EvalSymlinks(r); err == nil {
+		r = p
+	}
+	if p, err := filepath.EvalSymlinks(t); err == nil {
+		t = p
+	}
+	rel, err := filepath.Rel(r, t)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // Scan loads every artifact in the workspace: each plan, then each spec's three

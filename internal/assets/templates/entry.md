@@ -5,8 +5,9 @@ Spec-driven development, scaffolded and checked by `scc`. The methodology lives 
 ## Rules — `{{.Rules}}/<name>.md`
 
 {{if .RulesPreloaded -}}
-{{.Label}} loads `{{.Rules}}/` at session start — nothing to open. The triggers say *when*
-each governs: the failure is not a rule you never read, it is one you had and misapplied.
+{{.Label}} loads `{{.Rules}}/` at session start — nothing to open{{if .RulesScoped}}, bar `specs.md`,
+`tasks.md` and `knowledge-base.md`, read when you touch their tree{{end}}. The failure is not a
+rule you never read, it is one you had and misapplied — so the triggers say *when* each governs.
 {{- else -}}
 Nothing loads these for you. Open the file whose moment has arrived, and open it again
 in a new session: a rule you read yesterday is not a rule you have read.
@@ -35,8 +36,7 @@ Triggered by what you are about to touch:
 
 ## Ask the index before you read the file
 
-**Code** — `scc graph query|explore <symbol>`, or `codegraph_explore` where registered.
-Read the source when you are about to change it, not to find it.
+**Code** — `scc graph query|explore <symbol>`; read the source to change it, not to find it.
 
 **Plans and specs** — a plan is a header and a checklist: `map brief <plan>` once, then
 `map tasks <plan> --next` per task; **never open the plan**. Also `scc map` and `map

@@ -28,9 +28,9 @@ func runRTK(args []string) int {
 	noInstall := fs.Bool("no-install", false, "never run cargo; only write the block")
 	keep := fs.Bool("keep", false, "leave an existing block alone (default: replace it with the one this scc ships)")
 	jsonOut := addJSON(fs)
-	rest, err := parseFlags(fs, args)
+	rest, err := parseFlags(fs, helpWord(args))
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "rtk") {
 		return ExitError

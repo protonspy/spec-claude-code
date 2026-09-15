@@ -127,13 +127,70 @@ func TestCommitMsgIgnoresWhatGitStrips(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "COMMIT_EDITMSG")
 	msg := "feat: a real subject\n" +
 		"# Co-Authored-By: Claude <noreply@anthropic.com>\n" +
-		scissors + "\n" +
+		"# " + scissorsBody + "\n" +
 		"diff --git a/x b/x\n+\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)\n"
 	if err := os.WriteFile(path, []byte(msg), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if _, stderr, code := run(t, "hooks", "run", "commit-msg", path, "--root", root); code != ExitOK {
 		t.Errorf("exit = %d, want %d — the finding is in text git throws away (stderr: %s)", code, ExitOK, stderr)
+	}
+}
+
+// The comment character is configuration, and a repository that changed it still
+// has to have its template and its scissors recognized.
+//
+// `core.commentChar=;` is what somebody sets who writes `#123` at the start of a
+// line. With `#` compiled in, git's template read as part of the message and the
+// whole appended diff was scanned for signatures — so a commit whose *diff*
+// happened to add a generated-with footer to a file was refused, and a real
+// signature under `;` went through.
+func TestCommitMessageReadsTheConfiguredCommentCharacter(t *testing.T) {
+	msg := "feat: a real subject\n" +
+		"; Co-Authored-By: Claude <noreply@anthropic.com>\n" +
+		"; " + scissorsBody + "\n" +
+		"diff --git a/x b/x\n+Generated with Claude Code\n"
+	got := commitMessage(msg, ";")
+	if strings.Contains(got, "Co-Authored-By") {
+		t.Errorf("a comment line was read as the message:\n%s", got)
+	}
+	if strings.Contains(got, "diff --git") {
+		t.Errorf("the verbose diff was read as the message:\n%s", got)
+	}
+	if !strings.Contains(got, "a real subject") {
+		t.Errorf("the subject was stripped:\n%s", got)
+	}
+
+	// Unset and "auto" both fall back to git's default.
+	hash := "feat: x\n# a comment\n# " + scissorsBody + "\ndiff --git a/x b/x\n"
+	for _, comment := range []string{"", "auto", "#"} {
+		got := commitMessage(hash, comment)
+		if strings.Contains(got, "a comment") || strings.Contains(got, "diff --git") {
+			t.Errorf("commitMessage(_, %q) kept what git strips:\n%s", comment, got)
+		}
+	}
+}
+
+// git says on stdin what a push carries, and a push carrying nothing is not worth
+// a build, a lint and a full suite. `git push --delete` and a push with nothing
+// new both paid for one before this.
+func TestPrePushSkipsAPushThatCarriesNothing(t *testing.T) {
+	zero := strings.Repeat("0", 40)
+	for _, tc := range []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"a deletion", "(delete) " + zero + " refs/heads/gone abc123\n", false},
+		{"two deletions", "(delete) " + zero + " refs/heads/a abc\n(delete) " + zero + " refs/heads/b def\n", false},
+		{"a real push", "refs/heads/main abc123 refs/heads/main def456\n", true},
+		{"a delete beside a real push", "(delete) " + zero + " refs/heads/a abc\nrefs/heads/b abc123 refs/heads/b def\n", true},
+		{"nothing on stdin", "", true},
+		{"a shape this does not know", "garbage\n", true},
+	} {
+		if got := pushingAnything(strings.NewReader(tc.in)); got != tc.want {
+			t.Errorf("%s: pushingAnything = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

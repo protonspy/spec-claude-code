@@ -1,6 +1,6 @@
 ---
 name: glossary
-description: Own docs/glossary.md — one canonical term per concept, and the synonyms nobody should use for it. Use it when a domain term is coined, contested, fuzzy, or renamed; before naming a spec, a plan, a wiki page, or an identifier that will outlive the session; and when `scc validate` reports glossary.* findings — a duplicate entry, a term listed as both canonical and avoided, or an avoided synonym used somewhere in docs/.
+description: Own docs/glossary.md — one canonical term per concept, and the synonyms nobody should use for it. Use it when a domain term is coined, contested or renamed, before naming anything that will outlive the session, and on any glossary.* finding.
 ---
 
 You own the project's vocabulary. Domain language drifts by default: two people

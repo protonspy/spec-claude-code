@@ -71,7 +71,7 @@ func runSpecNew(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !kick.validate() {
 		return ExitError
@@ -175,7 +175,7 @@ func runSpecList(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "spec list") {
 		return ExitError
@@ -242,7 +242,7 @@ func runSpecShow(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	name, ok := artifactName(rest, "spec")
 	if !ok {
@@ -287,7 +287,7 @@ func runSpecDelete(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	name, ok := artifactName(rest, "spec")
 	if !ok {

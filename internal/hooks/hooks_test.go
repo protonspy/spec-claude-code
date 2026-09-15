@@ -307,3 +307,37 @@ func TestTheHarnessStagesOnlyEverReport(t *testing.T) {
 		}
 	}
 }
+
+// A shebang carries arguments, and an interpreter with one is still that
+// interpreter.
+//
+// posix matched the tail of the shebang line, so `#!/bin/sh -e` — an ordinary
+// hardening flag on an ordinary hook — read as a script written in something scc
+// must not append shell to, and `--force` refused it. The test states the
+// interpreters rather than the spellings, because the spellings are what was
+// wrong.
+func TestPosixReadsTheInterpreterNotTheLineEnding(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want bool
+	}{
+		{"#!/bin/sh", true},
+		{"#!/bin/sh -e", true},
+		{"#!/bin/sh -eu", true},
+		{"#!/usr/bin/env sh", true},
+		{"#!/usr/bin/env bash", true},
+		{"#!/usr/bin/env bash -eu", true},
+		{"#!/usr/bin/env -S bash -eu", true},
+		{"#!/bin/bash", true},
+		{"#!/usr/local/bin/zsh -f", true},
+		{"", true}, // no shebang: git runs it with sh
+		{"#!/usr/bin/env python3", false},
+		{"#!/usr/bin/python", false},
+		{"#!/usr/bin/env node", false},
+		{"#!/usr/bin/perl -w", false},
+	} {
+		if got := posix(tc.line + "\necho hi\n"); got != tc.want {
+			t.Errorf("posix(%q) = %v, want %v", tc.line, got, tc.want)
+		}
+	}
+}

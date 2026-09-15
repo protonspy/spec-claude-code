@@ -304,7 +304,11 @@ func TestRulesStayShortEnoughToBePreloaded(t *testing.T) {
 			t.Fatalf("%s: %v", f.Name, err)
 		}
 		name := path.Base(f.Rel)
-		lines := strings.Count(strings.TrimRight(raw, "\n"), "\n") + 1
+		// The prose, not the `paths:` header in front of it. The header is what
+		// takes a rule *out* of the preloaded set, so counting it against the
+		// budget the preloaded set exists to hold would charge a rule for the lines
+		// that stopped it being charged at all.
+		lines := strings.Count(strings.TrimRight(ruleBody(raw), "\n"), "\n") + 1
 
 		limit, capped := grandfathered[name]
 		if !capped {
@@ -974,7 +978,7 @@ var ladderInvariants = []string{
 // have to survive the header synthesis as well as the editing.
 func TestTheLadderKeepsItsCarveOuts(t *testing.T) {
 	for _, h := range paths.Harnesses() {
-		raw, err := renderRule(h, ladderRule)
+		raw, err := ruleAsShipped(h, ladderRule)
 		if err != nil {
 			t.Fatalf("%s: %v", h.ID, err)
 		}
@@ -1004,7 +1008,7 @@ func TestTheLadderKeepsItsCarveOuts(t *testing.T) {
 // elsewhere, and this is what keeps the route from being edited away separately
 // from the invariant that needs it.
 func TestTheLadderPointsTheRequirementSomewhereElse(t *testing.T) {
-	raw, err := renderRule(paths.Claude, ladderRule)
+	raw, err := ruleAsShipped(paths.Claude, ladderRule)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -1020,9 +1024,9 @@ func TestTheLadderPointsTheRequirementSomewhereElse(t *testing.T) {
 	}
 }
 
-// renderRule is one rule as a harness receives it, found by the name it ships
+// ruleAsShipped is one rule as a harness receives it, found by the name it ships
 // under rather than by the path it lands at — which differs per harness.
-func renderRule(h paths.Harness, name string) (string, error) {
+func ruleAsShipped(h paths.Harness, name string) (string, error) {
 	for _, f := range Workspace(h) {
 		if f.Name == name {
 			return Render(h, f)
@@ -1058,7 +1062,7 @@ func (e errNoSuchRule) Error() string {
 // uses wherever a change is cheap to make and expensive to make by accident.
 func TestTheTemplateVersionMovesWithTheTemplates(t *testing.T) {
 	// Bump Version, then replace this with the digest the failure prints.
-	const fingerprint = "d8eb76d69f2b335b93f20d492661f882e80ad7815d7a863a27c2631db05a7504"
+	const fingerprint = "32ec486ca64c66ba775896f352adf72c33cf50256770a4eb9e4b8480140d93f8"
 
 	sum := sha256.New()
 	// Version goes into the hash, and without it this test does not do the job its
@@ -1091,5 +1095,117 @@ Bump Version (currently %q) and set fingerprint in this test to:
 A template that changes while Version holds leaves two different sets of bytes
 under one number, and the manifest can no longer tell a pristine file from a
 stale one.`, Version, got)
+	}
+}
+
+// ruleBody is a rendered rule without the `paths:` header, when it has one.
+func ruleBody(raw string) string {
+	const fence = "---\n"
+	if !strings.HasPrefix(raw, fence) {
+		return raw
+	}
+	rest := raw[len(fence):]
+	end := strings.Index(rest, "\n"+fence)
+	if end < 0 {
+		return raw
+	}
+	return strings.TrimLeft(rest[end+len("\n"+fence):], "\n")
+}
+
+// A scoped rule is one whose failure something else reports, and that is the whole
+// bar — so it is checked rather than trusted to the comment that states it.
+//
+// A scope moves a rule from "in context before the decision" to "in context when
+// the file is opened", which is a real loss and is only survivable because
+// `scc validate` catches the result. A rule scoped without that safety net is a
+// rule the session that never opens the file simply does not have, with nothing
+// downstream to notice.
+func TestOnlyRulesAValidatorBacksAreScoped(t *testing.T) {
+	// The validator that reports what each scoped rule prevents. Adding a scope
+	// means adding a line here, which is the moment to check there really is one.
+	backed := map[string]string{
+		"tasks.md":          "spec and plan report a task line that breaks the grammar",
+		"specs.md":          "spec reports EARS and traceability",
+		"knowledge-base.md": "wiki, adr, glossary, stack and codewiki report docs/",
+	}
+	for _, r := range Rules() {
+		if len(r.scope) == 0 {
+			continue
+		}
+		if _, ok := backed[r.name]; !ok {
+			t.Errorf("%s is scoped, so it reaches the agent only once a matching file is open — "+
+				"name the validator that reports what it prevents, or take the scope off", r.name)
+		}
+	}
+	// And the scope has to reach the files the rule is about, or it is a rule
+	// nothing ever loads.
+	for _, r := range Rules() {
+		for _, g := range r.scope {
+			if !strings.Contains(g, "*") {
+				t.Errorf("%s: scope %q matches one path rather than a tree", r.name, g)
+			}
+		}
+	}
+}
+
+// The scoped rules are scoped on Claude Code and nowhere else.
+//
+// On Codex and opencode nothing preloads rules/ at all, so there is nothing for a
+// scope to save and the header would be two lines of a dialect their loaders do
+// not read, in front of a file the agent was told to open.
+func TestOnlyAHarnessThatReadsAScopeGetsOne(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		for _, f := range Workspace(h) {
+			if f.Kind != Rule || len(f.Scope) == 0 {
+				continue
+			}
+			raw, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s/%s: %v", h.ID, f.Name, err)
+			}
+			got := strings.HasPrefix(raw, "---\npaths:\n")
+			if got != h.ScopedRules {
+				t.Errorf("%s: %s has a paths: header = %v, want %v (ScopedRules is %v)",
+					h.ID, f.Name, got, h.ScopedRules, h.ScopedRules)
+			}
+		}
+	}
+}
+
+// A skill's description is the only part of it that is never free.
+//
+// The harness loads every skill's `description` at session start to decide when to
+// invoke it, and leaves the body until it does — so the body is paid once, by the
+// run that needed it, and the description is paid by every request of every
+// session whether the skill is used or not. Eight of them at ~500 characters each
+// is a preloaded rule nobody counted.
+//
+// 340 is generous for what a description has to do: say what the skill owns, and
+// say when it fires. What it does not have to do is enumerate the findings it
+// clears — `scc validate` names the rule, the skill's own body has the table, and
+// a description listing three of six shapes is worse than one saying "any adr.*
+// finding", which is both shorter and complete.
+func TestSkillDescriptionsStayShortEnoughToPreload(t *testing.T) {
+	const budget = 340
+	total := 0
+	for _, skill := range Skills() {
+		raw, err := Content("skills/" + skill + "/SKILL.md")
+		if err != nil {
+			t.Fatalf("%s: %v", skill, err)
+		}
+		m, err := splitMeta(skill, raw)
+		if err != nil {
+			t.Fatalf("%s: %v", skill, err)
+		}
+		total += len(m.description)
+		if n := len(m.description); n > budget {
+			t.Errorf("skills/%s: description is %d characters, over the %d-character budget — "+
+				"it is loaded into every request of every session, used or not", skill, n, budget)
+		}
+	}
+	// And the set as a whole, because eight descriptions each just under the
+	// budget is the same bill arriving in instalments.
+	if total > 2400 {
+		t.Errorf("the skill descriptions come to %d characters preloaded; keep the set under 2400", total)
 	}
 }

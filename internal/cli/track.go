@@ -48,7 +48,7 @@ func runSpecTrack(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	name, ok := artifactName(rest, "spec")
 	if !ok {
@@ -277,7 +277,7 @@ func runSpecSync(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	target, ok := resolveRoot(*root)
 	if !ok || !requireWorkspace(target) {

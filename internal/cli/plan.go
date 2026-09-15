@@ -65,7 +65,7 @@ func runPlanNew(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !kick.validate() {
 		return ExitError
@@ -146,7 +146,7 @@ func runPlanApprove(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	name, ok := artifactName(rest, "plan")
 	if !ok {
@@ -217,7 +217,7 @@ func runPlanReseal(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	name, ok := artifactName(rest, "plan")
 	if !ok {
@@ -302,7 +302,7 @@ func runPlanList(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "plan list") {
 		return ExitError
@@ -358,7 +358,7 @@ func runPlanDelete(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	name, ok := artifactName(rest, "plan")
 	if !ok {
