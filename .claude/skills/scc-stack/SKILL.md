@@ -1,6 +1,7 @@
 ---
-name: stack
-description: Own docs/stack.md — every adopted technology with one line on why it earned its place. Use it before adding a dependency to go.mod, package.json, or any other manifest; when a technology is being swapped, dropped, or evaluated; and when `scc validate` reports stack.missing or stack.undocumented-dependency, which means something is installed that nobody recorded a decision about.
+name: scc-stack
+description: Own docs/stack.md — every adopted technology with one line on why it earned its place. Use it before adding a dependency to any manifest, when a technology is swapped or dropped, and on any stack.* finding.
+argument-hint: [technology being adopted or dropped]
 ---
 
 You own `docs/stack.md`. The rule it enforces is in
@@ -8,9 +9,17 @@ You own `docs/stack.md`. The rule it enforces is in
 not listed here is an open decision, never something adopted silently.**
 
 This is checkable because dependency manifests are structured data. `scc validate`
-reads the direct dependencies out of `go.mod` and `package.json` and reports any
-that `stack.md` does not mention. Indirect dependencies are skipped — nobody decided
-those.
+reads the direct dependencies out of every manifest it knows — `go.mod`,
+`package.json`, `requirements.txt`, `pyproject.toml`, `Cargo.toml`,
+`composer.json`, `pom.xml` — and reports any that `stack.md` does not mention.
+Indirect dependencies are skipped: nobody decided those.
+
+## Nothing asked for
+
+`$ARGUMENTS` is the technology being adopted or dropped. Empty, run `scc validate`
+and work through the `stack.undocumented-dependency` findings: for each, either
+record the decision or establish that nobody can justify the dependency and remove
+it. Both are correct outcomes; listing a name with no reason is not.
 
 ## Adding a dependency is two steps
 

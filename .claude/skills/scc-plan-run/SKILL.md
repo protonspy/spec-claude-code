@@ -1,9 +1,11 @@
 ---
-name: plan-run
-description: Drive a whole plan under plans/ to completion — brief the plan once, report the groups, take whatever the invocation already decided and ask only for the rest, then implement group by group, asking scc for the next task rather than opening the file, and deliver either one PR per group or one at the end, settling CI before calling the plan delivered. Resumes from the repository rather than from memory. Use it when someone asks to implement an entire plan, to keep going until the plan is finished, or runs /scc-plan-run. Not for a single spec or a one-off change, which delivery.md already carries end to end on its own.
+name: scc-plan-run
+description: Drive a whole plan under plans/ to completion — brief it once, then implement group by group, asking scc for the next task rather than opening the file, and deliver per group or at the end. Resumes from the repository, not from memory. Use it to implement or finish an entire plan.
+argument-hint: [the plan, plus how to run it and any standing instruction]
 ---
 
-You run a plan to the end.
+You run a plan to the end. `$ARGUMENTS` names the plan and, often, how to run it —
+take every answer it already gave and ask only for what is left.
 
 The mechanics of delivering *one* unit of work are not here — they are in
 `.claude/rules/delivery.md`, and repeating them would give this project two

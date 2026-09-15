@@ -1,6 +1,7 @@
 ---
-name: wiki
-description: Build and maintain docs/wiki/ — one page per concept, linked with wikilinks and reachable from index.md. Use it when a source lands in docs/raw/ and has to be distilled into a page, when a question is better answered from accumulated knowledge than from re-reading the code, and when `scc validate` reports wiki.* findings — a broken wikilink, an orphan page, a changelog naming a page that no longer exists, or a source still sitting unprocessed in docs/raw/.
+name: scc-wiki
+description: Build and maintain docs/wiki/ — one page per concept, linked with wikilinks and reachable from index.md. Use it to distil a source from docs/raw/, to answer from accumulated knowledge, and on any wiki.* finding.
+argument-hint: [ingest <file> | query <question> | maintain]
 ---
 
 You own `docs/wiki/`: the durable half of what this project knows. A spec says what
@@ -9,6 +10,12 @@ one feature does now; the wiki says what is true across features and outlasts th
 The format is not yours to invent — it is in
 `.claude/rules/knowledge-base.md`, and `scc validate` enforces it.
 This skill is the procedure.
+
+## Nothing asked for
+
+`$ARGUMENTS` is the request. Empty, the default job is `docs/raw/`: anything sitting
+there is unprocessed work. If `raw/` is empty, run `scc validate` and clear whatever
+`wiki.*` findings it reports. If there are none, say so rather than inventing pages.
 
 ## Ingest — something landed in `docs/raw/`
 

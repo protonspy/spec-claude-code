@@ -1,3 +1,8 @@
+---
+paths:
+  - "docs/**"
+---
+
 # The knowledge base — `docs/`
 
 A spec answers *what this feature does now*. `docs/` answers *why* — the durable

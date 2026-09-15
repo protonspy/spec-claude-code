@@ -1,6 +1,7 @@
 ---
-name: prd
-description: Turn an initiative that spans more than one feature into a plan under plans/ — a short header, a checklist of tasks, and references to the specs that will be built separately. Use it when someone arrives with a PRD, a roadmap item, an epic, or a rough idea too large for one spec, and the first job is to find out what it actually decomposes into. For a single feature whose shape is already clear, skip this and run `scc spec new`.
+name: scc-prd
+description: Turn an initiative spanning more than one feature into a plan under plans/: a short header, a checklist, and references to the specs built separately. Use it for a PRD, a roadmap item, an epic, or an idea too large for one spec.
+argument-hint: [the initiative, epic, or PRD]
 ---
 
 You take an initiative that is too big for one spec and turn it into a plan: one
@@ -11,6 +12,12 @@ roadmap line, a paragraph in a chat. It is not an artifact this project keeps. T
 artifact is a **plan**, and the vocabulary in
 `.claude/rules/routing.md` is what the rest of the workspace uses. Do not
 create a `docs/prd/` directory.
+
+## Nothing asked for
+
+`$ARGUMENTS` is the initiative. Check the routing question before you start: work
+that is one feature with unsettled requirements is a spec, not a plan — run
+`scc spec new <feature>` rather than wrapping one feature in a plan for ceremony.
 
 ## First, check this is a plan at all
 

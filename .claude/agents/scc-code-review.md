@@ -1,5 +1,5 @@
 ---
-name: code-review
+name: scc-code-review
 description: Reviews a diff for correctness and quality against the task list, re-runs the feature's tests and lint, and reports. Use it after the last task of a spec or plan is verified and before opening the PR — never on your own work as the author.
 tools: Read, Grep, Glob, Bash
 model: sonnet
