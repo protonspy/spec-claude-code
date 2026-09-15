@@ -32,9 +32,9 @@ func runValidateAll(args []string) int {
 	// pull request — and a bare pre-commit run never waits on a build.
 	withChecks := fs.Bool("checks", false, "also run this workspace's build, format, lint and test commands")
 	jsonOut := addJSON(fs)
-	rest, err := parseFlags(fs, args)
+	rest, err := parseFlags(fs, helpWord(args))
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "validate") {
 		return ExitError
@@ -70,13 +70,20 @@ func runValidateAll(args []string) int {
 	// Counts per validator first, then the findings themselves. "Few findings, each
 	// fixable" is easiest to violate right here, where every check reports at once —
 	// so the shape of the output has to carry the summary before the detail.
+	//
+	// Only the validators that found something, though. A clean run printed twelve
+	// lines to say nothing happened, eleven of them a validator's name beside a
+	// zero, and this is the command the pre-commit hook runs and an agent reads back
+	// on every commit. What a reader needs from a clean run is the one line saying
+	// it was clean; what they need from a dirty one is which check fired, and that
+	// line is still here.
 	for _, r := range results {
-		line := fmt.Sprintf("%-12s %d", r.Name, r.Findings)
-		if r.Findings == 0 {
-			render.Info(line)
-			continue
+		if r.Findings > 0 {
+			render.Warn(fmt.Sprintf("%-12s %d", r.Name, r.Findings))
 		}
-		render.Warn(line)
+	}
+	if set.Empty() {
+		render.Info(fmt.Sprintf("%d validators · 0 findings", len(results)))
 	}
 	set.Report("validate")
 	return set.ExitCode()

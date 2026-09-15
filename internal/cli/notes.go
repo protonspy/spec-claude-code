@@ -94,7 +94,7 @@ func runNotesAdd(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	// The text is the positionals joined, so an unquoted sentence arrives as the
 	// sentence it was typed as. `scc graph explore` does the same, for the same
@@ -297,7 +297,7 @@ func runNotesFind(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	target, ok := resolveRoot(*root)
 	if !ok || !requireWorkspace(target) {
@@ -363,7 +363,7 @@ func runNotesShow(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) != 1 {
 		render.Err(fmt.Sprintf("expected exactly one note id, got %d", len(rest)))
@@ -411,7 +411,7 @@ func runNotesIndex(args []string, which string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "notes "+which) {
 		return ExitError
@@ -453,7 +453,7 @@ func runNotesRemove(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) != 1 {
 		render.Err(fmt.Sprintf("expected exactly one note id, got %d", len(rest)))

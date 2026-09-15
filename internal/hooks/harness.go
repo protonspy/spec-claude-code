@@ -399,7 +399,24 @@ func mine(raw json.RawMessage) bool {
 		return false
 	}
 	for _, h := range obj.Hooks {
-		if strings.Contains(h.Command, Prog+" hooks run ") {
+		if ours(h.Command) {
+			return true
+		}
+	}
+	return false
+}
+
+// ours reports whether a settings entry's command is one scc wrote.
+//
+// This decides what a remove takes out and what an install replaces, so a loose
+// match is scc editing somebody else's entry. A substring test claimed
+// `my-scc hooks run stop` and `scc hooks run stop | tee log` alike; the command is
+// one scc composes itself, so it can be recognized exactly — trimmed for the
+// whitespace a hand-edited settings file may carry, and nothing else.
+func ours(cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	for _, st := range AgentStages() {
+		if cmd == command(st) {
 			return true
 		}
 	}

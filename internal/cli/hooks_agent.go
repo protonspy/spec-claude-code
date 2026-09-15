@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/protonspy/spec-claude-code/internal/codegraph"
@@ -12,6 +13,7 @@ import (
 	"github.com/protonspy/spec-claude-code/internal/gate"
 	"github.com/protonspy/spec-claude-code/internal/git"
 	"github.com/protonspy/spec-claude-code/internal/hooks"
+	"github.com/protonspy/spec-claude-code/internal/validate"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
 
@@ -234,16 +236,61 @@ func stopContext(root string) []string {
 	return out
 }
 
-// stopFindings runs what a turn can afford: every validator that reads a file,
-// and neither of the two that do not. The pull request is a network call and the
-// test suite is a test suite — both belong at the push, which is where the hook
-// that runs them is.
+// stopFindings runs what a turn can afford and reports what a turn can act on.
+//
+// What it can afford: every validator that reads a file, and neither of the two
+// that do not. The pull request is a network call and the test suite is a test
+// suite — both belong at the push, which is where the hook that runs them is.
+//
+// What it can act on is the narrower half, and it is the Stop contract rather
+// than a nicety, because speaking here continues the conversation. Two kinds of
+// finding can never clear in the next turn and so would re-fire at the end of
+// every turn for the life of the branch:
+//
+//   - **a signature in a commit that is already made** — a rebase, not an edit,
+//     so `attribution` comes out of this run entirely.
+//   - **a finding in a file this branch never touched** — a migrated plan, a
+//     stale ADR, whatever the workspace was carrying before this work started.
+//     The agent is told to go and fix a file its task has nothing to do with,
+//     every turn, and correctly declines.
+//
+// Both are reported in full by `scc validate`, which is where somebody asking
+// about the workspace gets the whole answer. Here the question is narrower: what
+// did this turn just break.
 func stopFindings(root string) *finding.Set {
-	set, err := gateFindings(root, false)
+	set, err := gateFindings(root, false, validate.WithoutAttribution())
 	if err != nil {
 		return nil
 	}
-	return set
+	return touchedHere(root, set)
+}
+
+// touchedHere keeps the findings that sit in a file this branch has changed.
+//
+// Its answer when git cannot say — no repository, an unborn HEAD, a base that
+// will not resolve — is the whole set, unfiltered. That direction is deliberate:
+// the filter exists to keep the stage from nagging about work nobody here did,
+// and a workspace where the question cannot be asked is one where every finding
+// is as likely as not to be this session's.
+func touchedHere(root string, set *finding.Set) *finding.Set {
+	if set == nil || set.Empty() {
+		return set
+	}
+	changes, err := git.Changed(root, "")
+	if err != nil || len(changes) == 0 {
+		return set
+	}
+	touched := make(map[string]bool, len(changes))
+	for _, c := range changes {
+		touched[finding.Rel(c.Path)] = true
+	}
+	out := &finding.Set{}
+	for _, f := range set.Sorted() {
+		if touched[finding.Rel(f.File)] {
+			out.Add(f)
+		}
+	}
+	return out
 }
 
 // stopFindingLines is the findings themselves, capped.
@@ -275,7 +322,18 @@ func stopFindingLines(set *finding.Set) []string {
 // undeliveredLine says that finished work has not left the machine, and stops
 // there. It names the commands rather than running them: publishing is the
 // agent's act, in its next turn, where a person can see it happen.
+//
+// **Finished is the word that does the work, and a dirty tree is not it.** Said on
+// the first commit of a unit of work, this asks for a push in the middle of it —
+// and because Stop is a continuation, the ask is acted on: a push per turn, each
+// one paying for the pre-push gate's build, lint and suite, and a pull request
+// opened on a third of a feature. Uncommitted changes are the cheapest available
+// evidence that the work is still in hand, so the line waits for them to be gone.
+// A clean tree with commits the remote does not have is the state this is for.
 func undeliveredLine(root string) string {
+	if git.Dirty(root) {
+		return ""
+	}
 	u := git.UndeliveredWork(root)
 	if !u.Any() {
 		return ""
@@ -299,6 +357,45 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return s
+}
+
+// stale reports whether dir's graph is older than something inside it.
+//
+// It exists because this runs at the end of every turn, and CodeGraph is a node
+// process: an unconditional sync spends one on a turn that answered a question and
+// wrote nothing, and on Windows that is most of a second of the user waiting for a
+// re-index of a tree nobody edited. The comparison is a stat per changed file
+// rather than a walk, which is what keeps the check cheaper than the thing it is
+// avoiding.
+//
+// The answer when it cannot tell — no `.codegraph` to stat, no list of changed
+// files, a file that has since been deleted — is stale. Re-indexing needlessly
+// costs a subprocess; skipping a sync that was needed leaves the agent with an
+// index that answers confidently about code that changed, and the rule this
+// implements says that is the worse of the two.
+func stale(dir string, changed []git.Change) bool {
+	info, err := os.Stat(filepath.Join(dir, codegraph.Dir))
+	if err != nil {
+		return true
+	}
+	if len(changed) == 0 {
+		return true
+	}
+	indexed := info.ModTime()
+	for _, c := range changed {
+		p := c.Path
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(dir, filepath.FromSlash(p))
+		}
+		fi, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if fi.ModTime().After(indexed) {
+			return true
+		}
+	}
+	return false
 }
 
 // syncGraph brings every scoped graph up to date, silently.
@@ -333,6 +430,11 @@ func syncGraph(root string) {
 	if err != nil {
 		return
 	}
+	// What this branch has touched, asked once and reused per root. It is what
+	// makes the sync conditional: an index is re-run when a file it covers is
+	// newer than it is, and skipped otherwise.
+	changed, _ := git.Changed(root, "")
+
 	roots, _ := codegraph.Roots(root, scope)
 	for _, r := range roots {
 		// Only a tree that already has a graph. Building one from a hook would turn
@@ -340,6 +442,9 @@ func syncGraph(root string) {
 		// is a minute nobody asked for — `scc launch` and `scc graph build` are
 		// where that decision is made deliberately.
 		if !r.Indexed() {
+			continue
+		}
+		if !stale(r.Dir, changed) {
 			continue
 		}
 		// Output discarded rather than forwarded: stdout belongs to the hook's own

@@ -76,6 +76,29 @@ func runStdin(t *testing.T, stdin string, args ...string) (stdout, stderr string
 	return stdout, stderr, code
 }
 
+// decode unmarshals a command's --json document into v.
+//
+// What these assertions are about is the shape of the document, never the
+// whitespace between its keys: emitJSON indents for a terminal and writes compact
+// for everything else, so a test capturing a pipe sees the compact spelling and a
+// string match on `"count": 0` would be asserting on the reader rather than on the
+// command.
+func decode(t *testing.T, stdout string, v any) {
+	t.Helper()
+	if err := json.Unmarshal([]byte(stdout), v); err != nil {
+		t.Fatalf("could not decode the JSON document: %v\n%s", err, stdout)
+	}
+}
+
+// emptyList is the shape `plan list` and `spec list` promise on an empty
+// workspace: the key present, the array empty rather than null, and a zero count —
+// so a caller can index it without a nil check.
+type emptyList struct {
+	Plans []json.RawMessage `json:"plans"`
+	Specs []json.RawMessage `json:"specs"`
+	Count int               `json:"count"`
+}
+
 func TestVersionPrintsStampedVersion(t *testing.T) {
 	stdout, _, code := run(t, "version")
 	if code != ExitOK {

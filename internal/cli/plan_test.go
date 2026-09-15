@@ -137,7 +137,9 @@ func TestPlanListOnAnEmptyWorkspace(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit = %d", code)
 	}
-	if !strings.Contains(stdout, `"plans": []`) || !strings.Contains(stdout, `"count": 0`) {
+	var got emptyList
+	decode(t, stdout, &got)
+	if got.Plans == nil || len(got.Plans) != 0 || got.Count != 0 {
 		t.Errorf("empty list = %s, want an empty array and a zero count", stdout)
 	}
 }
@@ -156,7 +158,9 @@ func TestPlanListIgnoresNonPlans(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit = %d", code)
 	}
-	if !strings.Contains(stdout, `"count": 0`) {
+	var got emptyList
+	decode(t, stdout, &got)
+	if got.Count != 0 {
 		t.Errorf("list picked up something that is not a plan: %s", stdout)
 	}
 }

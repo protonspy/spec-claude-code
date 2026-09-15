@@ -64,7 +64,7 @@ func runGraphBuild(args []string) int {
 	force := fs.Bool("force", false, "rebuild from scratch even when a graph is already there")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "graph build") {
 		return ExitError
@@ -107,7 +107,7 @@ func runGraphSync(args []string) int {
 	root := addRoot(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "graph sync") {
 		return ExitError
@@ -134,7 +134,7 @@ func runGraphStatus(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "graph status") {
 		return ExitError
@@ -204,7 +204,7 @@ func runGraphQuery(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	query, ok := graphQueryArg(rest, "query")
 	if !ok {
@@ -234,7 +234,7 @@ func runGraphExplore(args []string) int {
 	root := addRoot(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	query, ok := graphQueryArg(rest, "explore")
 	if !ok {

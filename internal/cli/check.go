@@ -130,7 +130,7 @@ func runCheckRun(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	target, ok := resolveRoot(*root)
 	if !ok || !requireWorkspace(target) {
@@ -257,7 +257,7 @@ func runCheckSet(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	target, ok := resolveRoot(*root)
 	if !ok || !requireWorkspace(target) {
@@ -290,7 +290,11 @@ func runCheckSet(args []string) int {
 	}
 	// A --min with no command is how a floor is raised on a gate that already has
 	// one; a command with no --min leaves the floor where it was.
-	if fs.Lookup("min").Value.String() != "0" {
+	// Whether the caller typed it, not whether the value came out non-zero:
+	// reading the parsed value makes `--min 0` indistinguishable from an absent
+	// flag, and 0 is the one floor somebody sets deliberately — a project turning
+	// the floor off while keeping the gate.
+	if isSet(fs, "min") {
 		cfg.MinCoverage = *min
 	}
 	if cfg.Command(k) == gate.Skipped {
@@ -331,7 +335,7 @@ func decide(args []string, cmd, value, said string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	target, ok := resolveRoot(*root)
 	if !ok || !requireWorkspace(target) {
@@ -371,7 +375,7 @@ func saveConfig(root string, cfg gate.Config, jsonOut bool, said string) int {
 			gate.Config
 			Floor float64  `json:"floor"`
 			Files []string `json:"files"`
-		}{cfg, cfg.Floor(), relAll(wrote)})
+		}{cfg, cfg.Floor(), relAll(root, wrote)})
 	}
 	for _, f := range wrote {
 		render.OK(fmt.Sprintf("%s — %s", finding.Rel(workspace.Relative(mustCwd(), f)), said))
@@ -386,7 +390,7 @@ func runCheckShow(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "check show") {
 		return ExitError
@@ -428,14 +432,16 @@ func runCheckShow(args []string) int {
 
 // relAll makes a list of absolute paths printable and stable across machines,
 // which is what a JSON consumer needs from a field naming files in a repository.
-func relAll(paths []string) []string {
+//
+// Relative to the workspace root, which is what every other command's relPath
+// answers. Against the working directory the same manifest came back as
+// `.claude/scc-manifest.json` from the root and `../.claude/scc-manifest.json`
+// from `specs/` — one field naming one file two ways, which is exactly what a
+// consumer matching it against the manifest cannot do.
+func relAll(root string, paths []string) []string {
 	out := make([]string, 0, len(paths))
-	cwd := mustCwd()
 	for _, p := range paths {
-		if cwd != "" {
-			p = workspace.Relative(cwd, p)
-		}
-		out = append(out, finding.Rel(p))
+		out = append(out, relPath(root, p))
 	}
 	return out
 }

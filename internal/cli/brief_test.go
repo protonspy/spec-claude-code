@@ -172,7 +172,11 @@ func TestNextSaysWhyThereIsNothingToDo(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("--next on a finished plan = %d", code)
 	}
-	if !strings.Contains(stdout, `"done": true`) {
+	var next struct {
+		Done bool `json:"done"`
+	}
+	decode(t, stdout, &next)
+	if !next.Done {
 		t.Errorf("a finished plan must say so:\n%s", stdout)
 	}
 

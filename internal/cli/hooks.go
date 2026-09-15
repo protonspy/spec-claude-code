@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/protonspy/spec-claude-code/internal/attribution"
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/gate"
+	"github.com/protonspy/spec-claude-code/internal/git"
 	"github.com/protonspy/spec-claude-code/internal/hooks"
 	"github.com/protonspy/spec-claude-code/internal/render"
 	"github.com/protonspy/spec-claude-code/internal/validate"
@@ -114,7 +116,7 @@ func runHooksInstall(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "hooks install") {
 		return ExitError
@@ -168,7 +170,7 @@ func runHooksCheck(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "hooks check") {
 		return ExitError
@@ -201,7 +203,7 @@ func runHooksRemove(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "hooks remove") {
 		return ExitError
@@ -304,7 +306,7 @@ func runHooksRun(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) == 0 {
 		render.Err(fmt.Sprintf("hooks run: name a stage (%s)", strings.Join([]string{
@@ -325,16 +327,70 @@ func runHooksRun(args []string) int {
 	case hooks.CommitMsg:
 		return runCommitMsg(rest[1:], *jsonOut)
 	case hooks.PrePush:
+		if !pushingAnything(hookStdin()) {
+			// git runs pre-push for a deletion and for a push that turns out to have
+			// nothing new, and it says which on stdin. Without reading it, `git push
+			// --delete` and `git push --tags` both paid for a full build, lint and
+			// test run to gate a push that carries no commits — minutes, for nothing,
+			// on the command somebody reaches for to tidy up.
+			return ExitOK
+		}
 		return runGate(target, *jsonOut, true)
 	case hooks.StageSessionStart, hooks.StageUserPrompt, hooks.StageStop:
 		// A different protocol downstream of the same command: the harness hands
 		// the event in on stdin and reads a document back, where git reads an exit
 		// code. --json is ignored here because the output is already the harness's
 		// JSON and there is no second shape to ask for.
-		return runAgentStage(target, stage, os.Stdin)
+		return runAgentStage(target, stage, hookStdin())
 	default:
 		return runGate(target, *jsonOut, false)
 	}
+}
+
+// hookStdin is the hook's input, or an empty one when nobody is piping.
+//
+// The stages here are written for git and for the harness, both of which hand
+// their input in on a pipe. A person running `scc hooks run stop` to see what it
+// does — which the usage text invites — has a terminal on stdin, and a read of
+// that blocks until they work out that it wants a Ctrl-D. An empty reader is the
+// honest answer: there is no event, and every stage already degrades to silence
+// when the event is not what it expected.
+func hookStdin() io.Reader {
+	if isTerminal(os.Stdin) {
+		return strings.NewReader("")
+	}
+	return os.Stdin
+}
+
+// pushingAnything reads git's pre-push input and reports whether any ref is
+// actually being updated.
+//
+// One line per ref, `<local ref> <local oid> <remote ref> <remote oid>`, and a
+// local oid of all zeros is a deletion. No lines at all means git found nothing to
+// push. Unreadable input, or a shape this does not recognize, answers yes: the
+// gate running when it need not have costs time, and the gate not running when it
+// should have is the thing it exists to prevent.
+func pushingAnything(in io.Reader) bool {
+	raw, err := io.ReadAll(in)
+	if err != nil {
+		return true
+	}
+	body := strings.TrimSpace(string(raw))
+	if body == "" {
+		// A person at a terminal, or a git that passed nothing. Not evidence that
+		// there is nothing to push.
+		return true
+	}
+	for _, line := range strings.Split(body, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return true
+		}
+		if strings.Trim(fields[1], "0") != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // runGate is the pre-commit and pre-push check: the same run `scc validate` does,
@@ -365,9 +421,9 @@ func runGate(root string, jsonOut, pr bool) int {
 // repository that follows scc's rules without being one of its workspaces — scc's
 // own, for one — where the artifact validators have nothing to read and the rule
 // about what a commit may say still binds.
-func gateFindings(root string, pr bool) (*finding.Set, error) {
+func gateFindings(root string, pr bool, extra ...validate.Option) (*finding.Set, error) {
 	if workspace.IsWorkspace(root) {
-		var opts []validate.Option
+		opts := append([]validate.Option{}, extra...)
 		if pr {
 			opts = append(opts, validate.WithPR())
 			// The suite runs here and only here. A push is where a branch becomes a
@@ -425,7 +481,7 @@ func runCommitMsg(rest []string, jsonOut bool) int {
 		return ExitError
 	}
 	set := &finding.Set{}
-	for _, hit := range attribution.Scan(commitMessage(string(raw))) {
+	for _, hit := range attribution.Scan(commitMessage(string(raw), git.CommentChar(filepath.Dir(path)))) {
 		set.Addf(finding.Rel(path), hit.Line, "attribution."+hit.Rule,
 			"%s — the work is the user's, and the record says so", hit.Match)
 	}
@@ -450,13 +506,28 @@ func runCommitMsg(rest []string, jsonOut bool) int {
 // the comment character and a verbose commit pastes the entire diff below the
 // scissors — a check reading either would report findings on text that never
 // reaches a commit, and report them on every commit.
-func commitMessage(raw string) string {
+// The comment character is asked of git rather than assumed to be `#`. A
+// repository that sets `core.commentChar` to something else — `;` is the common
+// choice, for people who write `#123` at the start of a line — keeps its template
+// lines and its scissors line spelled with that character, and a check that went
+// on looking for `#` read git's own template as part of the message and scanned
+// the whole appended diff for signatures.
+//
+// `auto` is the one value that cannot be resolved by asking: git picks a character
+// at write time from the ones the message does not already use. It falls back to
+// `#`, which is what git picks unless the message has a line starting with one —
+// and in that case the cost is a comment line read as content, which checks more
+// text rather than less.
+func commitMessage(raw, comment string) string {
+	if comment == "" || comment == "auto" {
+		comment = "#"
+	}
 	var out []string
 	for _, line := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
-		if strings.HasPrefix(line, scissors) {
+		if strings.HasPrefix(line, comment) && strings.Contains(line, scissorsBody) {
 			break
 		}
-		if strings.HasPrefix(line, "#") {
+		if strings.HasPrefix(line, comment) {
 			continue
 		}
 		out = append(out, line)
@@ -464,5 +535,7 @@ func commitMessage(raw string) string {
 	return strings.Join(out, "\n")
 }
 
-// scissors is what `git commit --verbose` puts above the diff it appends.
-const scissors = "# ------------------------ >8 ------------------------"
+// scissorsBody is what `git commit --verbose` writes between the comment
+// character and the end of the line, above the diff it appends. Matched without
+// the character in front of it, because that character is configuration.
+const scissorsBody = "------------------------ >8 ------------------------"

@@ -45,9 +45,9 @@ func runInit(args []string) int {
 		picks[h.ID] = fs.Bool(h.ID, false, "scaffold for "+h.ID+" ("+h.EntryFile+", "+h.Dir+"/)")
 	}
 	jsonOut := addJSON(fs)
-	rest, err := parseFlags(fs, args)
+	rest, err := parseFlags(fs, helpWord(args))
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "init") {
 		return ExitError

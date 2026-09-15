@@ -125,7 +125,7 @@ func runMapIndex(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "map index") {
 		return ExitError
@@ -196,7 +196,7 @@ func runMapOutline(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) == 0 {
 		render.Err("map outline needs an artifact: a path, a plan name, or a feature name")
@@ -315,7 +315,7 @@ func runMapTasks(args []string) int {
 	group := fs.String("group", "", "only tasks in this numbering `group` (1, or 1.2)")
 	req := fs.String("req", "", "only tasks citing this `requirement` (R1.2)")
 	method := fs.String("method", "", "only tasks annotated `Unit` or TDD")
-	next := fs.Bool("next", false, "the one task to work on now: eligible, most urgent, lowest number")
+	next := fs.Bool("next", false, "the one task to work on now: eligible, most urgent, lowest number (named no artifact, the first with an open task, plans before specs — the answer names the file it came from)")
 	ready := fs.Bool("ready", false, "every eligible task, in the order --next would take them")
 	blocked := fs.Bool("blocked", false, "open tasks that are not eligible, each naming what it waits on")
 	deps := fs.Bool("deps", false, "the dependency edges alone, one line per task that has any")
@@ -325,7 +325,7 @@ func runMapTasks(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if *open && *done {
 		render.Err("--open and --done ask for opposite things")
@@ -675,7 +675,7 @@ func runMapBrief(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) == 0 {
 		render.Err("map brief needs an artifact: a path, a plan name, or a feature name")
@@ -796,7 +796,7 @@ func runMapShow(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) < 2 {
 		render.Err("map show needs an artifact and at least one address: `map show plans/x.md 1.2`")
@@ -862,7 +862,7 @@ func runMapBlocks(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) == 0 {
 		render.Err("map blocks needs an artifact")
@@ -918,7 +918,7 @@ func runMapFind(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) == 0 {
 		render.Err("map find needs something to look for")
@@ -974,7 +974,7 @@ func runMapTrace(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) != 1 {
 		render.Err("map trace takes one reference: a requirement (R1.2) or a spec (specs/<feature>/)")

@@ -20,8 +20,16 @@ import (
 // resealed on top, and the evidence would be gone in the same command that should
 // have reported it.
 
+// addNoVerify binds the flag that skips the seal check.
+//
+// Spelled `--no-seal-check` rather than `--no-verify`, which is what it was: git
+// spells "skip the hooks" `--no-verify`, scc installs git hooks, and an agent that
+// knows git reaches for it here expecting to get past `scc validate`. What it
+// would actually get is a plan's tamper-evidence turned off while every validator
+// still ran — the opposite of the ask, silently. The name says which check it
+// means; `SCC_SKIP_HOOKS=1` is the one that skips hooks.
 func addNoVerify(fs *flag.FlagSet) *bool {
-	return fs.Bool("no-verify", false, "skip the seal check on an approved plan (for diagnosis)")
+	return fs.Bool("no-seal-check", false, "skip the seal check on an approved plan (for diagnosis)")
 }
 
 // loadVerified is loadMany plus the seal check — the read path for every command

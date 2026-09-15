@@ -93,7 +93,7 @@ func runPlanMigrate(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	name, ok := artifactName(rest, "plan")
 	if !ok {

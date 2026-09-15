@@ -110,9 +110,9 @@ func TestDriftIsReportedAndActionable(t *testing.T) {
 		t.Errorf("patching a drifted plan = %d, want %d", code, ExitFindings)
 	}
 
-	// --no-verify is the diagnosis escape hatch, and nothing else.
-	if _, _, code := run(t, "map", "tasks", "sweep", "--root", root, "--no-verify"); code != ExitOK {
-		t.Errorf("--no-verify = %d", code)
+	// --no-seal-check is the diagnosis escape hatch, and nothing else.
+	if _, _, code := run(t, "map", "tasks", "sweep", "--root", root, "--no-seal-check"); code != ExitOK {
+		t.Errorf("--no-seal-check = %d", code)
 	}
 
 	if _, _, code := run(t, "plan", "reseal", "sweep", "--root", root); code != ExitError {

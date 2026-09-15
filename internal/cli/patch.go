@@ -118,7 +118,7 @@ func runPatchCheck(args []string, done bool) int {
 	pf := addPatchFlags(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) < 2 {
 		render.Err(name + " needs an artifact and at least one task number")
@@ -144,7 +144,7 @@ func runPatchTask(args []string) int {
 	priority := fs.Int("priority", 0, "set the priority: a whole `number` 1 or greater; 0 clears it")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) != 2 {
 		render.Err("patch task needs an artifact and one task number")
@@ -240,7 +240,7 @@ func runPatchAdd(args []string) int {
 	reason := fs.String("reason", "", "why this turned up after the plan was approved")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) != 1 {
 		render.Err("patch add needs an artifact")
@@ -316,7 +316,7 @@ func runPatchRemove(args []string) int {
 	reason := fs.String("reason", "", "why the work went away — required once the plan is approved")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) != 2 {
 		render.Err("patch rm needs an artifact and one task number")
@@ -344,7 +344,7 @@ func runPatchText(op string, args []string) int {
 	file := fs.String("file", "", "read the text from this `path` instead")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) != 2 {
 		render.Err(fmt.Sprintf("patch %s needs an artifact and one address", op))
@@ -376,7 +376,7 @@ func runPatchFrontmatter(args []string) int {
 	pf := addPatchFlags(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if len(rest) < 2 {
 		render.Err("patch fm needs an artifact and at least one key=value")

@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -326,14 +327,34 @@ func write(path, body string) error {
 
 // posix reports whether a script scc is about to append to is one git will run
 // with a POSIX shell.
+// It reads the interpreter out of the shebang rather than matching the line's
+// tail, because a shebang carries arguments: `#!/bin/sh -e` and `#!/usr/bin/env
+// bash -eu` are both ordinary hooks, and both were called non-POSIX and refused
+// even under --force. `env` is stepped over, since that is where the interpreter
+// name sits when it is used.
 func posix(doc string) bool {
 	line, _, _ := strings.Cut(strings.TrimSpace(doc), "\n")
 	if !strings.HasPrefix(line, "#!") {
 		// No shebang: git runs it with sh, which is what the block expects.
 		return true
 	}
+	fields := strings.Fields(strings.TrimPrefix(line, "#!"))
+	if len(fields) == 0 {
+		return true
+	}
+	interp := path.Base(filepath.ToSlash(fields[0]))
+	if interp == "env" && len(fields) > 1 {
+		// `env` may carry its own options before the program it runs.
+		for _, f := range fields[1:] {
+			if strings.HasPrefix(f, "-") || strings.Contains(f, "=") {
+				continue
+			}
+			interp = path.Base(filepath.ToSlash(f))
+			break
+		}
+	}
 	for _, sh := range []string{"sh", "bash", "dash", "zsh", "ksh"} {
-		if strings.HasSuffix(strings.TrimSpace(line), "/"+sh) || strings.HasSuffix(strings.TrimSpace(line), " "+sh) {
+		if interp == sh {
 			return true
 		}
 	}

@@ -41,9 +41,9 @@ func runUpdate(args []string) int {
 		picks[h.ID] = fs.Bool(h.ID, false, "update only the "+h.ID+" tree")
 	}
 	jsonOut := addJSON(fs)
-	rest, err := parseFlags(fs, args)
+	rest, err := parseFlags(fs, helpWord(args))
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "update") {
 		return ExitError

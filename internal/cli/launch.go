@@ -82,9 +82,9 @@ func runLaunch(args []string) int {
 	yes := fs.Bool("yes", false, "answer the install prompts with yes, for an unattended run")
 	dryRun := fs.Bool("dry-run", false, "print the command this would run, and run nothing")
 	jsonOut := addJSON(fs)
-	rest, err := parseFlags(fs, own)
+	rest, err := parseFlags(fs, helpWord(own))
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	mcpMode, err := headroom.ParseMCPMode(*mcp)
 	if err != nil {

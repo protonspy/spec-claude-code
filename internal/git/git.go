@@ -395,10 +395,44 @@ func parseLog(out string) []Commit {
 // it. Absence is a normal answer here as everywhere else in this package: a
 // directory that is not a repository has no hooks directory, which is not an
 // error to propagate.
-func HooksDir(dir string) (string, error) {
-	if p, err := run(Bin, dir, "config", "--get", "core.hooksPath"); err == nil && p != "" {
-		return absolute(dir, p), nil
+// Dirty reports whether the working tree has uncommitted changes, tracked or not.
+//
+// One `status --porcelain`, which is the cheapest question in this package that
+// reads the tree at all. Absence is a normal answer as everywhere else here: no
+// git, no repository, a status that will not run — all answer false, because a
+// caller asking "is this work finished" gets a less useful answer from an error
+// than from "as far as can be told, yes".
+func Dirty(dir string) bool {
+	out, err := run(Bin, dir, "status", "--porcelain", "--untracked-files=normal")
+	if err != nil {
+		return false
 	}
+	return strings.TrimSpace(out) != ""
+}
+
+// CommentChar is what this repository puts in front of a comment line in a commit
+// message template, from `core.commentChar`.
+//
+// Empty when it is unset, when git is not here, or when the question cannot be
+// asked — all of which the caller reads as the default. The literal string "auto"
+// comes back as itself rather than as a guess: git resolves that at write time
+// against the message being written, and a caller that has the message is in a
+// better position to decide what to do about it than this is.
+func CommentChar(dir string) string {
+	out, err := run(Bin, dir, "config", "--get", "core.commentChar")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+func HooksDir(dir string) (string, error) {
+	// `rev-parse --git-path hooks` already honours core.hooksPath, and it is the
+	// only one of the two that expands the `~` people actually write there. Asking
+	// `config --get` first looked like the more direct question and answered a
+	// configured `~/.githooks` with the literal string, which joined to
+	// `<repo>/~/.githooks` — a directory scc would create, write three hooks into,
+	// and report success for, while git went on reading the real one.
 	out, err := run(Bin, dir, "rev-parse", "--git-path", "hooks")
 	if err != nil {
 		return "", err

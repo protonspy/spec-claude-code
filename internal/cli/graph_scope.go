@@ -132,7 +132,7 @@ func runGraphScope(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	if !noPositionals(rest, "graph scope") {
 		return ExitError
@@ -185,7 +185,7 @@ func runGraphScopeSet(args []string) int {
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
-		return ExitError
+		return exitFor(err)
 	}
 	target, ok := resolveRoot(*root)
 	if !ok || !requireWorkspace(target) {
@@ -230,7 +230,7 @@ func writeScope(root string, scope []string, jsonOut bool) int {
 		return emitJSON(struct {
 			Scope []string `json:"scope"`
 			Files []string `json:"files"`
-		}{orEmpty(scope), relAll(wrote)})
+		}{orEmpty(scope), relAll(root, wrote)})
 	}
 	said := fmt.Sprintf("scope: %s", strings.Join(scope, ", "))
 	if len(scope) == 0 {
