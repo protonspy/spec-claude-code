@@ -226,7 +226,7 @@ import (
 // None of them is wrong about its own subject, which is why they survived review: a
 // rule is read one file at a time and audited the same way. The cost is the same as a
 // command that does not exist — the agent does what the line says, once.
-const Version = "28"
+const Version = "29"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
