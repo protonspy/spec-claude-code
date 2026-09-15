@@ -44,8 +44,8 @@ So the sections are conditional. Omit, don't fill:
 | has real alternatives with trade-offs | the alternatives and why one won — plus an ADR if it is hard to reverse |
 
 A heading filled with "N/A", or with prose written to satisfy the heading, reads as a
-decision nobody can tell apart from a real one. Delete the heading instead. `scc`
-never checks that a section is present: a required heading is a request for filler.
+decision nobody can tell apart from a real one. Delete the heading instead. **In a
+design**, `scc` requires no section: a required heading is a request for filler.
 
 ## tasks.md
 

@@ -29,8 +29,10 @@ The full suite runs at the end of the spec, or of each of a plan's groups. See
 A task that passes its tests with an unchecked error in it is not finished. Neither
 check substitutes for the other.
 
-The linter is whatever this project already uses. `scc` does not own it and does not
-run it, for the same reason it does not read your source.
+The linter is whatever this project already uses, and starting it per task is yours.
+`scc check` runs that same command at delivery, against the whole tree — the one place
+`scc` runs a command rather than reading a file, and deliberately not this one: per task
+the point is scope, and a tree-wide result is the feedback you cannot attribute.
 
 ## And the artifact
 

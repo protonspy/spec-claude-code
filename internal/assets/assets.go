@@ -210,7 +210,23 @@ import (
 // less than R1.2 says is the one failure this rule could cause, and it ships looking
 // like a clean diff. A deliberate ceiling is a note with a tag rather than a comment,
 // which notes.md had already argued for everything except this case.
-const Version = "27"
+// 28: five lines that said something the product does not do. An audit of the set for
+// ambiguity, prompted by porting ponytail, and the findings were all of one kind: a
+// sentence true of the artifact in front of it, read as a claim about the whole
+// product. artifacts.md called References the specs a plan decomposes into, where the
+// contract takes ADRs and links too. autonomy.md recorded the kickoff answers in
+// "`requirements.md` for a spec" and named no file for a plan, which has the same two
+// keys. specs.md said "`scc` never checks that a section is present" while arguing
+// against filler headings in a design — true there, false of a plan, where three
+// sections are required and the reader who believed it writes an invalid one.
+// verification.md said scc "does not own the linter and does not run it", which the
+// delivery gate stopped being true of. And ladder.md ran "before the code" without
+// saying what else runs before it, leaving two rules claiming the same moment.
+//
+// None of them is wrong about its own subject, which is why they survived review: a
+// rule is read one file at a time and audited the same way. The cost is the same as a
+// command that does not exist — the agent does what the line says, once.
+const Version = "28"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.

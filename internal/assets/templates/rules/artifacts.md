@@ -27,8 +27,8 @@ Read a file directly only when the question is about *this exact text* — prose
 about to rewrite, which is a spec's design and never a plan. **A plan's shape is
 closed**: the title, one to three sentences, then `## Why`, `## Paths`, `## References`,
 `## Out of scope`, `## Tasks`, `## Done when`, and any other heading is a finding.
-`## References` names the specs this decomposes into and carries no checkbox — that
-spec's state lives in that spec.
+`## References` is what this builds on — specs, ADRs, links — and carries no checkbox:
+a referenced spec's state lives in that spec.
 
 ## Writing
 

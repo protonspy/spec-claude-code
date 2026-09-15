@@ -1,7 +1,7 @@
 # The ladder — how much code a task gets
 
-[methodology.md](methodology.md) says how a task is built and tested. This says how
-much gets written. Before the code, stop at the first rung that holds:
+[methodology.md](methodology.md) says how a task is built and tested, and which tests
+already cover it. Name those first. Then, before the code, stop at the first rung:
 
 1. **Already here?** A helper, a type, a pattern this repo has — reuse it. Ask
    `scc graph explore "<what you were about to build>"` before you write: the thing
