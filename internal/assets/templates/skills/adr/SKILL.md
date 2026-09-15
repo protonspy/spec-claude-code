@@ -1,6 +1,6 @@
 ---
 name: adr
-description: Record a decision that is hard to reverse as a numbered ADR under docs/adr/, and supersede an old record rather than editing it. Use it when a choice is made that would be expensive to undo — storage, wire protocol, a module boundary, a vendor holding data, a framework the code will shape itself around — when someone asks why the project is built this way, and when `scc validate` reports adr.* findings such as a numbering gap, a superseded record with no successor, or a citation resolving to no record.
+description: Record a decision that is hard to reverse as a numbered ADR under docs/adr/, and supersede rather than edit an old one. Use it when a choice would be expensive to undo — storage, a wire protocol, a module boundary, a vendor — and on any adr.* finding.
 ---
 
 You write the record of a decision, so that the reasoning survives the people who

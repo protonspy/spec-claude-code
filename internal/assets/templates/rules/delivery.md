@@ -24,7 +24,7 @@ Once the last task is done:
 1. **`scc validate --checks --pr`** on the integrated branch — artifacts, record and the
    four gates together, build first and stopping at the first failure; `2` is not done.
    Per-task runs cannot see breakage between tasks, and this is what `pre-push` runs.
-2. **`code-review` and `security-review`** subagents on the diff, dispatched together.
+2. **`scc-code-review` and `scc-security-review`** subagents on the diff, dispatched together.
    **Both, every time, on every PR** — not "when the change looks risky", which is the
    judgment call that ends with neither being run. Each returns a verdict, what it
    checked, and findings by severity; you fix from that report and do not re-review.

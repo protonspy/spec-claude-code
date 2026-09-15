@@ -226,7 +226,30 @@ import (
 // None of them is wrong about its own subject, which is why they survived review: a
 // rule is read one file at a time and audited the same way. The cost is the same as a
 // command that does not exist — the agent does what the line says, once.
-const Version = "29"
+//
+// 30: the standing cost, measured and cut. What a scaffolded Claude Code workspace
+// preloads into every request had grown to 47KB — 15 rules and the entry file — while
+// this file's own prose still said nine rules and ~26KB. Nothing about the
+// methodology changed here; what changed is when three of its files arrive.
+// `specs.md`, `tasks.md` and `knowledge-base.md` carry a `paths:` header, so the
+// harness loads them when the agent touches the tree they govern rather than at
+// session start: 10.4KB, about a quarter, off every request. The bar for scoping a
+// rule is in Rules() and it is mechanical — a validator has to report what the rule
+// prevents, so a rule arriving late is a rule whose failure `scc validate` catches
+// before the commit. The entry file says which three, because it is the one document
+// the agent is meant to trust about its own environment.
+//
+// The skill descriptions are the other half and were the unmeasured one: a body is
+// paid by the run that invokes it, a description by every request whether the skill
+// runs or not. Eight came to 4087 characters, mostly enumerating findings the
+// validator already names — now 2084, with a budget test so the next one cannot
+// quietly restore them.
+//
+// And the two review agents become `scc-code-review` and `scc-security-review`.
+// Claude Code ships its own under the unprefixed names, so `delivery.md` naming them
+// in prose resolved to whichever the harness picked — a collision nobody would ever
+// see, because both produce a review and the one that ran is the one that answers.
+const Version = "30"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -253,7 +276,83 @@ const (
 	// Command is a slash command, on the same terms as Agent: shared body,
 	// per-harness frontmatter.
 	Command Kind = "command"
+	// Rule is one file of the methodology. Copied through like Plain, except on a
+	// harness that understands a `paths:` header, where a rule carrying one is
+	// rendered with it so the harness loads that rule on demand instead of at
+	// session start. See Rules for which rules carry one and why.
+	Rule Kind = "rule"
 )
+
+// rule is one file of the methodology and when the harness should load it.
+type rule struct {
+	// name is the file under rules/.
+	name string
+	// scope is the globs this rule governs, or nil for a rule that is always on.
+	//
+	// A rule with a scope is one a harness may load only when the agent works with
+	// a matching file. That is a real change in when the agent has it — it arrives
+	// as the file is opened rather than before the decision to open it — so the
+	// bar for putting a scope here is stated once, in Rules, and applies to every
+	// entry.
+	scope []string
+}
+
+// Rules is the methodology, in the order a unit of work meets it, and which of
+// them the harness may leave until they are needed.
+//
+// **Everything here is preloaded on Claude Code and paid in every request of the
+// session.** That is what the rules are for — a rule you have to decide to read is
+// one the session that skips it does not have — and it is also the whole of what
+// this product costs to run. Fifteen files come to ~44KB, and nothing about the
+// methodology gets cheaper by being explained better.
+//
+// **So three of them carry a scope, and the bar is mechanical: a rule may be
+// scoped only where a validator reports what it prevents.** The failure a scope
+// introduces is the rule arriving after the decision it governs, and that is
+// survivable exactly when something else catches the result — an EARS clause
+// missing a part, a task with no methodology annotation, a broken wikilink, a
+// dependency nobody recorded are all `scc validate` exit 2 before the commit. The
+// three scoped rules are the three whose subject a validator reads.
+//
+// Every other rule stays on whatever it costs, and the ones that look most
+// temptingly scopable are the clearest cases:
+//
+//   - `artifacts.md` would scope to `plans/**`, and its instruction is **never
+//     open the plan**. A rule that loads when the agent opens the file is a rule
+//     that only ever arrives to say the thing it was meant to prevent has happened.
+//   - `prior-art.md` and `routing.md` fire before the first artifact exists, so
+//     there is no file for a glob to match.
+//   - `caveman.md`, `ladder.md`, `methodology.md`, `delivery.md` and
+//     `verification.md` govern how the agent works rather than what it edits, and
+//     nothing mechanical reports a failure to follow them.
+//   - `notes.md` is triggered by writing a comment in *source*, which is every
+//     file in the repository — a scope covering everything is a preloaded rule
+//     with extra steps.
+func Rules() []rule {
+	return []rule{
+		{name: "caveman.md"},
+		{name: "routing.md"},
+		{name: "autonomy.md"},
+		{name: "prior-art.md"},
+		{name: "methodology.md"},
+		{name: "ladder.md"},
+		// The task grammar: `(Unit)`/`(TDD)`, the number, the citation, the four
+		// flags. `spec.task-*` and `plan.task-*` report every part of it.
+		{name: "tasks.md", scope: []string{"specs/**", "plans/**"}},
+		{name: "verification.md"},
+		{name: "delivery.md"},
+		// EARS, the delta form, the conditional design sections. The `spec`
+		// validator grades the requirement lines and the traceability both ways.
+		{name: "specs.md", scope: []string{"specs/**"}},
+		// The wiki, ADRs, codewiki, glossary and stack — five validators between
+		// them, reporting broken links, orphans, numbering gaps, unresolved
+		// citations, avoided synonyms and undocumented dependencies.
+		{name: "knowledge-base.md", scope: []string{"docs/**"}},
+		{name: "notes.md"},
+		{name: "code-search.md"},
+		{name: "artifacts.md"},
+	}
+}
 
 // File is one workspace file scc scaffolds and then tracks.
 type File struct {
@@ -267,6 +366,11 @@ type File struct {
 
 	// Kind selects the rendering.
 	Kind Kind
+
+	// Scope is a Rule's `paths:` list, empty for a rule that is always on. It
+	// reaches the file only on a harness whose ScopedRules says the header means
+	// something there.
+	Scope []string
 
 	// Owned marks a file the user owns from their first edit. scc writes it once
 	// and records it, then leaves it alone: an upgrade reports that a new version
@@ -289,26 +393,12 @@ func Workspace(h paths.Harness) []File {
 	}
 	// The methodology. Every one of these is scc's own content: an upgrade should
 	// deliver improvements to them, so none is Owned.
-	for _, rule := range []string{
-		"caveman.md",
-		"routing.md",
-		"autonomy.md",
-		"prior-art.md",
-		"methodology.md",
-		"ladder.md",
-		"tasks.md",
-		"verification.md",
-		"delivery.md",
-		"specs.md",
-		"knowledge-base.md",
-		"notes.md",
-		"code-search.md",
-		"artifacts.md",
-	} {
+	for _, r := range Rules() {
 		set = append(set, File{
-			Name: "rules/" + rule,
-			Rel:  under(h.RulesSeg, rule),
-			Kind: Plain,
+			Name:  "rules/" + r.name,
+			Rel:   under(h.RulesSeg, r.name),
+			Kind:  Rule,
+			Scope: r.scope,
 		})
 	}
 	for _, agent := range ReviewAgents {
@@ -439,7 +529,21 @@ func CodeGraphBlock() (string, error) { return Content(CodeGraphTemplate) }
 
 // ReviewAgents names the two subagents scc ships. Both read and neither writes:
 // review is where a cold context is worth paying for, and authorship is not.
-var ReviewAgents = []string{"code-review", "security-review"}
+//
+// **Prefixed, because the unprefixed names are taken.** Claude Code ships its own
+// `code-review` and `security-review`, so a workspace scaffolded with those names
+// hands the model two different things under each one — and `delivery.md` names
+// them in prose, which resolves to whichever the harness picked. That is not a
+// collision anybody would see: both names produce a review, and the one that ran
+// is the one that answers. The prefix is the same `scc-` the commands already
+// carry, and it is what makes the rule's instruction name exactly one thing.
+//
+// Keeping them at all is a separate question with a separate answer: these two
+// check what the built-in cannot, because they know the methodology. Gate 1 is
+// ticked boxes against the code that was actually written, the standard is the
+// artifact rather than taste, and the verdict comes back in a fixed shape the
+// orchestrator branches on. Codex and opencode have no built-in either.
+var ReviewAgents = []string{"scc-code-review", "scc-security-review"}
 
 // KnowledgeSkills names the skills that author a `docs/` artifact a validator
 // checks — one per artifact, so a workspace shipping the eight validators never
@@ -546,6 +650,15 @@ type layout struct {
 	// paths.Harness.PreloadsRules.
 	RulesPreloaded bool
 
+	// RulesScoped says some of the rules carry a `paths:` header this harness
+	// reads, so "everything is already in context" is not true of the whole set.
+	//
+	// It is a field for the same reason RulesPreloaded is one: the entry file is
+	// the document the agent is meant to trust about its own environment, and a
+	// blanket "nothing to open" in a workspace where three rules are on demand
+	// teaches it that the file is wrong. See paths.Harness.ScopedRules.
+	RulesScoped bool
+
 	// The same three paths, trailing slash included, padded to the column the
 	// entry file's layout block puts its descriptions in.
 	//
@@ -587,6 +700,7 @@ func layoutOf(h paths.Harness) layout {
 		Agents:         path.Join(h.Dir, h.AgentsSeg),
 		Manifest:       path.Join(h.Dir, paths.ManifestSeg),
 		RulesPreloaded: h.PreloadsRules,
+		RulesScoped:    h.ScopedRules,
 	}
 	l.RulesCol = column(l.Rules)
 	l.SkillsCol = column(l.Skills)
@@ -615,9 +729,31 @@ func Render(h paths.Harness, f File) (string, error) {
 		return renderAgent(h, f, expanded)
 	case Command:
 		return renderCommand(h, expanded)
+	case Rule:
+		return renderRule(h, f, expanded), nil
 	default:
 		return expanded, nil
 	}
+}
+
+// renderRule puts a rule's `paths:` header on where the harness reads one.
+//
+// Only there, and that is the point of the field rather than a switch: on Codex
+// and opencode nothing preloads the rules in the first place, so the header would
+// buy nothing and cost every reader of that file the two lines it takes to work
+// out that they are not YAML frontmatter it should act on.
+func renderRule(h paths.Harness, f File, body string) string {
+	if !h.ScopedRules || len(f.Scope) == 0 {
+		return body
+	}
+	var b strings.Builder
+	b.WriteString("---\npaths:\n")
+	for _, p := range f.Scope {
+		fmt.Fprintf(&b, "  - %q\n", p)
+	}
+	b.WriteString("---\n\n")
+	b.WriteString(body)
+	return b.String()
 }
 
 // expand runs a workspace template through text/template with the layout as its

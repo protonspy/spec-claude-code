@@ -1,6 +1,6 @@
 ---
 name: wiki
-description: Build and maintain docs/wiki/ — one page per concept, linked with wikilinks and reachable from index.md. Use it when a source lands in docs/raw/ and has to be distilled into a page, when a question is better answered from accumulated knowledge than from re-reading the code, and when `scc validate` reports wiki.* findings — a broken wikilink, an orphan page, a changelog naming a page that no longer exists, or a source still sitting unprocessed in docs/raw/.
+description: Build and maintain docs/wiki/ — one page per concept, linked with wikilinks and reachable from index.md. Use it to distil a source from docs/raw/, to answer from accumulated knowledge, and on any wiki.* finding.
 ---
 
 You own `docs/wiki/`: the durable half of what this project knows. A spec says what

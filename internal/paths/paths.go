@@ -109,6 +109,28 @@ type Harness struct {
 	// Verifiable per harness: `/context` in Claude Code lists what loaded.
 	PreloadsRules bool
 
+	// ScopedRules is whether this harness understands a `paths:` list in a rule's
+	// frontmatter — load this rule only when working with files that match, rather
+	// than at session start with everything else.
+	//
+	// It is the only lever there is on what the methodology costs. A preloaded
+	// rule is paid in every request of the session, and the set is 15 files and
+	// ~44KB; three of them govern a file the agent is going to have open anyway,
+	// and moving those three to on-demand takes roughly a quarter off the standing
+	// cost without moving a word of the methodology.
+	//
+	// Which three is not a judgment call, and the bar is in Workspace: a rule may
+	// be scoped only where a validator reports what it prevents. That is what makes
+	// arriving late survivable — the agent that wrote an EARS line wrong without
+	// the rule in context is told so by `scc validate`, exit 2, before the commit.
+	// A rule whose violation nothing mechanical catches stays preloaded whatever it
+	// costs, because for that one the rule is the only check there is.
+	//
+	// False for Codex and opencode, where it would be noise rather than a saving:
+	// nothing preloads RulesSeg there, so every rule is already on demand and a
+	// `paths:` header is a key their loaders do not read.
+	ScopedRules bool
+
 	// SubagentsInheritRules is the same question one level down: does a subagent
 	// this harness spawns arrive with the methodology already in context, or does
 	// it start without the rules the session it was spawned from is following?
@@ -194,6 +216,7 @@ var (
 		SkillsSeg: "skills", CommandsSeg: "commands", RulesSeg: "rules",
 		SettingsSeg:   "settings.json",
 		PreloadsRules: true,
+		ScopedRules:   true,
 		// Yes, and documented as such: a non-fork subagent inherits the whole
 		// CLAUDE.md hierarchy, project rules included.
 		SubagentsInheritRules: true,
