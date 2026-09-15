@@ -1,3 +1,9 @@
+---
+paths:
+  - "specs/**"
+  - "plans/**"
+---
+
 # Task grammar
 
 One grammar governs every task line, in a spec's `tasks.md` or a plan's checklist.

@@ -1,9 +1,11 @@
 ---
-name: init
-description: Bootstrap this project's knowledge base from the code that already exists — survey the repository, then write docs/stack.md, docs/glossary.md, the wiki, the codewiki, the ADRs for decisions already taken, and the project rule's real build, test, and lint commands, and the delivery gate's four. Use it on a workspace whose docs/ is still the four seeded anchors, when someone asks to document an existing codebase, when a repository has just been scaffolded and nothing under docs/ is filled in, or when someone runs /scc-init. Not for one page or one new decision — the wiki, glossary, stack, codewiki, and adr skills each own their own artifact, and this run is what calls them.
+name: scc-init
+description: Bootstrap this project's knowledge base from the code that already exists: survey the repository, then write the stack, glossary, wiki, codewiki and ADRs, and the project's real build, test, lint and format commands. Use it on a workspace whose docs/ is still the seeded anchors, or to document an existing codebase.
+argument-hint: [anchors | full, and the subtree to cover if not the whole repository]
 ---
 
-You fill an empty knowledge base from a repository that already exists.
+You fill an empty knowledge base from a repository that already exists. `$ARGUMENTS`
+is the scope, if one was given; the table below is what to do when it was not.
 
 The formats are not yours. Each artifact has an owner — the `stack`, `glossary`,
 `wiki`, `codewiki`, and `adr` skills — and the rule they all enforce is

@@ -43,3 +43,4 @@ over this file answers with the example above as well as with the notes. -->
 - n-0003 2026-09-15 #platform @Makefile — make is absent on a default Windows host, so the delivery gate calls go and golangci-lint directly rather than Makefile targets
 - n-0004 2026-09-15 #gotcha @tools/go.mod — tools/ is a nested module so the root's ./... never sees it — a helper in the main module would land in the coverage profile at 0%
 - n-0005 2026-09-15 #gotcha @.devcontainer/Dockerfile — bash -lc re-runs /etc/profile and rebuilds PATH, discarding every Docker ENV, so container tooling must be linked into /usr/local/bin
+- n-0006 2026-09-15 #gotcha @internal/scaffold — scc update deletes a managed file but never prunes the directory it emptied, and the skills validator then reports skill.missing-skill-md on the empty dir

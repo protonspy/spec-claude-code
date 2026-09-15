@@ -1,6 +1,7 @@
 ---
-name: glossary
-description: Own docs/glossary.md — one canonical term per concept, and the synonyms nobody should use for it. Use it when a domain term is coined, contested, fuzzy, or renamed; before naming a spec, a plan, a wiki page, or an identifier that will outlive the session; and when `scc validate` reports glossary.* findings — a duplicate entry, a term listed as both canonical and avoided, or an avoided synonym used somewhere in docs/.
+name: scc-glossary
+description: Own docs/glossary.md — one canonical term per concept, and the synonyms nobody should use for it. Use it when a domain term is coined, contested or renamed, before naming anything that will outlive the session, and on any glossary.* finding.
+argument-hint: [term, or the ambiguity to settle]
 ---
 
 You own the project's vocabulary. Domain language drifts by default: two people
@@ -10,6 +11,13 @@ two documents are describing the same concept or two different ones.
 
 The entry format is in `.claude/rules/knowledge-base.md`. This
 skill is when to reach for it and how to decide.
+
+## Nothing asked for
+
+`$ARGUMENTS` is the term, or the ambiguity to settle. Read `docs/glossary.md` before
+adding to it: an entry duplicating an existing concept under a different name makes
+the canonical source itself ambiguous. With nothing named, run `scc validate` and
+resolve the `glossary.*` findings.
 
 ## The entry
 

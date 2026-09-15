@@ -1,3 +1,8 @@
+---
+paths:
+  - "specs/**"
+---
+
 # Specs — the three artifacts
 
 `specs/<feature>/` holds exactly three files. `scc spec new <feature>` creates them;
