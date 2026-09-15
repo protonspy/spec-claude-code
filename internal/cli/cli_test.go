@@ -44,6 +44,38 @@ func run(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	return capture(t, func() int { return Run(args) })
 }
 
+// runStdin is run with something on stdin, for the harness hook stages — the
+// harness hands its event in on a pipe, and the one stage that reads a field out
+// of it cannot be exercised any other way.
+//
+// os.Stdin is swapped rather than injected for the same reason capture swaps
+// os.Stdout: the command reads the real file, and a test that could only drive it
+// through an injected reader would be testing a seam nothing else uses.
+//
+// Written through a pipe from a goroutine rather than from a temp file, so a
+// stage that never reads its input cannot block the test either: the write end is
+// closed regardless, and a full buffer is the writer's problem, not the reader's.
+func runStdin(t *testing.T, stdin string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	orig := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = orig; _ = r.Close() }()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.WriteString(w, stdin)
+		_ = w.Close()
+	}()
+	stdout, stderr, code = capture(t, func() int { return Run(args) })
+	<-done
+	return stdout, stderr, code
+}
+
 func TestVersionPrintsStampedVersion(t *testing.T) {
 	stdout, _, code := run(t, "version")
 	if code != ExitOK {

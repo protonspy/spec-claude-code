@@ -21,10 +21,10 @@ port or one test database must be namespaced, and two green features can break t
 
 Once the last task is done:
 
-1. **`scc check`** on the integrated branch — build, format, lint and suite, in that
-   order, stopping at the first failure. Per-task runs cannot see breakage between tasks.
-2. **`scc validate --checks --pr`** — artifacts, record and the gates together; `2` is not done.
-3. **`code-review` and `security-review`** subagents on the diff, dispatched together.
+1. **`scc validate --checks --pr`** on the integrated branch — artifacts, record and the
+   four gates together, build first and stopping at the first failure; `2` is not done.
+   Per-task runs cannot see breakage between tasks, and this is what `pre-push` runs.
+2. **`code-review` and `security-review`** subagents on the diff, dispatched together.
    **Both, every time, on every PR** — not "when the change looks risky", which is the
    judgment call that ends with neither being run. Each returns a verdict, what it
    checked, and findings by severity; you fix from that report and do not re-review.
@@ -34,17 +34,17 @@ Once the last task is done:
    dispatched is not a pass** — say so in the body rather than letting silence read as
    approval. Record both verdicts in the PR body: a review nobody can see did not
    happen. One round of fix-and-re-run, not three.
-4. **Commit and push.** Conventional Commits, written from the diff and the spec.
-5. **Open the PR.** Body: what changed, which spec or plan, how it was verified.
+3. **Commit and push.** Conventional Commits, written from the diff and the spec.
+4. **Open the PR.** Body: what changed, which spec or plan, how it was verified.
 
 **The work is the user's, and the record says so.** No `Co-Authored-By` for an assistant,
 no session link, no "generated with" footer or badge, no naming of a model, vendor or
 harness — not in a commit message, not in a PR title or body. The `commit-msg` hook
 rejects it as you write it, `SCC_SKIP_HOOKS=1` is not the fix, `--pr` reads the PR body.
 
-**The gates are commands, not claims.** `scc check` runs what this workspace recorded
-for build, format, lint and test; the last reads back `{"total": N, "coverage": P}` and
-is held to a floor. `pre-push` runs them, so what cannot clear them does not become a PR.
+**The gates are commands, not claims.** What this workspace recorded for build, format,
+lint and test; the last reads back `{"total": N, "coverage": P}` and is held to a floor.
+`scc check` runs those four alone mid-work; step 1 and `pre-push` add artifacts and record.
 
 **A branch leaves no trace in the artifacts, so record it.** `scc spec track <feature>
 --here` when you branch, `--pr <n>` when the PR opens; `scc spec sync` reads git and the

@@ -368,14 +368,53 @@ type Count struct {
 	Count int    `json:"count"`
 }
 
+// Seeded is the tag vocabulary scc's own scaffolded rules already name.
+//
+// It closes a gap that only shows up on a workspace's first day. `notes.md` tells
+// the agent to run `scc notes tags` and reuse a tag rather than coining a fourth
+// name for one concern; `ladder.md` tells it to type `--tag ceiling` when it marks
+// a corner it cut. In a fresh workspace those two instructions contradict each
+// other — the log is empty, so the command that is supposed to supply the
+// vocabulary answers with nothing, and the agent invents the very tag the rules
+// had already chosen: `shortcut`, then `simplification`, then `tradeoff`, one per
+// session, until the index the rule exists to protect is the drift it was meant to
+// prevent.
+//
+// So the vocabulary starts populated. These are not notes and nothing writes them
+// to the file: they are the tags scc's guidance mints, reported at a count of zero
+// so they sort under everything this project actually uses.
+//
+// Two, and the list is closed for the reason every closed list here is closed. A
+// vocabulary reaching past what the rules say would be scc deciding how somebody
+// else's project files its knowledge, which is the opposite of reading the index
+// before coining a tag. TestSeededTagsAreExactlyWhatTheRulesName is what stops
+// this list and the templates from naming different words.
+func Seeded() []string { return []string{"ceiling", "gotcha"} }
+
 // Tags is the tag index, most used first and alphabetical within a count.
 //
 // It exists to be read before a tag is coined. An open vocabulary drifts the way
 // domain language does — three tags for one concern inside a week — and the cheap
 // defense is not a closed list scc would have to guess at, but making the existing
 // tags one command away at the moment somebody is about to invent a fourth.
+//
+// The seeded vocabulary is unioned in at zero, which is what makes that command
+// answerable before the log has anything in it. A seeded tag already in use is
+// counted like any other and stops being distinguishable from one this project
+// coined itself — which is the point, because by then it is one.
 func (f *File) Tags() []Count {
-	return tally(f.Notes, func(n Note) []string { return n.Tags })
+	out := tally(f.Notes, func(n Note) []string { return n.Tags })
+	used := make(map[string]bool, len(out))
+	for _, c := range out {
+		used[c.Name] = true
+	}
+	for _, t := range Seeded() {
+		if !used[t] {
+			out = append(out, Count{Name: t})
+		}
+	}
+	sortCounts(out)
+	return out
 }
 
 // Paths is every path the log mentions, most noted first. Same purpose as Tags:
@@ -395,13 +434,22 @@ func tally(notes []Note, of func(Note) []string) []Count {
 	for v, c := range seen {
 		out = append(out, Count{Name: v, Count: c})
 	}
+	sortCounts(out)
+	return out
+}
+
+// sortCounts is the index order: most used first, alphabetical within a count.
+//
+// One function rather than two call sites, because Tags appends to what tally
+// already ordered and a second copy of this comparison would be a second answer
+// to "where does a tag nobody has used yet belong".
+func sortCounts(out []Count) {
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Count != out[j].Count {
 			return out[i].Count > out[j].Count
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out
 }
 
 // Today is the date a new note takes when the caller names none.

@@ -42,13 +42,24 @@ const (
 	// SessionStart is where a workspace says what it is missing before any work
 	// is done on it — one message, once, when it can still change the plan.
 	SessionStart Event = "SessionStart"
+	// UserPromptSubmit is the moment a request arrives and before the agent acts
+	// on it — the only point in a turn where saying "read it this way" is still
+	// cheaper than the reading it would replace.
+	//
+	// It is the stage with the worst cost profile in the set, because it fires on
+	// every prompt of every session rather than once. That is why it is bounded
+	// the hard way: it speaks only when the prompt *names an artifact this
+	// workspace actually has*, and says nothing on every other prompt. A stage
+	// that guessed would be noise in every turn, and noise in every turn is how a
+	// reader learns to skip the one turn it mattered.
+	UserPromptSubmit Event = "UserPromptSubmit"
 	// Stop is the end of a turn, which is the earliest a finding can be reported
 	// to the one who can fix it.
 	Stop Event = "Stop"
 )
 
-// Events returns the set, in that order.
-func Events() []Event { return []Event{SessionStart, Stop} }
+// Events returns the set, in the order a session meets them.
+func Events() []Event { return []Event{SessionStart, UserPromptSubmit, Stop} }
 
 // Stage is the name this event is called by on the command line: the hook entry
 // runs `scc hooks run <stage>`, and the stage names stay kebab-case like git's.
@@ -56,6 +67,8 @@ func (e Event) Stage() Stage {
 	switch e {
 	case SessionStart:
 		return StageSessionStart
+	case UserPromptSubmit:
+		return StageUserPrompt
 	case Stop:
 		return StageStop
 	}
@@ -67,24 +80,38 @@ func (e Event) Why() string {
 	switch e {
 	case SessionStart:
 		return "syncs the symbol graph and names what this workspace is missing, once"
+	case UserPromptSubmit:
+		return "says how to read an artifact the prompt named, and nothing otherwise"
 	case Stop:
-		return "syncs the graph, then reports findings and undelivered work to the agent"
+		return "syncs the graph, then reports findings, drift and undelivered work"
 	}
 	return ""
 }
 
 // Timeout is how long the harness may wait, in seconds.
 //
-// Both stages sync the symbol graph before they report, so both need room for a
-// subprocess rather than for reading two files. SessionStart stays the tighter of
-// the two on purpose: a session that hangs on scc is worse than one that starts on
-// a slightly stale index, and it is also the sync `scc launch` already did for
-// every session started that way.
+// SessionStart and Stop sync the symbol graph before they report, so both need
+// room for a subprocess rather than for reading two files. SessionStart stays the
+// tighter of the two on purpose: a session that hangs on scc is worse than one
+// that starts on a slightly stale index, and it is also the sync `scc launch`
+// already did for every session started that way.
+//
+// UserPromptSubmit is an order of magnitude tighter, and it has to be. It sits
+// between the person pressing enter and the agent starting, on every prompt —
+// latency there is felt directly, unlike the other two, which happen while
+// nobody is waiting. It is also the only stage that runs no subprocess at all:
+// two directory listings and a string scan. Ten seconds is not a budget it
+// expects to use, it is the ceiling past which something has gone wrong and the
+// turn should proceed without it.
 func (e Event) Timeout() int {
-	if e == Stop {
+	switch e {
+	case Stop:
 		return 120
+	case UserPromptSubmit:
+		return 10
+	default:
+		return 60
 	}
-	return 60
 }
 
 // HarnessStatus is one event's registration as it stands in a settings file.

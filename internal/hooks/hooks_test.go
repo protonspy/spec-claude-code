@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/protonspy/spec-claude-code/internal/paths"
 )
 
 // repo is a throwaway git repository. Every test here needs one, because the
@@ -229,5 +231,79 @@ func TestParseStage(t *testing.T) {
 	}
 	if _, err := ParseStage("post-merge"); err == nil {
 		t.Error("ParseStage accepted a stage scc does not install")
+	}
+}
+
+// TestNoHarnessNeedsASubagentStage is the gate on a stage scc deliberately does
+// not have.
+//
+// ponytail re-asserts its skill on every subagent start, because it assumes the
+// methodology does not survive the boundary. scc asked the same question and got
+// the opposite answer for the only harness that could host the stage: Claude Code
+// hands a non-fork subagent the whole CLAUDE.md hierarchy, project rules
+// included, so a SubagentStart hook would re-send ~26KB the agent already has —
+// the exact cost TestRulesStayShortEnoughToBePreloaded exists to prevent, paid
+// once per subagent instead of once per request.
+//
+// So the stage is absent on evidence rather than on appetite, and this is what
+// keeps the evidence load-bearing. Two ways to fail, and both are real:
+//
+//   - A harness with a hook surface stops delivering the rules to its subagents.
+//     That is the hole ponytail's stage fills, and it would now be open here.
+//   - A harness that does not deliver them grows a hook surface, which is the
+//     same hole arriving from the other direction.
+//
+// Either way the answer is to build the stage, and the failure says so rather
+// than leaving the next session to rediscover the question.
+func TestNoHarnessNeedsASubagentStage(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		if h.SettingsSeg == "" || h.SubagentsInheritRules {
+			continue
+		}
+		t.Errorf("%s has a hook surface (%s) and does not give its subagents the rules: "+
+			"a subagent there writes code under none of the methodology, and nothing reports it. "+
+			"Register a SubagentStart stage that emits the entry file's routing table — not the "+
+			"rules themselves, which is the cost the preload budget exists to prevent.",
+			h.ID, h.SettingsSeg)
+	}
+
+	// And the one stage this test is actually about stays absent. Named rather
+	// than inferred from the set's size: the set is allowed to grow, and what it
+	// is not allowed to grow is a stage that re-sends rules the agent already
+	// holds.
+	for _, e := range Events() {
+		if strings.Contains(string(e), "Subagent") {
+			t.Errorf("Events() registers %q. Every harness here hands its subagents the rules, "+
+				"so this re-sends ~26KB the agent already has — the cost the preload budget exists "+
+				"to prevent, paid once per subagent instead of once per request", e)
+		}
+	}
+}
+
+// TestTheHarnessStagesOnlyEverReport pins the contract both stages hold, and the
+// one a third would have to hold too.
+//
+// Exit 2 would block the turn, and a hook that can block a turn can loop one: the
+// agent fixes the finding, the hook fires again on the turn that fixed it, and a
+// bad comparison spends a session. Refusal belongs at the commit, which is a
+// decision with a natural place to stand in front of — which is why the git
+// stages are allowed to refuse and these are not.
+func TestTheHarnessStagesOnlyEverReport(t *testing.T) {
+	for _, s := range AgentStages() {
+		if s.Git() {
+			t.Errorf("%s is a harness stage but reports itself as one git runs; "+
+				"only the git side reads an exit code, and only the git side may refuse", s)
+		}
+		if s.Why() == "" {
+			t.Errorf("%s says nothing about itself, so `scc hooks check` has a blank row", s)
+		}
+	}
+	// Timeouts are bounded on both: a harness stage that hangs holds up the turn
+	// it was meant to make cheaper.
+	for _, e := range Events() {
+		if e.Timeout() <= 0 || e.Timeout() > 300 {
+			t.Errorf("%s has a %ds timeout; a stage that can hang a turn is worse than one that says nothing",
+				e, e.Timeout())
+		}
 	}
 }

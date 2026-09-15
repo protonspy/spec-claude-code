@@ -1,7 +1,11 @@
 package assets
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"testing"
 
@@ -930,5 +934,156 @@ func TestNoTemplateShipsAnAttributionFooter(t *testing.T) {
 		if !strings.Contains(rule, want) {
 			t.Errorf("%s never says %q; the no-attribution rule has gone missing", deliveryRule, want)
 		}
+	}
+}
+
+// ladderRule is the file the carve-outs live in, named once so a rename fails
+// here rather than turning the canary below into a test of nothing.
+const ladderRule = "rules/ladder.md"
+
+// ladderInvariants is what the ladder may never shorten, ported from ponytail's
+// own INVARIANTS list.
+//
+// The ladder tells the agent to reach for the smallest thing that works, and that
+// instruction has exactly one failure mode: applied to the wrong four things it
+// does not save effort, it removes a property the code was relying on. A missing
+// trust-boundary check, a swallowed write error, a dropped escape, a requirement
+// quietly built smaller — every one of them ships as a small clean diff, which is
+// precisely why none of them is caught on review.
+//
+// So the four are pinned verbatim rather than left to survive a rewrite on
+// goodwill. A rule at 55 lines is a rule under constant pressure to lose a line,
+// and the lines that read as padding are the ones that were load-bearing.
+var ladderInvariants = []string{
+	"**Validation at a trust boundary**",
+	"**Error handling that prevents data loss**",
+	"**Security and accessibility.**",
+	"**Anything the requirement asks for**",
+}
+
+// TestTheLadderKeepsItsCarveOuts is the canary for a reword that drops one.
+//
+// Verbatim, and that is the point rather than an accident of how it is written: a
+// looser check — "does the rule still mention security somewhere" — passes on a
+// rewrite that mentions security while no longer carving it out, which is the
+// failure it was supposed to catch. Matching the exact lead means a reword can
+// still happen, it just cannot happen silently: the test fails, somebody restates
+// the invariant here, and the change is made out loud.
+//
+// Checked against the rendered file for every harness, because the carve-outs
+// have to survive the header synthesis as well as the editing.
+func TestTheLadderKeepsItsCarveOuts(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		raw, err := renderRule(h, ladderRule)
+		if err != nil {
+			t.Fatalf("%s: %v", h.ID, err)
+		}
+		for _, want := range ladderInvariants {
+			if !strings.Contains(raw, want) {
+				t.Errorf("%s: %s no longer carves out %s — restate it in ladderInvariants "+
+					"if the reword is deliberate, so the change is made out loud", h.ID, ladderRule, want)
+			}
+		}
+		// The carve-outs are worth nothing detached from the sentence that says
+		// what they are: a list of four good things, with no line naming them as
+		// the limit, reads as encouragement rather than as a boundary.
+		if !strings.Contains(raw, "What the ladder never touches") {
+			t.Errorf("%s: %s lists the invariants but no longer says they are the limit", h.ID, ladderRule)
+		}
+	}
+}
+
+// TestTheLadderPointsTheRequirementSomewhereElse pins the boundary the carve-outs
+// cannot express on their own.
+//
+// "Anything the requirement asks for" says the ladder may not build less than the
+// spec; it does not say what to do when the requirement itself looks over-built.
+// Left unanswered that is a standing invitation to settle the question by
+// building less, which is the one failure this rule can cause and the one that
+// ships looking like a small clean diff. The rule answers it by routing
+// elsewhere, and this is what keeps the route from being edited away separately
+// from the invariant that needs it.
+func TestTheLadderPointsTheRequirementSomewhereElse(t *testing.T) {
+	raw, err := renderRule(paths.Claude, ladderRule)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if !strings.Contains(raw, "The requirement is not a rung") {
+		t.Fatalf("%s no longer says the requirement is out of the ladder's reach", ladderRule)
+	}
+	// A spec delta or a checkpoint — the two places the question is legitimately
+	// raised. Either will do; neither is not an option, because then the only
+	// thing left to do about an over-built requirement is to under-build it.
+	if !strings.Contains(raw, "specs.md") && !strings.Contains(raw, "autonomy.md") {
+		t.Errorf("%s says not to settle an over-built requirement by building less, "+
+			"but names nowhere to raise it instead", ladderRule)
+	}
+}
+
+// renderRule is one rule as a harness receives it, found by the name it ships
+// under rather than by the path it lands at — which differs per harness.
+func renderRule(h paths.Harness, name string) (string, error) {
+	for _, f := range Workspace(h) {
+		if f.Name == name {
+			return Render(h, f)
+		}
+	}
+	return "", errNoSuchRule(name)
+}
+
+type errNoSuchRule string
+
+func (e errNoSuchRule) Error() string {
+	return string(e) + " is not in the workspace set — was it renamed or dropped?"
+}
+
+// TestTheTemplateVersionMovesWithTheTemplates is the guard on a drift that
+// shipped once before it was caught.
+//
+// `Version` stamps every managed file in a workspace's manifest, and the manifest
+// uses it to answer "what did this file look like before?" — which is the half a
+// three-way merge cannot reconstruct from a hash alone. So a template that
+// changes while the version holds still leaves two different sets of bytes
+// wearing one number, and from then on a pristine file is indistinguishable from
+// a stale one.
+//
+// The convention already said to bump it. Nothing checked, because the suite
+// renders templates and asserts on their *content*, while the version is a
+// constant nobody compares against them — so the one session that forgot was all
+// it took, and the failure is silent until somebody upgrades.
+//
+// A fingerprint over the whole rendered set closes that. It is deliberately a
+// nuisance: any template edit fails this test, and the fix is to bump `Version`
+// and paste the new digest, which is the "made out loud" shape this repository
+// uses wherever a change is cheap to make and expensive to make by accident.
+func TestTheTemplateVersionMovesWithTheTemplates(t *testing.T) {
+	// Bump Version, then replace this with the digest the failure prints.
+	const fingerprint = "80c48c375fd5ec7511fc7f01b3409f1515c6bbd4fe4f113c6f8581e22eca7dec"
+
+	sum := sha256.New()
+	for _, h := range paths.Harnesses() {
+		files := Workspace(h)
+		sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
+		for _, f := range files {
+			raw, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s: %s: %v", h.ID, f.Name, err)
+			}
+			// The destination is hashed with the bytes, so a file that only moved
+			// still counts as a change — a manifest keyed by path cares about that
+			// exactly as much as it cares about content.
+			_, _ = fmt.Fprintf(sum, "%s\x00%s\x00%s\x00", h.ID, f.Rel, raw)
+		}
+	}
+	got := hex.EncodeToString(sum.Sum(nil))
+	if got != fingerprint {
+		t.Fatalf(`the rendered template set changed.
+
+Bump Version (currently %q) and set fingerprint in this test to:
+  %s
+
+A template that changes while Version holds leaves two different sets of bytes
+under one number, and the manifest can no longer tell a pristine file from a
+stale one.`, Version, got)
 	}
 }

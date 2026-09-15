@@ -13,8 +13,8 @@ questions, together, in the same breath:
    "80-90% reduction" counts **characters, not tokens**, and CJK spends more tokens per
    character, so the real saving is smaller and unmeasured. Governs speech, not artifacts.
 
-Record the answers in the artifact's frontmatter (`requirements.md` for a spec),
-then never ask again for this piece of work:
+Record the answers in the artifact's frontmatter — `requirements.md` for a spec, the
+plan file itself for a plan — then never ask again for this piece of work:
 
 ```yaml
 ---

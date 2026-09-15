@@ -59,6 +59,7 @@ const (
 // something the caller should have to spell differently.
 const (
 	StageSessionStart Stage = "session-start"
+	StageUserPrompt   Stage = "user-prompt"
 	StageStop         Stage = "stop"
 )
 
@@ -67,7 +68,7 @@ const (
 func Stages() []Stage { return []Stage{PreCommit, CommitMsg, PrePush} }
 
 // AgentStages is the harness set, in the order a session meets them.
-func AgentStages() []Stage { return []Stage{StageSessionStart, StageStop} }
+func AgentStages() []Stage { return []Stage{StageSessionStart, StageUserPrompt, StageStop} }
 
 // Git reports whether this stage is one git runs. The two families differ in
 // everything downstream of the name: git reads an exit code, the harness reads a
@@ -112,6 +113,8 @@ func (s Stage) Why() string {
 		return "runs `" + Prog + " validate --pr --checks` before the branch is pushed"
 	case StageSessionStart:
 		return SessionStart.Why()
+	case StageUserPrompt:
+		return UserPromptSubmit.Why()
 	case StageStop:
 		return Stop.Why()
 	}

@@ -40,12 +40,22 @@ import (
 // from refs already in the repository. A check that cost a fetch per turn is a
 // check somebody turns off, and it would take the cheap ones with it.
 func runAgentStage(root string, stage hooks.Stage, in io.Reader) int {
-	// The event is read and discarded. Nothing here needs a field from it yet, and
-	// the harness is entitled to a reader that consumes its input rather than one
-	// that leaves a pipe half-full.
-	_, _ = io.Copy(io.Discard, in)
+	// The event is read whole either way. Only one stage needs a field from it,
+	// and the harness is entitled to a reader that consumes its input rather than
+	// one that leaves a pipe half-full.
+	event := readEvent(in)
 
-	// Both stages, before anything else: the graph is brought current at the two
+	// The prompt stage returns before the sync, and that is the point rather than
+	// an oversight. SessionStart and Stop bookend a task and run while nobody is
+	// waiting; UserPromptSubmit sits between the person pressing enter and the
+	// agent starting, on every prompt, where latency is felt directly. Spending a
+	// CodeGraph subprocess there would make every turn slower to save a read the
+	// turn may not even do.
+	if stage == hooks.StageUserPrompt {
+		return emitHook(stage, promptContext(root, event.Prompt))
+	}
+
+	// The other two, before anything else: the graph is brought current at the two
 	// moments that bookend a task. See syncGraph — it is silent, and it is the one
 	// thing here that changes the workspace rather than reporting on it.
 	syncGraph(root)
@@ -58,6 +68,26 @@ func runAgentStage(root string, stage hooks.Stage, in io.Reader) int {
 		lines = stopContext(root)
 	}
 	return emitHook(stage, lines)
+}
+
+// hookEvent is the part of the harness's event this package reads.
+//
+// One field today. Parsed leniently on purpose: this is the harness's schema on
+// the harness's release schedule, and a stage whose whole job is to be silent
+// most of the time must degrade to silence rather than to an error when the
+// document is not what it expected.
+type hookEvent struct {
+	Prompt string `json:"prompt"`
+}
+
+func readEvent(in io.Reader) hookEvent {
+	var e hookEvent
+	raw, err := io.ReadAll(in)
+	if err != nil {
+		return e
+	}
+	_ = json.Unmarshal(raw, &e)
+	return e
 }
 
 // hookOutput is the harness's frozen shape. `additionalContext` is the field that
@@ -81,8 +111,11 @@ func emitHook(stage hooks.Stage, lines []string) int {
 		return ExitOK
 	}
 	event := hooks.SessionStart
-	if stage == hooks.StageStop {
+	switch stage {
+	case hooks.StageStop:
 		event = hooks.Stop
+	case hooks.StageUserPrompt:
+		event = hooks.UserPromptSubmit
 	}
 	out := hookOutput{Specific: hookSpecific{
 		EventName:         string(event),
@@ -127,7 +160,19 @@ func sessionStartContext(root string) []string {
 }
 
 // stopContext is what the end of a turn has to say: what the validators found,
-// and whether finished work is still sitting on this machine.
+// what the methodology drifted from, and whether finished work is still sitting
+// on this machine.
+//
+// Findings first, because they are the half a validator already owns and the half
+// with a file and a line to go to. Drift after, because it is the half nothing
+// else reads — no validator parses source, and none of them knows what this
+// branch did as opposed to what the tree currently says. Undelivered work last,
+// because it is the only one that is about the turn that is now over rather than
+// about the work inside it.
+//
+// Every one of the three is silent when it has nothing to say, and that is the
+// property to protect: three sections that each speak sometimes is a report worth
+// reading, and three that always speak is a banner.
 func stopContext(root string) []string {
 	var out []string
 	if set := stopFindings(root); set != nil && !set.Empty() {
@@ -135,6 +180,7 @@ func stopContext(root string) []string {
 		out = append(out, stopFindingLines(set)...)
 		out = append(out, fmt.Sprintf("Run `%s validate` for the rest, and fix these before the commit.", prog()))
 	}
+	out = append(out, driftLines(root)...)
 	if line := undeliveredLine(root); line != "" {
 		out = append(out, line)
 	}
