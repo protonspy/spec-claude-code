@@ -932,3 +932,103 @@ func TestNoTemplateShipsAnAttributionFooter(t *testing.T) {
 		}
 	}
 }
+
+// ladderRule is the file the carve-outs live in, named once so a rename fails
+// here rather than turning the canary below into a test of nothing.
+const ladderRule = "rules/ladder.md"
+
+// ladderInvariants is what the ladder may never shorten, ported from ponytail's
+// own INVARIANTS list.
+//
+// The ladder tells the agent to reach for the smallest thing that works, and that
+// instruction has exactly one failure mode: applied to the wrong four things it
+// does not save effort, it removes a property the code was relying on. A missing
+// trust-boundary check, a swallowed write error, a dropped escape, a requirement
+// quietly built smaller — every one of them ships as a small clean diff, which is
+// precisely why none of them is caught on review.
+//
+// So the four are pinned verbatim rather than left to survive a rewrite on
+// goodwill. A rule at 55 lines is a rule under constant pressure to lose a line,
+// and the lines that read as padding are the ones that were load-bearing.
+var ladderInvariants = []string{
+	"**Validation at a trust boundary**",
+	"**Error handling that prevents data loss**",
+	"**Security and accessibility.**",
+	"**Anything the requirement asks for**",
+}
+
+// TestTheLadderKeepsItsCarveOuts is the canary for a reword that drops one.
+//
+// Verbatim, and that is the point rather than an accident of how it is written: a
+// looser check — "does the rule still mention security somewhere" — passes on a
+// rewrite that mentions security while no longer carving it out, which is the
+// failure it was supposed to catch. Matching the exact lead means a reword can
+// still happen, it just cannot happen silently: the test fails, somebody restates
+// the invariant here, and the change is made out loud.
+//
+// Checked against the rendered file for every harness, because the carve-outs
+// have to survive the header synthesis as well as the editing.
+func TestTheLadderKeepsItsCarveOuts(t *testing.T) {
+	for _, h := range paths.Harnesses() {
+		raw, err := renderRule(h, ladderRule)
+		if err != nil {
+			t.Fatalf("%s: %v", h.ID, err)
+		}
+		for _, want := range ladderInvariants {
+			if !strings.Contains(raw, want) {
+				t.Errorf("%s: %s no longer carves out %s — restate it in ladderInvariants "+
+					"if the reword is deliberate, so the change is made out loud", h.ID, ladderRule, want)
+			}
+		}
+		// The carve-outs are worth nothing detached from the sentence that says
+		// what they are: a list of four good things, with no line naming them as
+		// the limit, reads as encouragement rather than as a boundary.
+		if !strings.Contains(raw, "What the ladder never touches") {
+			t.Errorf("%s: %s lists the invariants but no longer says they are the limit", h.ID, ladderRule)
+		}
+	}
+}
+
+// TestTheLadderPointsTheRequirementSomewhereElse pins the boundary the carve-outs
+// cannot express on their own.
+//
+// "Anything the requirement asks for" says the ladder may not build less than the
+// spec; it does not say what to do when the requirement itself looks over-built.
+// Left unanswered that is a standing invitation to settle the question by
+// building less, which is the one failure this rule can cause and the one that
+// ships looking like a small clean diff. The rule answers it by routing
+// elsewhere, and this is what keeps the route from being edited away separately
+// from the invariant that needs it.
+func TestTheLadderPointsTheRequirementSomewhereElse(t *testing.T) {
+	raw, err := renderRule(paths.Claude, ladderRule)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if !strings.Contains(raw, "The requirement is not a rung") {
+		t.Fatalf("%s no longer says the requirement is out of the ladder's reach", ladderRule)
+	}
+	// A spec delta or a checkpoint — the two places the question is legitimately
+	// raised. Either will do; neither is not an option, because then the only
+	// thing left to do about an over-built requirement is to under-build it.
+	if !strings.Contains(raw, "specs.md") && !strings.Contains(raw, "autonomy.md") {
+		t.Errorf("%s says not to settle an over-built requirement by building less, "+
+			"but names nowhere to raise it instead", ladderRule)
+	}
+}
+
+// renderRule is one rule as a harness receives it, found by the name it ships
+// under rather than by the path it lands at — which differs per harness.
+func renderRule(h paths.Harness, name string) (string, error) {
+	for _, f := range Workspace(h) {
+		if f.Name == name {
+			return Render(h, f)
+		}
+	}
+	return "", errNoSuchRule(name)
+}
+
+type errNoSuchRule string
+
+func (e errNoSuchRule) Error() string {
+	return string(e) + " is not in the workspace set — was it renamed or dropped?"
+}

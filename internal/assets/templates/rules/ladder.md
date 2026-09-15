@@ -15,7 +15,8 @@ already cover it. Name those first. Then, before the code, stop at the first run
 5. **One line?** One line.
 6. **Only then:** the least code that satisfies the requirement the task cites.
 
-Two rungs hold, take the higher one and move on.
+Two rungs hold, take the higher one. Two options the same size on one rung, take the
+one that is right on the edge cases: short is the tiebreak, never the target.
 
 **The ladder shortens the solution, never the reading.** It runs after you understand
 what the change touches: a small diff in the wrong place is not lazy, it is a second
