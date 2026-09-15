@@ -208,13 +208,56 @@ func TestMatch(t *testing.T) {
 func TestTagsAndPathsAreOrderedByUse(t *testing.T) {
 	f := parse(t, log)
 	tags := f.Tags()
-	if len(tags) != 3 || tags[0].Name != "cli" {
-		// cli, convention, gotcha — one each, so alphabetical decides.
+	// cli, convention, gotcha — one each, so alphabetical decides among them —
+	// and then `ceiling`, seeded but unused here, under all three. A seed that
+	// sorted among the used tags would put a word nobody has written above one
+	// this project actually files things under.
+	if got := names(tags); strings.Join(got, ",") != "cli,convention,gotcha,ceiling" {
 		t.Errorf("tags = %+v", tags)
 	}
+	if tags[len(tags)-1].Count != 0 {
+		t.Errorf("an unused seeded tag should report a count of 0, got %+v", tags[len(tags)-1])
+	}
 	if paths := f.Paths(); len(paths) != 2 {
+		// Paths take no seed: a path vocabulary scc invented would name files in
+		// somebody else's tree.
 		t.Errorf("paths = %+v", paths)
 	}
+}
+
+// TestASeededTagInUseIsCountedLikeAnyOther pins the half of Seeded that is easy
+// to get wrong: the vocabulary supplies a tag nobody has used yet, and stops
+// being visible the moment somebody uses it. A seed that kept its own row would
+// report `gotcha` twice, once at its real count and once at zero.
+func TestASeededTagInUseIsCountedLikeAnyOther(t *testing.T) {
+	f := parse(t, log)
+	for _, c := range f.Tags() {
+		if c.Name == "gotcha" && c.Count != 1 {
+			t.Errorf("gotcha is used once and seeded; it should count 1, got %+v", c)
+		}
+	}
+	if got := names(f.Tags()); len(got) != len(uniq(got)) {
+		t.Errorf("a tag appears twice in the index: %v", got)
+	}
+}
+
+func names(cs []Count) []string {
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, c.Name)
+	}
+	return out
+}
+
+func uniq(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s], out = true, append(out, s)
+		}
+	}
+	return out
 }
 
 func TestCheckPath(t *testing.T) {

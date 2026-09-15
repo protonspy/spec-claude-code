@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/protonspy/spec-claude-code/internal/assets"
+	"github.com/protonspy/spec-claude-code/internal/notes"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 )
 
@@ -316,3 +319,57 @@ func TestNotesRejectsAnUnknownSubcommand(t *testing.T) {
 		t.Errorf("stderr = %q", stderr)
 	}
 }
+
+// TestSeededTagsAreExactlyWhatTheRulesName keeps the tag vocabulary and the
+// scaffolded prose from naming different words.
+//
+// The gap it closes was real and one-sided: `ladder.md` tells the agent to type
+// `--tag ceiling`, `notes.md` tells it to run `scc notes tags` and reuse what is
+// there, and in a fresh workspace that command answered with nothing — so the
+// rule that exists to keep one concern under one tag was, on day one, the reason
+// a second name for it got coined.
+//
+// Both directions fail, and each is a different bug. A tag the templates name and
+// the vocabulary does not is the original gap coming back. A tag the vocabulary
+// carries and no rule names is scc filing somebody else's knowledge for them,
+// which is exactly what a seed may not do.
+func TestSeededTagsAreExactlyWhatTheRulesName(t *testing.T) {
+	named := map[string]bool{}
+	for _, h := range paths.Harnesses() {
+		for _, f := range assets.Workspace(h) {
+			raw, err := assets.Render(h, f)
+			if err != nil {
+				t.Fatalf("%s: %s: %v", h.ID, f.Name, err)
+			}
+			for _, m := range tagFlag.FindAllStringSubmatch(raw, -1) {
+				named[m[1]] = true
+			}
+		}
+	}
+	if len(named) == 0 {
+		t.Fatal("no `--tag <name>` appears in any template; the extraction is broken")
+	}
+
+	seeded := map[string]bool{}
+	for _, tag := range notes.Seeded() {
+		seeded[tag] = true
+	}
+	for tag := range named {
+		if !seeded[tag] {
+			t.Errorf("a scaffolded rule tells the agent to type `--tag %s`, "+
+				"but `scc notes tags` in a fresh workspace never offers it", tag)
+		}
+	}
+	for tag := range seeded {
+		if !named[tag] {
+			t.Errorf("the tag vocabulary seeds %q, which no scaffolded rule names — "+
+				"a seed may only carry what scc's own guidance already mints", tag)
+		}
+	}
+}
+
+// tagFlag is the one shape a rule uses to tell the agent which tag to type. The
+// `#tag` spelling in the grammar itself is deliberately not read: `#gotcha` in
+// `docs/notes.md` is an example of the format, and a canary that treated a format
+// example as a vocabulary entry would seed whatever the documentation illustrates.
+var tagFlag = regexp.MustCompile(`--tag[ \t]+([a-z0-9]+(?:-[a-z0-9]+)*)\b`)
