@@ -312,10 +312,16 @@ func TestBothStagesSyncTheGraph(t *testing.T) {
 	}
 }
 
-// The harness is told how long to wait, and both stages now run a subprocess
-// rather than reading two files. A timeout shorter than the work is a hook the
-// harness kills halfway.
-func TestHookTimeoutsLeaveRoomForTheSync(t *testing.T) {
+// The harness is told how long to wait, and what it is told has to match what the
+// stage actually does.
+//
+// Two shapes, and the split is the design rather than a tolerance. SessionStart
+// and Stop sync the symbol graph, so a timeout shorter than a CodeGraph run is a
+// hook the harness kills halfway. UserPromptSubmit runs no subprocess at all and
+// sits between a keystroke and the agent starting, so its ceiling is deliberately
+// an order of magnitude tighter — and a change that gave it room for a
+// subprocess would mean something had started running one there.
+func TestHookTimeoutsMatchWhatTheStageDoes(t *testing.T) {
 	root := initWorkspace(t)
 	events := hookEvents(t, root)
 	for _, e := range hooks.Events() {
@@ -327,8 +333,20 @@ func TestHookTimeoutsLeaveRoomForTheSync(t *testing.T) {
 		inner, _ := entry["hooks"].([]any)
 		first, _ := inner[0].(map[string]any)
 		timeout, _ := first["timeout"].(float64)
-		if int(timeout) != e.Timeout() || timeout < 60 {
-			t.Errorf("%s timeout = %v, want %d and room for a subprocess", e, timeout, e.Timeout())
+		if int(timeout) != e.Timeout() {
+			t.Errorf("%s timeout = %v, want %d", e, timeout, e.Timeout())
+		}
+		if e == hooks.UserPromptSubmit {
+			if timeout > 15 {
+				t.Errorf("%s timeout = %v: it runs on every prompt, in front of the person "+
+					"waiting, and reads two directories — a subprocess-sized budget here means "+
+					"something started running one", e, timeout)
+			}
+			continue
+		}
+		if timeout < 60 {
+			t.Errorf("%s timeout = %v: it syncs the graph, and a timeout shorter than the work "+
+				"is a hook the harness kills halfway", e, timeout)
 		}
 	}
 }

@@ -292,3 +292,20 @@ func indentWidth(s string) int {
 	}
 	return n
 }
+
+// Ticked reports whether one line, on its own, is a completed checkbox.
+//
+// It exists for the callers that have a line and no document — a reader walking a
+// diff, where the surrounding file is the *old* file and parsing it would answer a
+// question about the wrong version. Everything else should go through Scan, which
+// knows about fences and HTML comments and will not mistake an example inside one
+// for a task.
+//
+// Exported rather than reimplemented at the call site, because the alternative is
+// a second regular expression somewhere deciding what a ticked box looks like, and
+// two answers to that is how a checked task stops counting as progress in one
+// place while still counting in another.
+func Ticked(line string) bool {
+	m := checkboxRe.FindStringSubmatch(strings.TrimRight(line, "\r"))
+	return m != nil && m[2] != " "
+}

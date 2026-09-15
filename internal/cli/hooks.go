@@ -69,6 +69,7 @@ Git stages — these refuse:
 
 Harness stages — these only report, and never publish:
   session-start  %s
+  user-prompt    %s
   stop           %s
 
 The git hooks need a git repository; outside a workspace the artifact validators
@@ -84,7 +85,7 @@ never block a turn, and they never push or open a pull request: delivery is an
 act the agent takes in the open, where you can stop it.
 `, prog(), prog(), prog(), prog(), prog(),
 		hooks.PreCommit.Why(), hooks.CommitMsg.Why(), hooks.PrePush.Why(),
-		hooks.SessionStart.Why(), hooks.Stop.Why(), hooks.SkipEnv)
+		hooks.SessionStart.Why(), hooks.UserPromptSubmit.Why(), hooks.Stop.Why(), hooks.SkipEnv)
 }
 
 // hooksReport is the frozen JSON shape for install, check and remove: one entry
@@ -244,7 +245,10 @@ func reportHooks(all []hooks.Status, agent []hooks.HarnessStatus, note string, j
 // the same columns. They are different mechanisms and the reader is asking one
 // question of both: is this wired.
 func hookLine(name, what, path, note string, state hooks.State) {
-	line := fmt.Sprintf("%-13s %-10s %s", name, what, hookPath(path))
+	// Wide enough for the longest event name either family has. A column that one
+	// row overflows is a table that reads as broken on exactly the row somebody is
+	// looking at.
+	line := fmt.Sprintf("%-17s %-10s %s", name, what, hookPath(path))
 	switch {
 	case note != "":
 		render.Warn(line)
@@ -322,7 +326,7 @@ func runHooksRun(args []string) int {
 		return runCommitMsg(rest[1:], *jsonOut)
 	case hooks.PrePush:
 		return runGate(target, *jsonOut, true)
-	case hooks.StageSessionStart, hooks.StageStop:
+	case hooks.StageSessionStart, hooks.StageUserPrompt, hooks.StageStop:
 		// A different protocol downstream of the same command: the harness hands
 		// the event in on stdin and reads a document back, where git reads an exit
 		// code. --json is ignored here because the output is already the harness's

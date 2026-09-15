@@ -23,6 +23,7 @@ package git
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -479,4 +480,131 @@ func UndeliveredWork(dir string) Undelivered {
 	u.Pushed = true
 	_, u.Unpushed = counts(dir, remote, ref(dir, branch))
 	return u
+}
+
+// Change is one file this branch has touched, and the lines it added to it.
+type Change struct {
+	// Path is repo-relative and slash-separated, the way git reports it.
+	Path string `json:"path"`
+	// Added is the lines this branch introduced, without the diff's leading `+`.
+	// Only the added side: a marker that was already in the file before this work
+	// started is somebody else's, and reporting it would report the same thing on
+	// every branch until it was removed.
+	Added []string `json:"added,omitempty"`
+}
+
+// diffLimits bound what a caller running at the end of every turn may pay.
+//
+// The cap is not tuned, it is a ceiling: a branch that has touched two thousand
+// files is a branch where a per-file report has already stopped being readable,
+// and the honest failure is to stop counting rather than to spend a second of
+const (
+	maxChangedFiles = 400
+	maxAddedLines   = 4000
+)
+
+// Changed is what this branch has done to the tree, compared against base.
+//
+// **The baseline is base, never a session snapshot**, and that is the whole
+// design rather than an implementation detail. A snapshot taken at session start
+// would need somewhere to live, and scc has one file per harness on purpose; it
+// would also answer the wrong question, because `delivery.md` already makes one
+// branch one unit of work, so "what has this branch done" is the unit a reader is
+// actually asking about. Nothing here remembers anything between calls.
+//
+// The comparison is against the *working tree*, not against HEAD. At the end of a
+// turn the agent has usually written code and not yet committed it, and a caller
+// reading `base..HEAD` would report a clean branch for exactly the turn that just
+// wrote the thing worth reporting. Untracked files are included for the same
+// reason and on git's own terms — `--exclude-standard`, so a gitignored tree is
+// not walked.
+//
+// Absence is a normal answer, the line this package holds everywhere: no git, no
+// repository, an unborn HEAD, a shallow clone with no base ref, or a branch that
+// is exactly its base all come back empty and without an error.
+func Changed(dir, base string) ([]Change, error) {
+	if !Found(Bin) {
+		return nil, ErrUnavailable
+	}
+	if base == "" {
+		base = Base(dir)
+	}
+	against := compareRef(dir, base)
+	if against == "" {
+		return nil, nil
+	}
+
+	// -U0 so only the changed lines come back: context lines are unchanged text,
+	// and a caller scanning for what this branch introduced must not be handed
+	// three lines of somebody else's file on either side of every hunk.
+	out, err := run(Bin, dir, "diff", "--no-color", "--no-ext-diff", "-U0",
+		"--diff-filter=d", against, "--")
+	if err != nil {
+		// A range git cannot resolve, a repository mid-rebase. Nothing to report,
+		// and nothing worth failing the caller over.
+		return nil, nil
+	}
+	changes := parseDiff(out)
+
+	// Untracked files are all addition and git will not diff them, so they are
+	// read rather than diffed. A file git declined to read is skipped: it is a
+	// symlink, a device, or something the process may not open, and none of those
+	// is a failure of the question that was asked.
+	for _, p := range untracked(dir) {
+		if len(changes) >= maxChangedFiles {
+			break
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(p)))
+		if err != nil {
+			continue
+		}
+		changes = append(changes, Change{Path: p, Added: splitLines(string(raw))})
+	}
+	return changes, nil
+}
+
+// untracked is the files git can see and is not tracking, on git's own terms.
+func untracked(dir string) []string {
+	out, err := run(Bin, dir, "ls-files", "--others", "--exclude-standard")
+	if err != nil || out == "" {
+		return nil
+	}
+	return strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n")
+}
+
+// parseDiff turns a unified diff into one Change per file.
+//
+// Hand-parsed rather than shelled out to twice, because the alternative — one
+// `--name-only` run for the paths and one `-U0` run for the lines — asks git the
+// same question twice and lets the two answers disagree about a file that changed
+// between them.
+func parseDiff(out string) []Change {
+	var changes []Change
+	var cur *Change
+	lines := 0
+	for _, line := range splitLines(out) {
+		switch {
+		case strings.HasPrefix(line, "+++ b/"):
+			if len(changes) >= maxChangedFiles {
+				cur = nil
+				continue
+			}
+			changes = append(changes, Change{Path: strings.TrimPrefix(line, "+++ b/")})
+			cur = &changes[len(changes)-1]
+		case strings.HasPrefix(line, "+++ "):
+			// /dev/null: a deletion, already excluded by --diff-filter=d, and a
+			// header shape worth not mistaking for a path called "/dev/null".
+			cur = nil
+		case cur != nil && strings.HasPrefix(line, "+") && lines < maxAddedLines:
+			cur.Added = append(cur.Added, strings.TrimPrefix(line, "+"))
+			lines++
+		}
+	}
+	return changes
+}
+
+// splitLines splits on LF with CR tolerated, so a CRLF checkout on Windows does
+// not hand every caller a trailing carriage return to strip.
+func splitLines(s string) []string {
+	return strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
 }
