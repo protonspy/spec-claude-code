@@ -38,9 +38,12 @@ scc can scaffold itself.
 ## Paths
 
 - `benchmarks/` — new; the harness, the arms, the scorer
-- `internal/hooks/harness.go`
+- `internal/hooks/harness.go` — the event set and its contract
+- `internal/cli/hooks_agent.go` — `stopContext`, where a drift line would be written
 - `internal/cli/hooks.go`
+- `internal/git` — the `base..HEAD` range the drift stage reads
 - `internal/paths/harness.go`
+- `internal/assets/assets_test.go` — where the carve-out canary goes
 - `internal/assets/templates/rules/ladder.md`
 - `internal/assets/templates/rules/notes.md`
 
@@ -53,6 +56,7 @@ scc can scaffold itself.
   section included, which is the part most worth imitating
 - PR #41 — the graph-subcommand fix and the command canary
 - PR #42 — `rules/ladder.md`
+- `docs/rule-refinements` — the five rule fixes the same audit turned up, already committed
 - `design/orchestration.md` §6 — the rule set and what each rule is for
 
 ## Out of scope
@@ -90,6 +94,12 @@ scc can scaffold itself.
 - [ ] 2.3 (Unit) Restore the edge-case rung — "two stdlib options the same size, take the one
   correct on edge cases" was cut from `ladder.md` for the line budget, not on merit
   _Priority 3_
+- [ ] 2.4 (Unit) Settle whether `delivery.md` means to run the suite twice. Step 1 is `scc
+  check` and step 2 is `scc validate --checks`, which adds the same four gates — so the
+  sequence as written builds, formats, lints and tests twice on the way to one PR. Either
+  step 1 goes or step 2 drops `--checks`, and which one is a question about intent rather
+  than about wording. Found by the audit this port prompted; it has no other home
+  _Priority 2_
 - [ ] 3.1 (Unit) Establish whether a subagent inherits the preloaded rules, per harness, and
   record the answer where the next session can find it. Everything below turns on it, and it
   is a property of the harness rather than of scc — the question `PreloadsRules` already
