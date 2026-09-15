@@ -18,14 +18,14 @@ in a new session: a rule you read yesterday is not a rule you have read.
 - `prior-art.md` — then read what `docs/` already decides, before the first artifact
 - `routing.md` — work arrives and needs a vehicle: a spec, or a plan
 - `methodology.md` — starting a task: which cycle, what to run first
+- `ladder.md` — about to write the code: how much of it the task gets
 - `verification.md` — code is written and you think it is done
 - `delivery.md` — last task done: branch, review, PR
 
 Triggered by what you are about to touch:
 
 - `project.md` — **before any build, test, lint, or format command.** This project's
-  commands exist nowhere else, and a guessed test command that exits 0 looks exactly
-  like a passing suite.
+  commands exist nowhere else; a guessed one that exits 0 looks like a passing suite.
 - `code-search.md` — before going looking for code you have not read
 - `artifacts.md` — before opening a plan or a spec
 - `specs.md` — writing requirements, design, or tasks for a spec
