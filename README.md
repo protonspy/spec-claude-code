@@ -48,18 +48,25 @@ wires both places a check can run without anybody remembering it:
 | | Where | What it does |
 |---|---|---|
 | **git** | `.git/hooks` | `pre-commit` runs `scc validate`, `commit-msg` reads the message being written, `pre-push` runs `scc validate --pr --checks`. These **refuse** — a commit is a decision with a natural place to stand in front of. |
-| **harness** | `.claude/settings.json` | `SessionStart` says once that this workspace has recorded no commands; `UserPromptSubmit` says how to read an artifact the prompt named, and nothing otherwise; `Stop` hands back `scc validate` findings, methodology drift and undelivered work at the end of a turn — the moment they are cheapest to fix. |
+| **harness** | `.claude/settings.json` | `SessionStart` says once that this workspace has recorded no commands and reports methodology drift; `UserPromptSubmit` says how to read an artifact the prompt named, and nothing otherwise; `Stop` hands back `scc validate` findings and undelivered work at the end of a turn — the moment they are cheapest to fix. |
 
-The harness hooks **report and never refuse**: a hook that can stop a turn can also
-loop one. They **never push and never open a PR** either — the Stop hook says the
-branch has commits that never left the machine, and the agent pushes in its next
-turn, in the open, where you can still stop it. Publishing on an event nobody is
-watching is not a thing scc does on your behalf.
+The harness hooks **never refuse**, and they **never push or open a PR** — the Stop
+hook says the branch has commits that never left the machine, and the agent pushes in
+its next turn, in the open, where you can still stop it. Publishing on an event nobody
+is watching is not a thing scc does on your behalf.
+
+**On `Stop`, saying anything is a continuation**, not a passive report: the harness
+keeps the conversation going so the agent can act on it. So the Stop hook honours
+`stop_hook_active` and carries only what the next turn can *resolve* — a finding clears
+when it is fixed, unpushed work clears when it is pushed. v0.24.0 got this wrong and
+looped; v0.24.1 is the fix.
 
 **Drift is the half no validator can reach**, because none of them reads source: code
 changed on this branch with no box ticked, a `TODO` left behind, commits sitting on the
 base branch. Each is a line only when it is true, measured against the branch rather
-than a session snapshot, so nothing is remembered between turns.
+than a session snapshot, so nothing is remembered between turns. It is reported at
+**`SessionStart`** — a fact about the branch clears for nobody, so at the end of a turn
+it would repeat until the harness cut it off.
 
 They cost nothing a turn cannot afford: no network, no test suite, and silence when
 there is nothing to say — a clean branch draws no line at all, and `UserPromptSubmit`

@@ -22,12 +22,21 @@ import (
 // stdin, and what scc prints on stdout comes back to the agent as context for its
 // next turn. Everything else about these two stages follows from one decision:
 //
-// **They report and never refuse.** Exit 2 would block the turn, and a hook that
-// can stop a turn can also loop one — the agent fixes the finding, the hook fires
-// again on the turn that fixed it, and a bad comparison spends a session. The git
-// hooks are where refusal belongs, because a commit is a decision with a natural
-// place to stand in front of; the end of a turn is a moment to *tell* somebody
-// something while it is still cheap to act on.
+// **They never refuse — but on Stop, speaking is itself a continuation.** This
+// was written down wrong once and shipped as a loop, so it is worth stating
+// precisely: the harness treats `additionalContext` on Stop as guidance the
+// conversation continues for, under the same loop protections as an outright
+// block. Returning 0 is not a passive report there. Two rules follow, and both
+// are load-bearing:
+//
+//   - `stop_hook_active` is honoured unconditionally. Once the harness says it is
+//     already continuing because of this hook, the hook has been heard.
+//   - Stop may only carry what the next turn can *resolve*. A finding clears when
+//     it is fixed; unpushed work clears when it is pushed. A fact about the
+//     branch clears for nobody, which is why drift is reported at SessionStart.
+//
+// The git hooks are where refusal belongs, because a commit is a decision with a
+// natural place to stand in front of.
 //
 // **They never publish.** The end of a turn is a plausible moment to `git push`,
 // and scc does not: that sends work on an event nobody is watching. What the Stop
@@ -55,6 +64,26 @@ func runAgentStage(root string, stage hooks.Stage, in io.Reader) int {
 		return emitHook(stage, promptContext(root, event.Prompt))
 	}
 
+	// **Stop is a continuation, not a report, and getting that wrong shipped a
+	// loop.**
+	//
+	// The harness treats `additionalContext` on Stop as guidance it should act on:
+	// the conversation *continues* so the agent can, under the same loop
+	// protections as an outright block. This package's comments claimed the
+	// opposite — that returning 0 with context was a passive report and only exit
+	// 2 could hold a turn open — and on that reading it never read
+	// `stop_hook_active`. The result, in a real session: a branch-scoped finding
+	// that could never clear re-fired on every continuation until the harness
+	// overrode it at the consecutive-block cap, with the agent answering "." to
+	// itself nine times.
+	//
+	// So the flag is honoured first and unconditionally. When the harness is
+	// already continuing because of this hook, the hook has nothing further to
+	// add: it has been heard, and saying it again is the loop.
+	if stage == hooks.StageStop && event.StopHookActive {
+		return ExitOK
+	}
+
 	// The other two, before anything else: the graph is brought current at the two
 	// moments that bookend a task. See syncGraph — it is silent, and it is the one
 	// thing here that changes the workspace rather than reporting on it.
@@ -78,6 +107,10 @@ func runAgentStage(root string, stage hooks.Stage, in io.Reader) int {
 // document is not what it expected.
 type hookEvent struct {
 	Prompt string `json:"prompt"`
+	// StopHookActive is true when the harness is *already* continuing because of
+	// a Stop hook. Reading it is not optional, and this package learned that the
+	// hard way — see runAgentStage.
+	StopHookActive bool `json:"stop_hook_active"`
 }
 
 func readEvent(in io.Reader) hookEvent {
@@ -146,33 +179,48 @@ func sessionStartContext(root string) []string {
 	if !workspace.IsWorkspace(root) {
 		return nil
 	}
+	// Drift is reported here rather than at the end of a turn, and the move was
+	// paid for in a broken session. It is a fact about the branch — source changed
+	// with no box ticked, a marker in code, commits on the base branch — so no
+	// action in the next turn makes it false, and at Stop, where context continues
+	// the conversation, a fact that cannot be resolved is a fact that repeats
+	// until the harness cuts it off. Said once, at the start, where it is
+	// information rather than an instruction the agent cannot carry out.
+	out := driftLines(root)
+
 	cfg, err := gate.Load(root)
 	if err != nil || cfg.Any() {
-		return nil
+		return out
 	}
-	return []string{
+	return append(out,
 		"scc: this workspace records no build, format, lint or test command, so the delivery gate has nothing to run.",
 		fmt.Sprintf("Record them with `%s check set <gate> \"<command>\"`, built from this project's own toolchain;", prog()),
 		fmt.Sprintf("`%s check skip <gate>` is the answer for a step this project genuinely does not have.", prog()),
 		`The test gate has to print {"total": N, "coverage": P} on stdout and keep the suite's exit status.`,
 		fmt.Sprintf("`%s check help` has the rest.", prog()),
-	}
+	)
 }
 
 // stopContext is what the end of a turn has to say: what the validators found,
-// what the methodology drifted from, and whether finished work is still sitting
-// on this machine.
+// and whether finished work is still sitting on this machine.
 //
-// Findings first, because they are the half a validator already owns and the half
-// with a file and a line to go to. Drift after, because it is the half nothing
-// else reads — no validator parses source, and none of them knows what this
-// branch did as opposed to what the tree currently says. Undelivered work last,
-// because it is the only one that is about the turn that is now over rather than
-// about the work inside it.
+// **Only things the agent can resolve now.** Anything here continues the
+// conversation, so whatever it says has to be something the next turn can act on
+// and thereby make go away — otherwise the same line comes back on the next stop,
+// and the next, until the harness overrides the hook at its consecutive-block
+// cap. A finding clears when it is fixed; unpushed work clears when it is pushed.
+// Both terminate.
 //
-// Every one of the three is silent when it has nothing to say, and that is the
-// property to protect: three sections that each speak sometimes is a report worth
-// reading, and three that always speak is a banner.
+// Drift used to be here and is not any more, for exactly that reason: "source
+// changed on this branch with no box ticked" is a fact about the branch, not
+// about the turn, and no action the agent takes in the next turn can make it
+// false. Measured in a real session, it re-fired on every continuation while the
+// agent — correctly — kept answering that the work was not orphaned. It moved to
+// SessionStart, which is said once and cannot hold a turn open.
+//
+// Both halves are silent when they have nothing to say, and that is the property
+// to protect: sections that each speak sometimes are a report worth reading, and
+// sections that always speak are a banner.
 func stopContext(root string) []string {
 	var out []string
 	if set := stopFindings(root); set != nil && !set.Empty() {
@@ -180,7 +228,6 @@ func stopContext(root string) []string {
 		out = append(out, stopFindingLines(set)...)
 		out = append(out, fmt.Sprintf("Run `%s validate` for the rest, and fix these before the commit.", prog()))
 	}
-	out = append(out, driftLines(root)...)
 	if line := undeliveredLine(root); line != "" {
 		out = append(out, line)
 	}
