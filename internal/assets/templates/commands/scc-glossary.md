@@ -1,12 +1,8 @@
 ---
-description: Add, settle, or rename a canonical term in docs/glossary.md, and list the synonyms to avoid
+description: Own docs/glossary.md — one canonical term per concept, and the synonyms nobody should use for it. Use it when a domain term is coined, contested or renamed, before naming anything that will outlive the session, and on any glossary.* finding.
 argument-hint: [term, or the ambiguity to settle]
 ---
 
-Use the `glossary` skill.
+Use the `scc-glossary` skill.
 
-Term: $ARGUMENTS
-
-Read `docs/glossary.md` before adding to it — an entry that duplicates an existing
-concept under a different name makes the canonical source itself ambiguous. If
-nothing was named, run `scc validate` and resolve the `glossary.*` findings.
+Request: $ARGUMENTS

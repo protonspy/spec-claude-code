@@ -54,7 +54,9 @@ plans/<name>.md     structure, plus a checklist and/or spec references
 docs/               knowledge base — wiki, adr, codewiki, glossary, stack, notes
 {{.RulesCol}}the methodology above
 {{.SkillsCol}}authoring each part of docs/, and running a plan group by group
-{{- if .HasCommands}}
+{{- if .SkillsAreCommands}}
+                    on demand too: /scc-plan-run, /scc-wiki, /scc-adr, …
+{{- else if .HasCommands}}
 {{.CommandsCol}}the same skills on demand: /scc-plan-run, /scc-wiki, /scc-adr, …
 {{- end}}
 ```

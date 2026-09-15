@@ -88,6 +88,20 @@ type Harness struct {
 	// the skills alone there rather than writing into the user's home directory.
 	CommandsSeg string
 
+	// SkillsAreCommands is whether this harness already exposes a skill as a slash
+	// command, so scc need not write one.
+	//
+	// Claude Code does: a skill at `skills/<name>/SKILL.md` is invocable as
+	// `/<name>` with nothing else on disk. A command file beside it is then two
+	// entry points for one thing in the picker, and — the half that is not
+	// cosmetic — a second `description` preloaded into every request whether
+	// anybody runs it or not.
+	//
+	// It is what makes the `scc-` prefix belong on the skill rather than on the
+	// command: with no command file, the skill's own name is what the user types,
+	// and `/init` is already Claude Code's.
+	SkillsAreCommands bool
+
 	// RulesSeg is where the methodology goes under Dir. The path is scc's choice
 	// in all three, kept parallel so one layout is learned once — but what the
 	// harness then does with it is not, which is what PreloadsRules records.
@@ -214,9 +228,10 @@ var (
 		ID: "claude", Label: "Claude Code", Bin: "claude", Dir: ClaudeDir, EntryFile: "CLAUDE.md",
 		AgentsSeg: "agents", AgentFormat: FormatMarkdown,
 		SkillsSeg: "skills", CommandsSeg: "commands", RulesSeg: "rules",
-		SettingsSeg:   "settings.json",
-		PreloadsRules: true,
-		ScopedRules:   true,
+		SettingsSeg:       "settings.json",
+		SkillsAreCommands: true,
+		PreloadsRules:     true,
+		ScopedRules:       true,
 		// Yes, and documented as such: a non-fork subagent inherits the whole
 		// CLAUDE.md hierarchy, project rules included.
 		SubagentsInheritRules: true,

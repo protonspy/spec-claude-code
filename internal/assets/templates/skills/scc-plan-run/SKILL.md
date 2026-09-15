@@ -1,9 +1,11 @@
 ---
-name: plan-run
+name: scc-plan-run
 description: Drive a whole plan under plans/ to completion — brief it once, then implement group by group, asking scc for the next task rather than opening the file, and deliver per group or at the end. Resumes from the repository, not from memory. Use it to implement or finish an entire plan.
+argument-hint: [the plan, plus how to run it and any standing instruction]
 ---
 
-You run a plan to the end.
+You run a plan to the end. `$ARGUMENTS` names the plan and, often, how to run it —
+take every answer it already gave and ask only for what is left.
 
 The mechanics of delivering *one* unit of work are not here — they are in
 `{{.Rules}}/delivery.md`, and repeating them would give this project two

@@ -249,7 +249,28 @@ import (
 // Claude Code ships its own under the unprefixed names, so `delivery.md` naming them
 // in prose resolved to whichever the harness picked — a collision nobody would ever
 // see, because both produce a review and the one that ran is the one that answers.
-const Version = "30"
+//
+// 31: the slash commands come off Claude Code, and the `scc-` prefix moves onto the
+// skill. Claude Code registers a skill as `/<name>` by itself and its own
+// documentation now says commands and skills are one mechanism — so a command file
+// beside each skill was a second entry point in the picker for one thing, and a
+// second `description` preloaded into every request whether anybody ran it or not.
+// That is the whole cost: ~980 characters of saying twice what the skill says once.
+//
+// The rename is what makes the removal safe rather than a second collision. With no
+// command file the skill's own name is what the user types, and `/init` is a command
+// Claude Code already ships — the same failure the review agents had under their
+// unprefixed names, one version ago, by the same door. So the skills are `scc-init`,
+// `scc-wiki` and the rest, and every reference to `/scc-init` already written keeps
+// resolving. opencode still gets command files, because nothing there turns a skill
+// into one.
+//
+// What the command bodies carried and the skills did not is the *default job* — what
+// to do when nobody typed an argument, which for five of them is "run `scc validate`
+// and clear this artifact's findings". That moved into the skill bodies, where it is
+// paid by the run that invokes it instead of by every session; `argument-hint` moved
+// with it, since SKILL.md takes the same key.
+const Version = "31"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -417,19 +438,31 @@ func Workspace(h paths.Harness) []File {
 			Rel:  under(h.SkillsSeg, skill, "SKILL.md"),
 			Kind: Plain,
 		})
-		// One command per skill, so the human has an explicit entry point where the
-		// model has a description. Namespaced, because slash commands share a flat
-		// namespace with every other source the harness loads them from and `/adr`
-		// would collide on contact.
+		// A command per skill, for a harness where a skill is not already one.
 		//
-		// Codex is the exception and gets none: its custom prompts live in the
+		// **Where it is, the command file is pure cost.** Claude Code registers
+		// every skill as `/<name>` by itself, so shipping `commands/scc-wiki.md`
+		// beside `skills/scc-wiki/` put two entry points in the picker for one
+		// thing and, worse, a second `description` in front of the model — and a
+		// description is the half that is preloaded into every request whether
+		// anybody runs it or not. Eight of them came to ~980 characters of saying
+		// twice what the skill's own description says once.
+		//
+		// The prefix moved onto the skill to make that possible, and it is load-
+		// bearing rather than tidy: with the command gone the skill's own name is
+		// what the user types, and `init` is a slash command Claude Code already
+		// ships. `/init` resolving to two different things is the failure the
+		// review agents had under their unprefixed names, arriving by the same
+		// door — so the names are `scc-init`, `scc-wiki`, and every reference to
+		// `/scc-init` that was already written keeps working.
+		//
+		// Codex gets none for a different reason: its custom prompts live in the
 		// user's home directory and are deprecated in favor of skills, so there is
-		// nothing project-scoped to write. The skills above are the whole surface
-		// there, which is what Codex itself now recommends.
-		if h.CommandsSeg == "" {
+		// nothing project-scoped to write.
+		if h.CommandsSeg == "" || h.SkillsAreCommands {
 			continue
 		}
-		cmd := commandPrefix + skill + ".md"
+		cmd := skill + ".md"
 		set = append(set, File{
 			Name: "commands/" + cmd,
 			Rel:  under(h.CommandsSeg, cmd),
@@ -553,7 +586,7 @@ var ReviewAgents = []string{"scc-code-review", "scc-security-review"}
 // delivery are rules under the harness's rules directory, read when the concern
 // is live. A skill restating a rule is a second copy of one fact, and the copy
 // goes stale.
-var KnowledgeSkills = []string{"adr", "codewiki", "glossary", "prd", "stack", "wiki"}
+var KnowledgeSkills = []string{"scc-adr", "scc-codewiki", "scc-glossary", "scc-prd", "scc-stack", "scc-wiki"}
 
 // WorkflowSkills names the skills that drive the methodology instead of authoring a
 // document. There is one, and the bar for a second is the rule above: if a skill
@@ -573,7 +606,7 @@ var KnowledgeSkills = []string{"adr", "codewiki", "glossary", "prd", "stack", "w
 // moment its own concern arrives. Bootstrapping an existing repository is the one job
 // that needs the order *across* the six, a survey before any of them, and a bar on
 // what may be written when the answer is being reconstructed rather than remembered.
-var WorkflowSkills = []string{"init", "plan-run"}
+var WorkflowSkills = []string{"scc-init", "scc-plan-run"}
 
 // Skills is every skill scc ships, knowledge first. Both the skill directory and its
 // slash command are derived from this one list, so the two cannot drift apart, and a
@@ -588,8 +621,13 @@ func Skills() []string {
 	return append(append([]string{}, KnowledgeSkills...), WorkflowSkills...)
 }
 
-// commandPrefix namespaces the scaffolded slash commands.
-const commandPrefix = "scc-"
+// SkillPrefix namespaces everything scc scaffolds that the user invokes by name.
+//
+// It sits on the skill rather than on a command wrapping it, because on a harness
+// that turns a skill into a slash command by itself the skill's name *is* what
+// gets typed — and `init` is a command Claude Code already ships. The review
+// agents carry it for the same reason under the same names.
+const SkillPrefix = "scc-"
 
 // Dirs returns every directory `scc init` creates, including the ones it has no
 // file to put in. An agent that can see specs/, plans/, and docs/adr/ knows where
@@ -644,7 +682,10 @@ type layout struct {
 	Agents      string
 	Commands    string
 	HasCommands bool
-	Manifest    string
+	// SkillsAreCommands says the harness turns a skill into a slash command by
+	// itself, so the layout block names no commands directory — there is not one.
+	SkillsAreCommands bool
+	Manifest          string
 	// RulesPreloaded says the harness already put Rules in the agent's context,
 	// so a template can stop telling it to go and read them. See
 	// paths.Harness.PreloadsRules.
@@ -691,16 +732,17 @@ func column(p string) string {
 
 func layoutOf(h paths.Harness) layout {
 	l := layout{
-		Harness:        h.ID,
-		Label:          h.Label,
-		Dir:            h.Dir,
-		Entry:          h.EntryFile,
-		Rules:          path.Join(h.Dir, h.RulesSeg),
-		Skills:         path.Join(h.Dir, h.SkillsSeg),
-		Agents:         path.Join(h.Dir, h.AgentsSeg),
-		Manifest:       path.Join(h.Dir, paths.ManifestSeg),
-		RulesPreloaded: h.PreloadsRules,
-		RulesScoped:    h.ScopedRules,
+		Harness:           h.ID,
+		Label:             h.Label,
+		Dir:               h.Dir,
+		Entry:             h.EntryFile,
+		Rules:             path.Join(h.Dir, h.RulesSeg),
+		Skills:            path.Join(h.Dir, h.SkillsSeg),
+		Agents:            path.Join(h.Dir, h.AgentsSeg),
+		Manifest:          path.Join(h.Dir, paths.ManifestSeg),
+		RulesPreloaded:    h.PreloadsRules,
+		RulesScoped:       h.ScopedRules,
+		SkillsAreCommands: h.SkillsAreCommands,
 	}
 	l.RulesCol = column(l.Rules)
 	l.SkillsCol = column(l.Skills)

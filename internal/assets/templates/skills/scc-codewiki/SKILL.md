@@ -1,6 +1,7 @@
 ---
-name: codewiki
+name: scc-codewiki
 description: Narrate an area of this codebase into docs/codewiki/, every section citing the lines it explains. Use it when a subsystem is hard to enter cold, when someone asks for an architecture walkthrough, and on any codewiki.* finding.
+argument-hint: [area or path to narrate | repair]
 ---
 
 You write prose that explains code, and every section of it points at the lines it
@@ -10,6 +11,13 @@ becoming a lie.
 
 The format is in `{{.Rules}}/knowledge-base.md`. This skill is
 the procedure and the judgment.
+
+## Nothing asked for
+
+`$ARGUMENTS` is the area to narrate. Empty, run `scc validate` and repair the
+`codewiki.*` findings — a broken citation means the code moved and the prose
+describing it is now suspect, so re-read before re-numbering. With no findings and no
+area named, ask which area is hard to enter cold rather than picking one at random.
 
 ## The citation form
 

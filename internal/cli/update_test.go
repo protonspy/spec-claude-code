@@ -39,7 +39,7 @@ func TestUpdateNeedsAWorkspace(t *testing.T) {
 // deleted, before anything is written.
 func TestUpdateReportsThePlanAndWritesNothingOnADryRun(t *testing.T) {
 	root := initWorkspace(t)
-	missing := ".claude/skills/adr/SKILL.md"
+	missing := ".claude/skills/scc-adr/SKILL.md"
 	if err := os.Remove(filepath.Join(root, filepath.FromSlash(missing))); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
