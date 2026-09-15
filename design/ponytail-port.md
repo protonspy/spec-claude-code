@@ -196,9 +196,17 @@ scc can scaffold itself.
 - [ ] 5.2 (Unit) Write it up in `design/`, limitations first: the model, the sample size,
   what the scorer cannot see, and anything found that contradicts the design
   _Depends 5.1_
+  _Status removed_
+  _Reason There is no result to write up. Skipped with the measurement — see 4.1._
 - [ ] 5.3 (Unit) Act on the result — a rule or a hook stage the measurement cannot
   distinguish from its absence either earns a reason to stay or comes out
   _Depends 5.2_
+  _Status removed_
+  _Reason This was the task the whole plan pointed at, and skipping it is the real cost
+  of skipping the measurement: every rule and both hook stages now stand because they
+  were argued for, and not one of them has had to survive being told apart from its own
+  absence. Recorded here rather than dropped, because the next person to add a rule
+  should find out that the bar was proposed and not applied._
 
 ## Done when
 
