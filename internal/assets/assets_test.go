@@ -1,7 +1,11 @@
 package assets
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1031,4 +1035,55 @@ type errNoSuchRule string
 
 func (e errNoSuchRule) Error() string {
 	return string(e) + " is not in the workspace set — was it renamed or dropped?"
+}
+
+// TestTheTemplateVersionMovesWithTheTemplates is the guard on a drift that
+// shipped once before it was caught.
+//
+// `Version` stamps every managed file in a workspace's manifest, and the manifest
+// uses it to answer "what did this file look like before?" — which is the half a
+// three-way merge cannot reconstruct from a hash alone. So a template that
+// changes while the version holds still leaves two different sets of bytes
+// wearing one number, and from then on a pristine file is indistinguishable from
+// a stale one.
+//
+// The convention already said to bump it. Nothing checked, because the suite
+// renders templates and asserts on their *content*, while the version is a
+// constant nobody compares against them — so the one session that forgot was all
+// it took, and the failure is silent until somebody upgrades.
+//
+// A fingerprint over the whole rendered set closes that. It is deliberately a
+// nuisance: any template edit fails this test, and the fix is to bump `Version`
+// and paste the new digest, which is the "made out loud" shape this repository
+// uses wherever a change is cheap to make and expensive to make by accident.
+func TestTheTemplateVersionMovesWithTheTemplates(t *testing.T) {
+	// Bump Version, then replace this with the digest the failure prints.
+	const fingerprint = "80c48c375fd5ec7511fc7f01b3409f1515c6bbd4fe4f113c6f8581e22eca7dec"
+
+	sum := sha256.New()
+	for _, h := range paths.Harnesses() {
+		files := Workspace(h)
+		sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
+		for _, f := range files {
+			raw, err := Render(h, f)
+			if err != nil {
+				t.Fatalf("%s: %s: %v", h.ID, f.Name, err)
+			}
+			// The destination is hashed with the bytes, so a file that only moved
+			// still counts as a change — a manifest keyed by path cares about that
+			// exactly as much as it cares about content.
+			_, _ = fmt.Fprintf(sum, "%s\x00%s\x00%s\x00", h.ID, f.Rel, raw)
+		}
+	}
+	got := hex.EncodeToString(sum.Sum(nil))
+	if got != fingerprint {
+		t.Fatalf(`the rendered template set changed.
+
+Bump Version (currently %q) and set fingerprint in this test to:
+  %s
+
+A template that changes while Version holds leaves two different sets of bytes
+under one number, and the manifest can no longer tell a pristine file from a
+stale one.`, Version, got)
+	}
 }

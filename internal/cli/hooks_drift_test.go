@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/protonspy/spec-claude-code/internal/hooks"
 )
 
 // driftRepo is a workspace on a base branch with one commit, pushed to a remote.
@@ -36,10 +38,25 @@ func driftRepo(t *testing.T) string {
 	return root
 }
 
+// gitDo runs one git command in the fixture, with scc's own git hooks skipped.
+//
+// The fixture is a scaffolded workspace, and `scc init` installs those hooks by
+// default — so a plain `git commit` here fires `pre-commit`, which fails closed
+// when `scc` is not on PATH. That is the hook behaving exactly as designed: a
+// gate that passed silently when its checker is missing would report success it
+// did not verify. It is still the wrong thing to run *inside a test*, where the
+// subject is drift detection and the binary under test has not been installed
+// anywhere.
+//
+// Caught by CI rather than locally, which is the whole lesson: this passed on a
+// machine that happens to have `scc` on PATH and failed on every machine that
+// does not. SCC_SKIP_HOOKS is the documented escape hatch and this is what it is
+// for.
 func gitDo(t *testing.T, root string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = root
+	cmd.Env = append(os.Environ(), hooks.SkipEnv+"=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
