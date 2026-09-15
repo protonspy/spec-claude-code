@@ -10,8 +10,8 @@ Sort by what you are actually asking:
 | You are asking | Use | Because |
 |---|---|---|
 | Where is this exact text — a string, a flag, an error message, an import? | grep | The graph indexes symbols, not text. Grep is exact, instant, and never stale. |
-| Who calls this? What does it call? | `scc graph query <name>`, `callers`, `callees` | Grep finds the name; only the graph knows which occurrences are calls. |
-| What breaks if I change this? | `scc graph impact <symbol>` | Grep cannot answer this at all. Reading files to answer it costs a dozen reads and still misses one. |
+| Which symbol is called `<name>`, and where? | `scc graph query <name>` | An exact-name lookup over symbols rather than text; `--kind function` narrows it, `--limit` caps it. |
+| Who calls this? What breaks if I change it? | `scc graph explore "what calls <name>"` | Grep finds the name; only the graph knows which occurrences are calls, and explore answers with the call paths between them. |
 | Where does this *concept* live? | `scc graph explore "<question>"` | The concept has no single spelling to grep for. |
 
 The tell is whether your question names a **string** or a **relationship**. A string
