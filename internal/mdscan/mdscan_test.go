@@ -340,3 +340,41 @@ func TestMaskProsePreservesCRLFOffsets(t *testing.T) {
 		t.Errorf("Mask moved the marker to %d, want %d", i, strings.Index(doc, "<!-- y -->"))
 	}
 }
+
+// Ticked is exported rather than reimplemented at the call site, because the
+// alternative is a second regular expression somewhere deciding what a ticked box
+// looks like — and two answers to that is how a checked task stops counting as
+// progress in one place while still counting in another.
+func TestTickedReadsOneLine(t *testing.T) {
+	for line, want := range map[string]bool{
+		"- [x] 1.1 (Unit) Done":      true,
+		"- [X] 1.1 (Unit) Done":      true,
+		"- [x] 1.1 (Unit) Done\r":    true,
+		"  - [x] 1.1 nested":         true,
+		"- [ ] 1.1 (Unit) Not done":  false,
+		"- [] 1.1 malformed":         false,
+		"* [x] 1.1 with a star":      true,
+		"1. [x] 1.1 an ordered item": false,
+		"not a checkbox at all":      false,
+		"":                           false,
+	} {
+		if got := Ticked(line); got != want {
+			t.Errorf("Ticked(%q) = %v, want %v", line, got, want)
+		}
+	}
+}
+
+// A marker inside a blockquote or a four-space indented block is deliberately not
+// masked: those are constructs mdscan's fence scanner does not model, and the
+// splice that reads this is documented as covering fenced blocks and code spans
+// only. Pinned so a later change to Mask is a decision rather than a surprise.
+func TestMaskDoesNotClaimConstructsItDoesNotModel(t *testing.T) {
+	for _, doc := range []string{
+		"> <!-- quoted-marker -->\n",
+		"    <!-- indented-marker -->\n",
+	} {
+		if !strings.Contains(Mask(doc), "marker") {
+			t.Errorf("Mask hid a construct it does not model:\n%q", doc)
+		}
+	}
+}

@@ -146,3 +146,75 @@ func TestAFencedExampleIsNotTheBlock(t *testing.T) {
 		t.Errorf("Splice rewrote the fenced example:\n%s", out)
 	}
 }
+
+// Remove is the counterpart to Splice, and its promise is what survives: the file
+// that carried the block alongside somebody else's content is still theirs
+// afterwards, and the blank lines the block sat between go with it — a file left
+// with a growing stack of empty lines records how many times the tool ran.
+func TestRemoveTakesTheBlockAndItsBlankLines(t *testing.T) {
+	head := "# CLAUDE.md\n\nThe user's own prose.\n"
+	tail := "\nAnd more of their prose.\n"
+
+	// Between two pieces of the user's own text.
+	doc, _, err := alpha.Splice(head+tail, alphaBlock, false)
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	out, found := alpha.Remove(doc)
+	if !found {
+		t.Fatal("Remove did not find the block it had just spliced")
+	}
+	if strings.Contains(out, "Alpha says this.") {
+		t.Errorf("Remove left the block behind:\n%s", out)
+	}
+	if !strings.Contains(out, "The user's own prose.") || !strings.Contains(out, "And more of their prose.") {
+		t.Errorf("Remove took the user's text with it:\n%s", out)
+	}
+	if strings.Contains(out, "\n\n\n") {
+		t.Errorf("Remove left a stack of blank lines:\n%q", out)
+	}
+
+	// A document that is nothing but the block comes back empty rather than as a
+	// file holding one newline.
+	if out, found := alpha.Remove(alphaBlock + "\n"); !found || strings.TrimSpace(out) != "" {
+		t.Errorf("removing the whole document left %q (found = %v)", out, found)
+	}
+
+	// A document with no block is returned unchanged, and says so.
+	plain := "# CLAUDE.md\n\nNothing here.\n"
+	if out, found := alpha.Remove(plain); found || out != plain {
+		t.Errorf("Remove on a blockless document returned %q, %v", out, found)
+	}
+	// An opening marker with no close is malformed, not a block to take out.
+	unclosed := "<!-- alpha v1 -->\nno close\n"
+	if out, found := alpha.Remove(unclosed); found || out != unclosed {
+		t.Errorf("Remove on an unclosed block returned %q, %v", out, found)
+	}
+	// And a marker written in prose is not a block either, on this path as on
+	// every other.
+	prose := "documented as `<!-- alpha v1 -->` … `<!-- /alpha -->` in a sentence.\n"
+	if out, found := alpha.Remove(prose); found || out != prose {
+		t.Errorf("Remove took a sentence out of the document: %q, %v", out, found)
+	}
+}
+
+// CRLF is preserved on every path, because rewriting every line of somebody
+// else's file is not a change they asked for.
+func TestSpliceAndRemovePreserveCRLF(t *testing.T) {
+	doc := "# CLAUDE.md\r\n\r\nTheir prose.\r\n"
+
+	out, _, err := alpha.Splice(doc, alphaBlock, false)
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	if strings.Contains(strings.ReplaceAll(out, "\r\n", ""), "\n") {
+		t.Errorf("the splice introduced a bare LF into a CRLF document:\n%q", out)
+	}
+	back, found := alpha.Remove(out)
+	if !found {
+		t.Fatal("Remove did not find the block in a CRLF document")
+	}
+	if strings.Contains(strings.ReplaceAll(back, "\r\n", ""), "\n") {
+		t.Errorf("the remove introduced a bare LF:\n%q", back)
+	}
+}
