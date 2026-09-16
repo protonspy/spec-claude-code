@@ -317,3 +317,58 @@ func TestPrePushIsSilentWithoutATestCommand(t *testing.T) {
 		t.Errorf("the hook demanded a test command nobody asked it to check: %q", stdout+stderr)
 	}
 }
+
+// The hooks are installable in a repository that follows scc's rules without being
+// one of its workspaces — scc's own, for one — where the artifact validators have
+// nothing to read and the rule about what a commit may say still binds.
+//
+// That narrowing is not a courtesy: without it the pre-commit hook would report
+// findings about a `specs/` tree that does not exist, in every repository that
+// merely installed it.
+func TestTheGateNarrowsOutsideAWorkspace(t *testing.T) {
+	dir := gitInit(t)
+
+	// Not a workspace: the record checks run and the artifact ones have nothing to
+	// say, so a fresh repository is clean rather than full of findings.
+	if _, stderr, code := run(t, "hooks", "run", "pre-commit", "--root", dir); code != ExitOK {
+		t.Errorf("pre-commit in a plain repository exited %d (%s)", code, stderr)
+	}
+
+	// The same stage in a workspace runs everything, and a workspace scc just
+	// scaffolded is clean — a validator that fired on scc own output is the
+	// worst bug in the product.
+	root := gitWorkspace(t)
+	if _, stderr, code := run(t, "hooks", "run", "pre-commit", "--root", root); code != ExitOK {
+		t.Errorf("pre-commit in a fresh workspace exited %d (%s)", code, stderr)
+	}
+
+	// And the report says the way past itself, because a gate with no documented
+	// escape is a gate people delete the first time it is wrong.
+	plan := filepath.Join(root, "plans", "broken.md")
+	if err := os.MkdirAll(filepath.Dir(plan), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(plan, []byte("# Broken\n\n## Nonsense\n\nNo required sections.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	stdout, stderr, code := run(t, "hooks", "run", "pre-commit", "--root", root)
+	if code != ExitFindings {
+		t.Errorf("a workspace with a broken plan exited %d, want %d", code, ExitFindings)
+	}
+	if !strings.Contains(stdout+stderr, hooks.SkipEnv) {
+		t.Errorf("the gate does not name the way past it:\n%s%s", stdout, stderr)
+	}
+
+	// --json keeps stdout a document and still carries the exit contract.
+	stdout, _, code = run(t, "hooks", "run", "pre-commit", "--root", root, "--json")
+	if code != ExitFindings {
+		t.Errorf("--json exited %d, want %d", code, ExitFindings)
+	}
+	var doc struct {
+		Count int `json:"count"`
+	}
+	decode(t, stdout, &doc)
+	if doc.Count == 0 {
+		t.Errorf("the document reports no findings though the command exited %d", ExitFindings)
+	}
+}

@@ -642,3 +642,46 @@ func TestACitationToTheLastLineResolves(t *testing.T) {
 		t.Errorf("citing a line of an empty file reported %v: %+v", got, set.Sorted())
 	}
 }
+
+// An ADR whose frontmatter cannot be read is reported as that rather than as a
+// missing status: the two send the reader to different places, and "add a status"
+// to a file whose YAML is broken is advice that cannot be followed.
+func TestAnUnreadableADRFrontmatterIsItsOwnFinding(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(paths.ADR(root), "0001-use-sqlite.md"),
+		"---\nstatus: accepted\nnested:\n  too:\n    deep: yes\n---\n\n# Use SQLite\n\n## Context\n\nBecause.\n")
+
+	got := runValidator(t, ADR, root)
+	if !contains(got, "adr.frontmatter-unreadable") {
+		set, _ := ADR(root)
+		t.Errorf("rules = %v, want adr.frontmatter-unreadable; findings: %+v", got, set.Sorted())
+	}
+	// And not also the findings that depend on having read it: one finding that
+	// names the real problem beats three that agree with each other.
+	for _, unwanted := range []string{"adr.missing-status", "adr.status-invalid"} {
+		if contains(got, unwanted) {
+			t.Errorf("an unreadable file also reported %s: %v", unwanted, got)
+		}
+	}
+}
+
+// The status vocabulary is closed, and a status outside it is its own finding
+// rather than silence — a record whose state nobody can read is a record that
+// binds nothing.
+func TestADRStatusVocabulary(t *testing.T) {
+	root := t.TempDir()
+
+	write(t, filepath.Join(paths.ADR(root), "0001-a.md"),
+		"---\nstatus: probably-fine\n---\n\n# A\n\n## Context\n\nBecause.\n")
+	if got := runValidator(t, ADR, root); !contains(got, "adr.status-invalid") {
+		set, _ := ADR(root)
+		t.Errorf("rules = %v, want adr.status-invalid; findings: %+v", got, set.Sorted())
+	}
+
+	write(t, filepath.Join(paths.ADR(root), "0001-a.md"),
+		"---\ntitle: A\n---\n\n# A\n\n## Context\n\nBecause.\n")
+	if got := runValidator(t, ADR, root); !contains(got, "adr.missing-status") {
+		set, _ := ADR(root)
+		t.Errorf("rules = %v, want adr.missing-status; findings: %+v", got, set.Sorted())
+	}
+}
