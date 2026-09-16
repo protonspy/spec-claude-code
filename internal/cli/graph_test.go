@@ -329,3 +329,36 @@ func TestGraphScopeSurvivesInit(t *testing.T) {
 		t.Errorf("codegraph = %v, want it carried across init", m.Codegraph)
 	}
 }
+
+// The whole command is the binary, so a missing CodeGraph is a hard error here —
+// unlike the launch path, where a graph is an enhancement and the agent starts
+// anyway. The error has to name the install, because the next thing the reader
+// does is install it.
+func TestGraphRefusesWithoutTheBinaryAndNamesTheInstall(t *testing.T) {
+	root := initWorkspace(t)
+	isolatedPath(t)
+
+	for _, sub := range [][]string{
+		{"sync"},
+		{"build"},
+		{"query", "renderTask"},
+		{"explore", "how does a plan get validated"},
+	} {
+		args := append(append([]string{"graph"}, sub...), "--root", root)
+		stdout, stderr, code := run(t, args...)
+		if code == ExitOK {
+			t.Errorf("`scc graph %s` with no binary exited 0", strings.Join(sub, " "))
+			continue
+		}
+		if !strings.Contains(stdout+stderr, "codegraph") {
+			t.Errorf("`scc graph %s` did not name the binary:\n%s%s", strings.Join(sub, " "), stdout, stderr)
+		}
+	}
+
+	// npm is the only installer scc will run, and the hint names it rather than
+	// the piped script CodeGraph's own docs lead with.
+	stdout, stderr, _ := run(t, "graph", "sync", "--root", root)
+	if strings.Contains(stdout+stderr, "| sh") || strings.Contains(stdout+stderr, "iex") {
+		t.Errorf("the hint pipes a remote script into a shell:\n%s%s", stdout, stderr)
+	}
+}

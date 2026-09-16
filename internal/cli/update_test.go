@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/protonspy/spec-claude-code/internal/hooks"
 	"github.com/protonspy/spec-claude-code/internal/manifest"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
@@ -246,5 +247,43 @@ func TestUpdateTargetsEveryInitializedHarness(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "init --codex") {
 		t.Errorf("stderr = %q, want it to say how to create that tree", stderr)
+	}
+}
+
+// `scc update` reports a stale hook block and does not rewrite it: a "yes" about
+// template files is not consent to edit .git.
+func TestUpdateReportsStaleHooksWithoutRewritingThem(t *testing.T) {
+	root := gitWorkspace(t)
+
+	hooksDir, err := hooks.Dir(root)
+	if err != nil {
+		t.Fatalf("hooks.Dir: %v", err)
+	}
+	path := filepath.Join(hooksDir, "pre-commit")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	stale := strings.Replace(string(before), "scc hooks run pre-commit", "scc hooks run pre-commit --old", 1)
+	if stale == string(before) {
+		t.Fatal("the installed hook does not call back into scc, so this test's premise is gone")
+	}
+	if err := os.WriteFile(path, []byte(stale), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	stdout, stderr, code := run(t, "update", "--yes", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("update: exit %d (%s)", code, stderr)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(after) != stale {
+		t.Errorf("update rewrote a hook in .git:\n%s", after)
+	}
+	if !strings.Contains(stdout+stderr, "hooks") {
+		t.Errorf("update said nothing about the stale hook:\n%s%s", stdout, stderr)
 	}
 }
