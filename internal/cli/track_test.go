@@ -258,6 +258,9 @@ func TestSpecSyncFollowsABranchToMerged(t *testing.T) {
 	gitRun("init", "-q", "-b", "main", ".")
 	gitRun("config", "user.email", "t@example.com")
 	gitRun("config", "user.name", "t")
+	// A machine whose global config signs commits would fail every commit below
+	// non-interactively, which is an environment this test does not mean to assert about.
+	gitRun("config", "commit.gpgsign", "false")
 	gitRun("add", "-A")
 	gitRun("commit", "-qm", "init")
 	gitRun("switch", "-qc", "feat/user-auth")
@@ -309,5 +312,103 @@ func TestSpecSyncFollowsABranchToMerged(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "0 still open") {
 		t.Errorf("sync = %q, want nothing left open", stdout)
+	}
+}
+
+// syncTargets is the specs to reconcile: the ones named, or all of them. A name
+// becomes a path segment, so it goes through SafeName first — without it
+// `scc spec sync ..` walks out of the workspace.
+func TestSpecSyncTargetsNamedSpecsOrAllOfThem(t *testing.T) {
+	if !git.Found(git.Bin) {
+		t.Skip("git is not on PATH")
+	}
+	root := trackedSpec(t)
+	gitHere(t, root)
+	if _, _, code := run(t, "spec", "new", "second-feature", "--root", root); code != ExitOK {
+		t.Fatalf("spec new: exit %d", code)
+	}
+	// Sync reconciles the specs that recorded something: one with no branch and no
+	// PR is a spec nobody has started, which is not a loose end to report.
+	for _, name := range []string{"user-auth", "second-feature"} {
+		if _, stderr, code := run(t, "spec", "track", name, "--branch", "feat/"+name, "--root", root); code != ExitOK {
+			t.Fatalf("spec track %s: exit %d (%s)", name, code, stderr)
+		}
+	}
+
+	var doc struct {
+		Specs []struct {
+			Name string `json:"spec"`
+		} `json:"specs"`
+		Count int `json:"count"`
+	}
+	stdout, stderr, code := run(t, "spec", "sync", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("spec sync: exit %d (%s)", code, stderr)
+	}
+	decode(t, stdout, &doc)
+	if doc.Count < 2 {
+		t.Errorf("a bare sync reconciled %d specs, want both: %+v", doc.Count, doc.Specs)
+	}
+
+	stdout, _, code = run(t, "spec", "sync", "user-auth", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("spec sync user-auth: exit %d", code)
+	}
+	one := doc
+	decode(t, stdout, &one)
+	if one.Count != 1 {
+		t.Errorf("a named sync reconciled %d specs: %+v", one.Count, one.Specs)
+	}
+
+	for _, name := range []string{"..", "../outside", "nested/name"} {
+		if _, _, code := run(t, "spec", "sync", name, "--root", root); code == ExitOK {
+			t.Errorf("spec sync %q exited 0", name)
+		}
+	}
+	// A spec that is simply not there is an error too, and one that names itself.
+	stdout, stderr, code = run(t, "spec", "sync", "no-such-feature", "--root", root)
+	if code == ExitOK {
+		t.Error("syncing a spec that does not exist exited 0")
+	}
+	if !strings.Contains(stdout+stderr, "no-such-feature") {
+		t.Errorf("the error does not name the spec:\n%s%s", stdout, stderr)
+	}
+}
+
+// --dry-run reports what sync would write and writes nothing: the record is the
+// user's, and a command that edited every spec in the workspace without being
+// asked would be the one flag nobody expects to change anything doing exactly that.
+func TestSpecSyncDryRunWritesNothing(t *testing.T) {
+	root := trackedSpec(t)
+	if _, _, code := run(t, "spec", "track", "user-auth", "--branch", "feat/x", "--root", root); code != ExitOK {
+		t.Fatalf("spec track: exit %d", code)
+	}
+	before := requirements(t, root)
+
+	if _, stderr, code := run(t, "spec", "sync", "--dry-run", "--root", root); code != ExitOK {
+		t.Fatalf("spec sync --dry-run: exit %d (%s)", code, stderr)
+	}
+	if requirements(t, root) != before {
+		t.Error("--dry-run rewrote the record")
+	}
+}
+
+// gitHere makes root a repository with one commit, which is what `spec sync` needs
+// before it has anything to reconcile against.
+func gitHere(t *testing.T, root string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main", "."},
+		{"config", "user.email", "t@example.invalid"},
+		{"config", "user.name", "t"},
+		{"config", "commit.gpgsign", "false"},
+		{"add", "-A"},
+		{"commit", "-qm", "init"},
+	} {
+		cmd := exec.Command(git.Bin, args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
 	}
 }

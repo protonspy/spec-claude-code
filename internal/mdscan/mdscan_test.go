@@ -299,3 +299,82 @@ func TestLineIsOneBasedAndSafe(t *testing.T) {
 		t.Error("out-of-range Line() did not return empty")
 	}
 }
+
+func TestMaskProseHidesExamplesAndKeepsComments(t *testing.T) {
+	doc := "Prose about `<!-- rtk-instructions v2 -->` and its close.\n" +
+		"```\n<!-- fenced-marker -->\n```\n" +
+		"<!-- real-marker v1 -->\nbody\n<!-- /real-marker -->\n"
+
+	got := Mask(doc)
+
+	if len(got) != len(doc) {
+		t.Fatalf("Mask changed the length: %d, want %d", len(got), len(doc))
+	}
+	for _, hidden := range []string{"rtk-instructions", "fenced-marker"} {
+		if strings.Contains(got, hidden) {
+			t.Errorf("Mask left %q visible:\n%s", hidden, got)
+		}
+	}
+	for _, kept := range []string{"<!-- real-marker v1 -->", "<!-- /real-marker -->", "body"} {
+		if !strings.Contains(got, kept) {
+			t.Errorf("Mask hid %q, which is not an example:\n%s", kept, got)
+		}
+	}
+	if i := strings.Index(got, "<!-- real-marker v1 -->"); i != strings.Index(doc, "<!-- real-marker v1 -->") {
+		t.Errorf("Mask moved the marker to %d, want %d", i, strings.Index(doc, "<!-- real-marker v1 -->"))
+	}
+}
+
+func TestMaskProsePreservesCRLFOffsets(t *testing.T) {
+	doc := "a `<!-- x -->` b\r\n<!-- y -->\r\n"
+
+	got := Mask(doc)
+
+	if len(got) != len(doc) {
+		t.Fatalf("Mask changed the length: %d, want %d", len(got), len(doc))
+	}
+	if strings.Contains(got, "<!-- x -->") {
+		t.Errorf("Mask left the code span visible: %q", got)
+	}
+	if i := strings.Index(got, "<!-- y -->"); i != strings.Index(doc, "<!-- y -->") {
+		t.Errorf("Mask moved the marker to %d, want %d", i, strings.Index(doc, "<!-- y -->"))
+	}
+}
+
+// Ticked is exported rather than reimplemented at the call site, because the
+// alternative is a second regular expression somewhere deciding what a ticked box
+// looks like — and two answers to that is how a checked task stops counting as
+// progress in one place while still counting in another.
+func TestTickedReadsOneLine(t *testing.T) {
+	for line, want := range map[string]bool{
+		"- [x] 1.1 (Unit) Done":      true,
+		"- [X] 1.1 (Unit) Done":      true,
+		"- [x] 1.1 (Unit) Done\r":    true,
+		"  - [x] 1.1 nested":         true,
+		"- [ ] 1.1 (Unit) Not done":  false,
+		"- [] 1.1 malformed":         false,
+		"* [x] 1.1 with a star":      true,
+		"1. [x] 1.1 an ordered item": false,
+		"not a checkbox at all":      false,
+		"":                           false,
+	} {
+		if got := Ticked(line); got != want {
+			t.Errorf("Ticked(%q) = %v, want %v", line, got, want)
+		}
+	}
+}
+
+// A marker inside a blockquote or a four-space indented block is deliberately not
+// masked: those are constructs mdscan's fence scanner does not model, and the
+// splice that reads this is documented as covering fenced blocks and code spans
+// only. Pinned so a later change to Mask is a decision rather than a surprise.
+func TestMaskDoesNotClaimConstructsItDoesNotModel(t *testing.T) {
+	for _, doc := range []string{
+		"> <!-- quoted-marker -->\n",
+		"    <!-- indented-marker -->\n",
+	} {
+		if !strings.Contains(Mask(doc), "marker") {
+			t.Errorf("Mask hid a construct it does not model:\n%q", doc)
+		}
+	}
+}

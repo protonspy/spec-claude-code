@@ -416,3 +416,67 @@ func TestFlatCommandKeysAreReadAndMigrated(t *testing.T) {
 		t.Errorf("check = %+v, want the migrated values", check)
 	}
 }
+
+// CarryOver exists because `scc init` and `scc update` both build the next
+// manifest from scratch and then fill in the file entries — right for the entries
+// and silently destructive for everything else. Before the gate's commands lived
+// here the only casualty was the unknown-field preservation; now a re-run of init
+// would throw away the whole configuration.
+func TestCarryOverKeepsEverythingThatIsNotAFileEntry(t *testing.T) {
+	prior := New("30", paths.Claude)
+	prior.Build = "go build ./..."
+	prior.Test = "go run -C tools ./testreport"
+	prior.Lint = "golangci-lint run"
+	prior.Format = "skipped"
+	prior.MinCoverage = 91
+	prior.Codegraph = []string{"backend/src", "frontend/src"}
+	prior.Set("CLAUDE.md", "abc", "30")
+
+	// A key a newer scc wrote that this build has never heard of.
+	raw, err := prior.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+	withUnknown := strings.Replace(string(raw), "{\n", "{\n  \"somethingNewer\": {\"deep\": 1},\n", 1)
+	prior = &Manifest{}
+	if err := json.Unmarshal([]byte(withUnknown), prior); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	next := New("31", paths.Claude)
+	next.CarryOver(prior)
+
+	if next.Build != "go build ./..." || next.Format != "skipped" {
+		t.Errorf("the commands did not carry over: %+v", next)
+	}
+	if next.MinCoverage != 91 {
+		t.Errorf("MinCoverage = %v, want 91", next.MinCoverage)
+	}
+	if strings.Join(next.Codegraph, " ") != "backend/src frontend/src" {
+		t.Errorf("the graph scope did not carry over: %v", next.Codegraph)
+	}
+	out, err := next.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+	if !strings.Contains(string(out), "somethingNewer") {
+		t.Errorf("a key this build does not know was dropped:\n%s", out)
+	}
+	// The file entries are the one thing it must *not* carry: they belong to the
+	// scaffold run that is rebuilding them.
+	if len(next.Files) != 0 {
+		t.Errorf("CarryOver brought the file entries with it: %+v", next.Files)
+	}
+	// And the scope is a copy rather than the prior's own slice.
+	next.Codegraph[0] = "mutated"
+	if prior.Codegraph[0] == "mutated" {
+		t.Error("CarryOver aliased the prior manifest's scope")
+	}
+
+	// A nil prior is a first scaffold, and it leaves the new manifest alone.
+	fresh := New("31", paths.Claude)
+	fresh.CarryOver(nil)
+	if fresh.Build != "" || fresh.MinCoverage != 0 {
+		t.Errorf("CarryOver(nil) invented configuration: %+v", fresh)
+	}
+}

@@ -373,3 +373,48 @@ func TestRemoveLeavesATombstone(t *testing.T) {
 		t.Error("removing an already-removed note succeeded")
 	}
 }
+
+func TestTodayIsADateTheGrammarAccepts(t *testing.T) {
+	if err := CheckDate(Today()); err != nil {
+		t.Errorf("Today() = %q, which the grammar rejects: %v", Today(), err)
+	}
+	for _, bad := range []string{"", "09-02-2026", "2026-2-9", "yesterday", "2026-13-01"} {
+		if err := CheckDate(bad); err == nil {
+			t.Errorf("CheckDate(%q) accepted a date the grammar would not parse back", bad)
+		}
+	}
+}
+
+// One note is one line, and what a reader greps for and what a reader is shown
+// must not be two formats to learn — so String is Format.
+func TestStringIsTheFormatAReaderGrepsFor(t *testing.T) {
+	n := Note{
+		ID: ID(42), Num: 42, Date: "2026-02-09", Tags: []string{"gotcha"},
+		Paths: []string{"internal/cli/launch.go"},
+		Text:  "wrap writes MCP config to the agent's own file",
+	}
+	if n.String() != n.Format() {
+		t.Errorf("String and Format disagree:\n%s\n%s", n.String(), n.Format())
+	}
+	line := n.String()
+	if strings.Count(line, "\n") != 0 {
+		t.Errorf("a note spans lines: %q", line)
+	}
+	// The index fields come first, which is what makes a grep for a tag a grep for
+	// a whole note.
+	for _, want := range []string{ID(42), "2026-02-09", "#gotcha", "@internal/cli/launch.go"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the line does not carry %q: %s", want, line)
+		}
+	}
+
+	// And it round-trips: the grammar that writes it is the grammar that reads it.
+	f := parse(t, "# Notes\n\n## "+Section+"\n\n"+line+"\n")
+	if len(f.Notes) != 1 {
+		t.Fatalf("the log cannot read back what it wrote: %s", line)
+	}
+	back := f.Notes[0]
+	if back.Num != n.Num || back.Text != n.Text || strings.Join(back.Tags, ",") != "gotcha" {
+		t.Errorf("round trip changed the note: %+v", back)
+	}
+}

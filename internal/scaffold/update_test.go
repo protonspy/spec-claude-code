@@ -343,3 +343,62 @@ func findWorkspaceFile(t *testing.T, h paths.Harness, rel string) assets.File {
 	t.Fatalf("%s ships no file at %s", h.ID, rel)
 	return assets.File{}
 }
+
+// Count and Writes are what a caller prints and what it asks the user to agree to,
+// and Writes has one subtlety worth pinning: an orphan counts. Nothing is written
+// to the file, but it stops being managed, and a stale entry left in the manifest
+// would send the next update looking for a template that no longer exists.
+func TestCountAndWritesDescribeThePlanTheUserIsShown(t *testing.T) {
+	root := t.TempDir()
+	applyTo(t, root, paths.Claude, false)
+
+	// A plan with nothing to do writes nothing, whichever way force is set.
+	plan := planFor(t, root, paths.Claude)
+	if n := plan.Count(UpCurrent); n == 0 {
+		t.Errorf("a fresh workspace has %d current files", n)
+	}
+	for _, force := range []bool{false, true} {
+		if plan.Writes(force) {
+			t.Errorf("a fresh workspace reports writes with force = %v: %+v", force, plan.Pending())
+		}
+	}
+	if len(plan.Pending()) != 0 {
+		t.Errorf("a fresh workspace has pending items: %+v", plan.Pending())
+	}
+
+	// A conflict alone is a plan with nothing to do *until the user decides*, so
+	// it writes only under force.
+	edited := ".claude/rules/tasks.md"
+	writeManaged(t, root, paths.Claude, edited, "# mine\n", false)
+	plan = planFor(t, root, paths.Claude)
+	if n := plan.Count(UpConflict); n != 1 {
+		t.Errorf("Count(conflict) = %d, want 1", n)
+	}
+	if plan.Writes(false) {
+		t.Error("a plan whose only item is a conflict reports writes without force")
+	}
+	if !plan.Writes(true) {
+		t.Error("a plan whose only item is a conflict reports no writes under force")
+	}
+	if len(plan.Pending()) != 1 {
+		t.Errorf("Pending = %+v, want the one conflict", plan.Pending())
+	}
+
+	// An orphan writes without force: the file is left alone, but the manifest
+	// entry goes, and a stale one would send the next update looking for a
+	// template that is not there.
+	orphan := ".claude/rules/retired-edited.md"
+	writeManaged(t, root, paths.Claude, orphan, "# retired\n", true)
+	writeManaged(t, root, paths.Claude, orphan, "# and then edited\n", false)
+	plan = planFor(t, root, paths.Claude)
+	if n := plan.Count(UpOrphan); n != 1 {
+		t.Errorf("Count(orphan) = %d, want 1", n)
+	}
+	if !plan.Writes(false) {
+		t.Error("a plan with an orphan reports no writes, so the manifest keeps a dead entry")
+	}
+	// An action nothing in this plan carries counts zero rather than guessing.
+	if n := plan.Count(UpdateAction("not-an-action")); n != 0 {
+		t.Errorf("Count on an unknown action = %d", n)
+	}
+}

@@ -489,3 +489,94 @@ func skipRest(t *testing.T, root, keep string) {
 		}
 	}
 }
+
+// A finding about the configuration points at the manifest, and it names it
+// relative to the workspace root — which is what every other command's relPath
+// answers. Against the working directory the same file came back as
+// `.claude/scc-manifest.json` from the root and `../.claude/scc-manifest.json`
+// from `specs/`, one field naming one file two ways.
+func TestTheWrittenManifestsAreNamedFromTheRoot(t *testing.T) {
+	root := initWorkspace(t)
+
+	stdout, stderr, code := run(t, "check", "set", "build", "go build ./...", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("check set: exit %d (%s)", code, stderr)
+	}
+	var doc struct {
+		Wrote []string `json:"files"`
+	}
+	decode(t, stdout, &doc)
+	if len(doc.Wrote) == 0 {
+		t.Fatalf("check set reported no files written: %s", stdout)
+	}
+	for _, p := range doc.Wrote {
+		if filepath.IsAbs(p) {
+			t.Errorf("a written path is absolute: %q", p)
+		}
+		if strings.HasPrefix(p, "..") {
+			t.Errorf("a written path escapes the workspace: %q", p)
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(p))); err != nil {
+			t.Errorf("the reported path does not resolve under the root: %q", p)
+		}
+	}
+}
+
+// The four gates are a closed set, and a fifth name is refused rather than
+// recorded under a key nothing reads. `skipped` is a word rather than an absent
+// key, so declining one and clearing it are different acts with different
+// consequences.
+func TestCheckSetSkipAndClearAreThreeDifferentActs(t *testing.T) {
+	root := initWorkspace(t)
+
+	if _, _, code := run(t, "check", "set", "typecheck", "tsc --noEmit", "--root", root); code == ExitOK {
+		t.Error("a gate this project does not have was recorded")
+	}
+	if _, _, code := run(t, "check", "skip", "typecheck", "--root", root); code == ExitOK {
+		t.Error("a gate this project does not have was declined")
+	}
+	// And `set` with no command is a usage error rather than an empty recording,
+	// which reads back as "nobody has decided".
+	if _, _, code := run(t, "check", "set", "lint", "--root", root); code == ExitOK {
+		t.Error("`check set lint` with no command exited 0")
+	}
+
+	if _, stderr, code := run(t, "check", "skip", "format", "--root", root); code != ExitOK {
+		t.Fatalf("check skip: exit %d (%s)", code, stderr)
+	}
+	var doc struct {
+		Commands map[string]string `json:"commands"`
+		Floor    float64           `json:"floor"`
+	}
+	stdout, _, code := run(t, "check", "show", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("check show: exit %d", code)
+	}
+	decode(t, stdout, &doc)
+	if doc.Commands["format"] != "skipped" {
+		t.Errorf("a declined gate reads back as %q, want the word that means declined", doc.Commands["format"])
+	}
+
+	// Clearing puts it back to undecided, which is a different state: the
+	// validator is silent about a declined gate and reports an undecided one.
+	if _, stderr, code := run(t, "check", "clear", "format", "--root", root); code != ExitOK {
+		t.Fatalf("check clear: exit %d (%s)", code, stderr)
+	}
+	stdout, _, code = run(t, "check", "show", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("check show: exit %d", code)
+	}
+	var cleared struct {
+		Commands map[string]string `json:"commands"`
+		Floor    float64           `json:"floor"`
+	}
+	decode(t, stdout, &cleared)
+	if cleared.Commands["format"] == "skipped" {
+		t.Error("clear left the gate declined rather than undecided")
+	}
+	// The floor has a working default and is reported even when nobody set one,
+	// so a reader never has to know what the default is.
+	if cleared.Floor <= 0 {
+		t.Errorf("floor = %v, want the default this workspace is held to", cleared.Floor)
+	}
+}

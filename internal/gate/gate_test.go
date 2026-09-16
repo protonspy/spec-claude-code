@@ -1,6 +1,11 @@
 package gate
 
 import (
+	"os"
+
+	"github.com/protonspy/spec-claude-code/internal/assets"
+	"github.com/protonspy/spec-claude-code/internal/manifest"
+	"github.com/protonspy/spec-claude-code/internal/paths"
 	"io"
 	"runtime"
 	"strings"
@@ -320,4 +325,89 @@ func twoStreams(out, err string) string {
 		return "echo " + err + " 1>&2 & echo " + out
 	}
 	return "printf '%s\n' '" + err + "' >&2; printf '%s\n' '" + out + "'"
+}
+
+// scaffolded makes root look like a workspace for these harnesses: the manifest is
+// the marker, and it is also where the commands live.
+func scaffolded(t *testing.T, all ...paths.Harness) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, h := range all {
+		if err := os.MkdirAll(h.Config(root), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := manifest.Save(root, h, manifest.New(assets.Version, h)); err != nil {
+			t.Fatalf("manifest.Save: %v", err)
+		}
+	}
+	return root
+}
+
+// A workspace that records nothing is not an error: absence means this project has
+// not wired its commands up, which the caller reports or ignores depending on
+// whether the gate was asked for.
+func TestLoadAndSaveRoundTripThroughEveryManifest(t *testing.T) {
+	root := scaffolded(t, paths.Claude, paths.Codex)
+
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Any() {
+		t.Errorf("a freshly scaffolded workspace reported commands: %+v", cfg)
+	}
+
+	want := Config{
+		Commands: map[Kind]string{
+			Build:  "go build ./...",
+			Test:   "go run -C tools ./testreport",
+			Lint:   "golangci-lint run",
+			Format: Skipped,
+		},
+		MinCoverage: 91,
+	}
+	wrote, err := Save(root, want)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	// Every harness rather than one: the next reader takes the first that has
+	// any, so writing a single manifest would make the answer depend on which
+	// tool the reader was standing in.
+	if len(wrote) != 2 {
+		t.Errorf("Save wrote %v, want both manifests", wrote)
+	}
+
+	got, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, k := range Kinds() {
+		if got.Command(k) != want.Command(k) {
+			t.Errorf("%s = %q, want %q", k, got.Command(k), want.Command(k))
+		}
+	}
+	if got.MinCoverage != want.MinCoverage {
+		t.Errorf("MinCoverage = %v, want %v", got.MinCoverage, want.MinCoverage)
+	}
+	// `skipped` is a word rather than an absent key: a language with no formatter
+	// is a real answer, and a gate left unrecorded is a decision nobody has made.
+	if !got.Declined(Format) {
+		t.Error("a gate recorded as skipped did not read back as declined")
+	}
+	if got.Declined(Build) {
+		t.Error("a gate with a real command read back as declined")
+	}
+
+	// A finding about the configuration points at the manifest it was read from.
+	if p := ManifestPath(root); p != paths.Claude.Manifest(root) {
+		t.Errorf("ManifestPath = %q, want the first harness's manifest", p)
+	}
+	// And outside a workspace it still names a file, so a finding has somewhere to
+	// point rather than an empty path.
+	if p := ManifestPath(t.TempDir()); p == "" {
+		t.Error("ManifestPath outside a workspace named nothing")
+	}
+	if _, err := Save(t.TempDir(), want); err == nil {
+		t.Error("Save outside a workspace returned no error")
+	}
 }

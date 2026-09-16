@@ -1,0 +1,421 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// specWorkspace is mapWorkspace plus a spec, for the reads that only make sense
+// against one: a requirement id, a trace, and an index with both trees in it.
+func specWorkspace(t *testing.T) string {
+	t.Helper()
+	root := mapWorkspace(t)
+	dir := filepath.Join(root, "specs", "job-store")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"requirements.md": `---
+autonomy: auto
+ci: wait
+---
+
+# Job store
+
+## Requirements
+
+- **R1.1** WHEN a job is submitted THE SYSTEM SHALL write it to disk before replying
+- **R1.2** WHILE a job is running THE SYSTEM SHALL keep its request id addressable
+`,
+		"design.md": `# Job store — design
+
+## Storage
+
+One file per job, written atomically. Satisfies R1.1.
+
+## Recovery
+
+The request id recovers an already-paid result after a crash. Satisfies R1.2.
+`,
+		"tasks.md": `# Job store — tasks
+
+## Tasks
+
+- [ ] 1.1 (TDD) Write the job file atomically (R1.1)
+- [ ] 1.2 (Unit) Recover by request id (R1.2)
+`,
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// The index is what a session reads instead of the workspace. It has to name every
+// artifact and say enough about each that the next command is obvious — which is
+// the whole reason it exists rather than `ls`.
+func TestMapIndexNamesEveryArtifact(t *testing.T) {
+	root := specWorkspace(t)
+
+	stdout, _, code := run(t, "map", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("map: exit %d", code)
+	}
+	for _, want := range []string{"sample", "job-store"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("the index does not mention %q:\n%s", want, stdout)
+		}
+	}
+
+	var doc struct {
+		Artifacts []struct {
+			Path  string `json:"path"`
+			Kind  string `json:"kind"`
+			Title string `json:"title"`
+		} `json:"artifacts"`
+	}
+	stdout, _, code = run(t, "map", "index", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("map index --json: exit %d", code)
+	}
+	decode(t, stdout, &doc)
+	if len(doc.Artifacts) < 4 {
+		t.Fatalf("the index lists %d artifacts, want the plan and the spec's three: %+v",
+			len(doc.Artifacts), doc.Artifacts)
+	}
+	kinds := map[string]bool{}
+	for _, a := range doc.Artifacts {
+		if a.Path == "" || a.Kind == "" {
+			t.Errorf("an entry is not fully described: %+v", a)
+		}
+		kinds[a.Kind] = true
+	}
+	for _, want := range []string{"plan", "requirements", "design", "tasks"} {
+		if !kinds[want] {
+			t.Errorf("the index has no %s artifact: %+v", want, doc.Artifacts)
+		}
+	}
+}
+
+// A trace answers "what else mentions this", which is the question that otherwise
+// costs a read of every file in the spec.
+func TestMapTraceFollowsARequirementThroughItsSpec(t *testing.T) {
+	root := specWorkspace(t)
+
+	stdout, stderr, code := run(t, "map", "trace", "specs/job-store/R1.1", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("map trace: exit %d (%s)", code, stderr)
+	}
+	// The requirement itself and the design that satisfies it: two files, one
+	// command, where the alternative is reading the spec.
+	for _, want := range []string{"requirements.md", "design.md"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("the trace does not reach %s:\n%s", want, stdout)
+		}
+	}
+
+	// A spec reference traces too: a plan's leaf is an address like any other.
+	if _, _, code := run(t, "map", "trace", "specs/job-store/", "--root", root); code != ExitOK {
+		t.Errorf("tracing a spec reference exited %d", code)
+	}
+
+	// An id nothing mentions is answered rather than failed — "nothing mentions
+	// this" is a result, and the line saying so is what stops a caller reading an
+	// empty stdout as a broken command.
+	stdout, _, code = run(t, "map", "trace", "specs/job-store/R9.9", "--root", root)
+	if code != ExitOK {
+		t.Errorf("tracing an id nothing mentions exited %d", code)
+	}
+	if !strings.Contains(stdout, "nothing") {
+		t.Errorf("an empty trace said nothing about being empty: %q", stdout)
+	}
+}
+
+// Section addressing bottoms out on a long section with no headings inside it, and
+// blocks is the answer: every paragraph's opening line, as an address `show` takes.
+func TestMapBlocksIndexesASectionThatHasNoHeadings(t *testing.T) {
+	root := mapWorkspace(t)
+
+	stdout, stderr, code := run(t, "map", "blocks", "plans/sample.md", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("map blocks: exit %d (%s)", code, stderr)
+	}
+	if strings.TrimSpace(stdout) == "" {
+		t.Fatal("map blocks printed nothing")
+	}
+
+	var doc struct {
+		Blocks []struct {
+			Section string `json:"section"`
+			Index   int    `json:"index"`
+			Lead    string `json:"lead"`
+			Line    int    `json:"line"`
+		} `json:"blocks"`
+	}
+	stdout, _, code = run(t, "map", "blocks", "plans/sample.md", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("map blocks --json: exit %d", code)
+	}
+	decode(t, stdout, &doc)
+	if len(doc.Blocks) == 0 {
+		t.Fatal("map blocks --json listed nothing")
+	}
+	// Every ref it prints has to be one `show` accepts, or the index is a list of
+	// addresses that do not resolve.
+	for _, b := range doc.Blocks {
+		if b.Section == "" || b.Index < 1 || b.Line < 1 || b.Lead == "" {
+			t.Errorf("a block is not addressable: %+v", b)
+			continue
+		}
+		ref := fmt.Sprintf("%s:%d", b.Section, b.Index)
+		if _, _, code := run(t, "map", "show", "plans/sample.md", ref, "--root", root); code != ExitOK {
+			t.Errorf("map show %s exited %d, though blocks printed it", ref, code)
+		}
+	}
+}
+
+// --ready and --blocked share one implementation with --next, because two notions
+// of eligibility would be two answers to "what do I work on".
+func TestMapTasksReadyAndBlockedAgreeWithNext(t *testing.T) {
+	root := mapWorkspace(t)
+
+	next, _, code := run(t, "map", "tasks", "plans/sample.md", "--root", root, "--next")
+	if code != ExitOK {
+		t.Fatalf("--next: exit %d", code)
+	}
+	if strings.TrimSpace(next) == "" {
+		t.Fatal("--next printed nothing on a plan with open tasks")
+	}
+	ready, _, code := run(t, "map", "tasks", "plans/sample.md", "--root", root, "--ready")
+	if code != ExitOK {
+		t.Fatalf("--ready: exit %d", code)
+	}
+	if strings.TrimSpace(ready) == "" {
+		t.Fatal("--ready printed nothing on a plan with open tasks")
+	}
+
+	for _, flag := range []string{"--blocked", "--deps", "--open", "--done"} {
+		if _, _, code := run(t, "map", "tasks", "plans/sample.md", "--root", root, flag); code != ExitOK {
+			t.Errorf("%s exited %d", flag, code)
+		}
+	}
+}
+
+// brief is the header and tasks is the checklist, and no command returns both —
+// that split is what gives "never read the plan" its authority.
+func TestMapBriefAndTasksAreEachSmallerThanThePlan(t *testing.T) {
+	root := mapWorkspace(t)
+	full := len(planText(t, root))
+
+	brief, _, code := run(t, "map", "brief", "plans/sample.md", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("map brief: exit %d", code)
+	}
+	tasks, _, code := run(t, "map", "tasks", "plans/sample.md", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("map tasks: exit %d", code)
+	}
+	if len(brief) >= full {
+		t.Errorf("the brief is no smaller than the plan (%d vs %d)", len(brief), full)
+	}
+	if len(tasks) >= full {
+		t.Errorf("the checklist is no smaller than the plan (%d vs %d)", len(tasks), full)
+	}
+}
+
+// A name rather than a path: `scc map brief sample` has to find the plan, because
+// the address forms exist so a caller never has to know the layout.
+func TestMapAcceptsANameAsWellAsAPath(t *testing.T) {
+	root := specWorkspace(t)
+
+	for _, ref := range []string{"plans/sample.md", "sample"} {
+		if _, _, code := run(t, "map", "brief", ref, "--root", root); code != ExitOK {
+			t.Errorf("map brief %s exited %d", ref, code)
+		}
+	}
+	for _, ref := range []string{"specs/job-store/tasks.md", "job-store"} {
+		if _, _, code := run(t, "map", "outline", ref, "--root", root); code != ExitOK {
+			t.Errorf("map outline %s exited %d", ref, code)
+		}
+	}
+	// A name nothing answers to is an error that says so.
+	stdout, stderr, code := run(t, "map", "brief", "no-such-plan", "--root", root)
+	if code == ExitOK {
+		t.Error("map brief on a name nothing answers to exited 0")
+	}
+	if !strings.Contains(stdout+stderr, "no-such-plan") {
+		t.Errorf("the error does not name what was asked for:\n%s%s", stdout, stderr)
+	}
+}
+
+// Indented for a person, compact for everything else: the overwhelming reader of a
+// --json document here is an agent paying by the byte, and measured on a six-task
+// plan the indented form was 2198 bytes against 599 for the human listing.
+//
+// Every read has both forms, and neither may be empty — a command that printed
+// nothing on one of them would send the caller to the file.
+func TestEveryMapReadHasBothForms(t *testing.T) {
+	root := specWorkspace(t)
+
+	for _, args := range [][]string{
+		{"index"},
+		{"outline", "plans/sample.md"},
+		{"brief", "plans/sample.md"},
+		{"tasks", "plans/sample.md"},
+		{"show", "plans/sample.md", "1.2"},
+		{"blocks", "plans/sample.md"},
+		{"trace", "specs/job-store/R1.1"},
+		{"outline", "specs/job-store/requirements.md"},
+		{"show", "specs/job-store/requirements.md", "R1.1"},
+	} {
+		name := strings.Join(args, " ")
+		human, _, code := run(t, append(append([]string{"map"}, args...), "--root", root)...)
+		if code != ExitOK {
+			t.Errorf("`map %s` exited %d", name, code)
+			continue
+		}
+		if strings.TrimSpace(human) == "" {
+			t.Errorf("`map %s` printed nothing", name)
+		}
+		machine, _, code := run(t, append(append([]string{"map"}, args...), "--root", root, "--json")...)
+		if code != ExitOK {
+			t.Errorf("`map %s --json` exited %d", name, code)
+			continue
+		}
+		if !json.Valid([]byte(strings.TrimSpace(machine))) {
+			t.Errorf("`map %s --json` did not print a JSON document:\n%s", name, machine)
+		}
+		// Compact: the document carries no run of leading whitespace, which is
+		// what a third of the indented form was.
+		if strings.Contains(machine, "\n    ") {
+			t.Errorf("`map %s --json` is indented, which an agent pays for by the byte", name)
+		}
+	}
+}
+
+// --width is for a terminal and applies to the listings, which clip to one line
+// because a list of sixty one-line tasks is not a list. --next ignores it and
+// prints the task whole: the line below the checkbox is usually where the decision
+// sits, and a --next that stopped there would send the reader to the file — the
+// exact cost this surface exists to remove.
+func TestWidthClipsTheListingAndNotTheNextTask(t *testing.T) {
+	root := mapWorkspace(t)
+
+	narrow, _, code := run(t, "map", "tasks", "plans/sample.md", "--root", root, "--width", "40")
+	if code != ExitOK {
+		t.Fatalf("--width: exit %d", code)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(narrow), "\n") {
+		if len([]rune(line)) > 80 {
+			t.Errorf("a clipped listing line is %d runes long: %q", len([]rune(line)), line)
+		}
+	}
+
+	next, _, code := run(t, "map", "tasks", "plans/sample.md", "--root", root, "--next", "--width", "40")
+	if code != ExitOK {
+		t.Fatalf("--next --width: exit %d", code)
+	}
+	// 1.2's description runs onto a second line in the fixture, and --next has to
+	// print it.
+	if !strings.Contains(next, "so the secret is never") {
+		t.Errorf("--next stopped at the checkbox line:\n%s", next)
+	}
+}
+
+// `map find` is undocumented rather than removed: with the plan small, searching
+// inside one stopped making sense, while searching the corpus is still the only
+// alternative to reading a file. Its flags are the whole of what it offers over a
+// grep, so each has a case.
+func TestMapFindNarrowsByFlag(t *testing.T) {
+	root := specWorkspace(t)
+
+	all, _, code := run(t, "map", "find", "atomic", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("map find: exit %d", code)
+	}
+	if strings.TrimSpace(all) == "" {
+		t.Fatal("map find printed nothing for a term the workspace contains")
+	}
+
+	var doc struct {
+		Query string `json:"query"`
+		Hits  []struct {
+			Ref  string `json:"ref"`
+			Path string `json:"path"`
+			Kind string `json:"kind"`
+		} `json:"hits"`
+		Count int `json:"count"`
+	}
+	stdout, _, code := run(t, "map", "find", "atomic", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("map find --json: exit %d", code)
+	}
+	decode(t, stdout, &doc)
+	if doc.Count == 0 || len(doc.Hits) != doc.Count {
+		t.Fatalf("the document disagrees with itself: %+v", doc)
+	}
+	if doc.Query != "atomic" {
+		t.Errorf("query = %q", doc.Query)
+	}
+
+	// --in restricts to one artifact, which is what makes a hit list readable in a
+	// workspace with more than a handful of files.
+	stdout, _, code = run(t, "map", "find", "atomic", "--root", root, "--in", "job-store", "--json")
+	if code != ExitOK {
+		t.Fatalf("--in: exit %d", code)
+	}
+	scoped := doc
+	decode(t, stdout, &scoped)
+	for _, h := range scoped.Hits {
+		if !strings.Contains(h.Path, "job-store") {
+			t.Errorf("--in job-store returned a hit in %s", h.Path)
+		}
+	}
+
+	// --limit caps the list, and --kind narrows it to one addressable unit.
+	stdout, _, code = run(t, "map", "find", "the", "--root", root, "--limit", "2", "--any", "--json")
+	if code != ExitOK {
+		t.Fatalf("--limit: exit %d", code)
+	}
+	capped := doc
+	decode(t, stdout, &capped)
+	if capped.Count > 2 {
+		t.Errorf("--limit 2 returned %d hits", capped.Count)
+	}
+
+	stdout, _, code = run(t, "map", "find", "job", "--root", root, "--kind", "task", "--any", "--json")
+	if code != ExitOK {
+		t.Fatalf("--kind: exit %d", code)
+	}
+	kinds := doc
+	decode(t, stdout, &kinds)
+	for _, h := range kinds.Hits {
+		if h.Kind != "task" {
+			t.Errorf("--kind task returned a %s", h.Kind)
+		}
+	}
+
+	// A regex that will not compile is an error rather than zero hits, which would
+	// read as "nothing matches".
+	if _, _, code := run(t, "map", "find", "(unclosed", "--root", root, "--regex"); code == ExitOK {
+		t.Error("a malformed regex exited 0")
+	}
+	// And nothing to look for is a usage error rather than the whole corpus.
+	if _, _, code := run(t, "map", "find", "--root", root); code != ExitError {
+		t.Error("map find with no query did not report a usage error")
+	}
+	// A term nothing matches is an answer, said out loud.
+	stdout, _, code = run(t, "map", "find", "zzzznothingmatchesthis", "--root", root)
+	if code != ExitOK {
+		t.Errorf("a term nothing matches exited %d", code)
+	}
+	if !strings.Contains(stdout, "nothing") {
+		t.Errorf("an empty result said nothing about being empty:\n%s", stdout)
+	}
+}

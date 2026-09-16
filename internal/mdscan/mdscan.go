@@ -309,3 +309,45 @@ func Ticked(line string) bool {
 	m := checkboxRe.FindStringSubmatch(strings.TrimRight(line, "\r"))
 	return m != nil && m[2] != " "
 }
+
+// Mask returns content with fenced blocks and inline code spans blanked to spaces,
+// byte for byte, so an index into the result is an index into the original.
+//
+// HTML comments survive, which is the one way it differs from Document.Body and the
+// whole reason it exists: the caller is looking for markers that *are* HTML comments,
+// and a document explaining those markers in prose is not a document carrying the
+// block. `internal/mdblock` measures over this and slices out of the original — this
+// repository's own entry file documents both marker pairs, and without the mask the
+// splice reads a sentence about the markers as the block itself.
+//
+// Line endings are not normalized, because the caller preserves the document's own
+// and a normalizing mask would hand it offsets into a string it never had.
+func Mask(content string) string {
+	lines := strings.Split(content, "\n")
+	var fence string
+	for i, line := range lines {
+		if fence != "" {
+			if closesFence(line, fence) {
+				fence = ""
+			}
+			lines[i] = blank(line)
+			continue
+		}
+		if open, delim := opensFence(line); open {
+			fence = delim
+			lines[i] = blank(line)
+			continue
+		}
+		lines[i] = maskCodeSpans(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// blank returns a run of spaces as long as line, keeping a trailing carriage return
+// so a CRLF document masks to one of exactly the same shape.
+func blank(line string) string {
+	if strings.HasSuffix(line, "\r") {
+		return strings.Repeat(" ", len(line)-1) + "\r"
+	}
+	return strings.Repeat(" ", len(line))
+}

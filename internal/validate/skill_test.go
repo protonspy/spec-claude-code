@@ -326,3 +326,31 @@ func TestCompatibilityLimitCountsCharacters(t *testing.T) {
 		t.Errorf("a compatibility field of exactly %d characters was reported as too long", skillCompatibilityMax)
 	}
 }
+
+// A link inside the skill is the only kind this validator can check: everything
+// else — an anchor, an absolute path, a URL, a mailto, a path that escapes the
+// skill — is somebody else's to resolve, and reporting it would be scc claiming to
+// know about the world outside the directory it is looking at.
+func TestOnlyALinkInsideTheSkillIsChecked(t *testing.T) {
+	for _, target := range []string{
+		"reference.md",
+		"scripts/run.sh",
+		"./reference.md",
+	} {
+		if !isLocalReference(target) {
+			t.Errorf("isLocalReference(%q) = false for a path inside the skill", target)
+		}
+	}
+	for _, target := range []string{
+		"",
+		"#a-heading",
+		"/etc/passwd",
+		"../outside.md",
+		"https://example.invalid/page",
+		"mailto:someone@example.invalid",
+	} {
+		if isLocalReference(target) {
+			t.Errorf("isLocalReference(%q) = true, and that is not scc's to resolve", target)
+		}
+	}
+}

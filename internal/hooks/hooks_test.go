@@ -341,3 +341,109 @@ func TestPosixReadsTheInterpreterNotTheLineEnding(t *testing.T) {
 		}
 	}
 }
+
+// Look changes nothing, which is the whole of what `scc hooks check` needs and
+// the one thing a report must never get wrong: a check that installed what it
+// was asked to report on would make the answer true by writing it.
+func TestLookReportsWithoutWriting(t *testing.T) {
+	dir := repo(t)
+
+	all, err := Look(dir)
+	if err != nil {
+		t.Fatalf("Look: %v", err)
+	}
+	if len(all) != len(Stages()) {
+		t.Fatalf("got %d stages, want %d", len(all), len(Stages()))
+	}
+	for _, s := range all {
+		if s.State != Missing {
+			t.Errorf("%s: state=%q on a repository with no hooks", s.Stage, s.State)
+		}
+		if _, err := os.Stat(s.Path); !os.IsNotExist(err) {
+			t.Errorf("Look created %s", s.Path)
+		}
+	}
+	if OK(all) {
+		t.Error("OK true for a repository with no hooks installed")
+	}
+
+	if _, err := Install(dir, false); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	all, err = Look(dir)
+	if err != nil {
+		t.Fatalf("Look: %v", err)
+	}
+	if !OK(all) {
+		t.Errorf("OK false right after a successful install: %+v", all)
+	}
+
+	// OK over nothing is false, and that is deliberate: an empty report means the
+	// question could not be answered, not that everything is fine.
+	if OK(nil) {
+		t.Error("OK(nil) is true, so an unanswerable check reads as a pass")
+	}
+	if _, err := Look(t.TempDir()); err == nil {
+		t.Error("Look outside a repository returned no error")
+	}
+}
+
+// A hook scc appended to keeps everything of theirs when scc's block comes back
+// out — the other half of the promise --force makes.
+func TestRemoveLeavesAForeignHookItAppendedTo(t *testing.T) {
+	dir := repo(t)
+	hooks, err := Dir(dir)
+	if err != nil {
+		t.Fatalf("Dir: %v", err)
+	}
+	path := filepath.Join(hooks, string(PreCommit))
+	const theirs = "#!/bin/sh\necho theirs\n"
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(theirs), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, err := Install(dir, true); err != nil {
+		t.Fatalf("Install --force: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(raw), "echo theirs") {
+		t.Fatalf("--force overwrote the existing hook:\n%s", raw)
+	}
+
+	all, err := Remove(dir)
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	for _, s := range all {
+		if s.Stage != PreCommit {
+			continue
+		}
+		if s.Action != Removed || s.State != Foreign {
+			t.Errorf("pre-commit: state=%q action=%q, want the foreign script left behind", s.State, s.Action)
+		}
+	}
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(raw), "echo theirs") {
+		t.Errorf("remove took the user's own hook with it:\n%s", raw)
+	}
+	if strings.Contains(string(raw), Prog+" hooks run") {
+		t.Errorf("remove left scc's block behind:\n%s", raw)
+	}
+
+	// A second remove has nothing of scc's to take out.
+	all, _ = Remove(dir)
+	for _, s := range all {
+		if s.Action != Skipped {
+			t.Errorf("second remove: %s action=%q, want %q", s.Stage, s.Action, Skipped)
+		}
+	}
+}

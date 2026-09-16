@@ -36,6 +36,25 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends gh \
  && rm -rf /var/lib/apt/lists/*
 
+# The workspace is a bind mount from the host, so its files arrive owned by a uid
+# this container does not have, and git refuses a repository it thinks belongs to
+# somebody else — the ownership check that exists because a differently-owned .git
+# can carry a config or a hook that runs on the next ordinary git command
+# (CVE-2022-24765). Scoped to where devcontainers mount a workspace and no further:
+# this container forwards GH_TOKEN and mounts the agent's credential volume, so a
+# bare `*` here would hand the next crafted .git in a dependency tree exactly those.
+#
+# Set in the image rather than in postCreateCommand, and that is forced from both
+# ends: --global writes ~/.gitconfig, which is the read-only bind that carries your
+# identity in ("Device or resource busy", which failed postCreate, `devcontainer up`
+# and the whole sandbox, back onto the host), while --system writes /etc/gitconfig,
+# which postCreate's non-root user cannot. The build runs as root and can.
+#
+# The path is a literal because ${containerWorkspaceFolder} is not resolved at build
+# time. A workspace mounted somewhere else gets git's ordinary ownership message and
+# one `git config --global --add safe.directory <path>` to run — visible, not silent.
+RUN git config --system --add safe.directory '/workspaces/*'
+
 # RTK is the slow layer: it is a Rust build, so this installs a toolchain, builds
 # one binary and throws the toolchain away. Delete this block if you would rather
 # have fast rebuilds than filtered command output — nothing else depends on it,
@@ -50,7 +69,6 @@ RUN export CARGO_HOME=/tmp/cargo RUSTUP_HOME=/tmp/rustup \
  && "$CARGO_HOME/bin/cargo" install --git https://github.com/rtk-ai/rtk --locked \
  && install -m 0755 "$CARGO_HOME/bin/rtk" /usr/local/bin/rtk \
  && rm -rf "$CARGO_HOME" "$RUSTUP_HOME"
-
 # <<< project toolchain — /scc-init fills this in >>>
 # A Go project needs golang; a Python project needs python and its package
 # manager; a Node project needs whatever the one above is not. Install what `scc

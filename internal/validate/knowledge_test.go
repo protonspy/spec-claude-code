@@ -565,3 +565,123 @@ func TestCodewikiValidatesAWorkspaceBehindASymlink(t *testing.T) {
 		t.Errorf("rules = %v, want none: a citation inside a symlinked workspace is not an escape", got)
 	}
 }
+
+// A duplicated heading gives two sections one anchor, and a link to it lands on
+// whichever came first — which is the whole reason slugs are checked rather than
+// assumed.
+func TestCodewikiHeadingSlugsMustBeUniqueAndReal(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "main.go"), "one\ntwo\nthree\n")
+	write(t, filepath.Join(paths.Codewiki(root), "app.md"), `# App
+
+## How it starts
+
+[main.go:1-2]()
+
+## How it starts
+
+[main.go:2-3]()
+
+## !!!
+
+[main.go:1-3]()
+
+##
+
+[main.go:1-3]()
+`)
+	got := runValidator(t, Codewiki, root)
+	for _, want := range []string{
+		"codewiki.duplicate-heading",
+		"codewiki.unslugged-heading",
+		"codewiki.empty-heading",
+	} {
+		if !contains(got, want) {
+			set, _ := Codewiki(root)
+			t.Errorf("rules = %v, want %s; findings: %+v", got, want, set.Sorted())
+		}
+	}
+}
+
+// countLines counts the way an editor numbers: a trailing newline does not add a
+// line, so a citation to the last line of a well-formed file resolves rather than
+// being reported as one past the end.
+func TestACitationToTheLastLineResolves(t *testing.T) {
+	root := t.TempDir()
+	// Three lines and a trailing newline — the shape every well-formed text file
+	// has, and the one an off-by-one gets wrong.
+	write(t, filepath.Join(root, "main.go"), "one\ntwo\nthree\n")
+	write(t, filepath.Join(paths.Codewiki(root), "app.md"), `# App
+
+## The whole file
+
+[main.go:1-3]()
+`)
+	if got := runValidator(t, Codewiki, root); len(got) != 0 {
+		set, _ := Codewiki(root)
+		t.Errorf("a citation to the last line reported %v: %+v", got, set.Sorted())
+	}
+
+	// A file with no trailing newline has the same number of lines, and a file
+	// with no content at all has none to cite.
+	write(t, filepath.Join(root, "short.go"), "only\n")
+	write(t, filepath.Join(root, "empty.go"), "")
+	write(t, filepath.Join(paths.Codewiki(root), "app.md"), `# App
+
+## One line
+
+[short.go:1-1]()
+
+## Nothing at all
+
+[empty.go:1-1]()
+`)
+	got := runValidator(t, Codewiki, root)
+	if !contains(got, "codewiki.citation-out-of-range") {
+		set, _ := Codewiki(root)
+		t.Errorf("citing a line of an empty file reported %v: %+v", got, set.Sorted())
+	}
+}
+
+// An ADR whose frontmatter cannot be read is reported as that rather than as a
+// missing status: the two send the reader to different places, and "add a status"
+// to a file whose YAML is broken is advice that cannot be followed.
+func TestAnUnreadableADRFrontmatterIsItsOwnFinding(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(paths.ADR(root), "0001-use-sqlite.md"),
+		"---\nstatus: accepted\nnested:\n  too:\n    deep: yes\n---\n\n# Use SQLite\n\n## Context\n\nBecause.\n")
+
+	got := runValidator(t, ADR, root)
+	if !contains(got, "adr.frontmatter-unreadable") {
+		set, _ := ADR(root)
+		t.Errorf("rules = %v, want adr.frontmatter-unreadable; findings: %+v", got, set.Sorted())
+	}
+	// And not also the findings that depend on having read it: one finding that
+	// names the real problem beats three that agree with each other.
+	for _, unwanted := range []string{"adr.missing-status", "adr.status-invalid"} {
+		if contains(got, unwanted) {
+			t.Errorf("an unreadable file also reported %s: %v", unwanted, got)
+		}
+	}
+}
+
+// The status vocabulary is closed, and a status outside it is its own finding
+// rather than silence — a record whose state nobody can read is a record that
+// binds nothing.
+func TestADRStatusVocabulary(t *testing.T) {
+	root := t.TempDir()
+
+	write(t, filepath.Join(paths.ADR(root), "0001-a.md"),
+		"---\nstatus: probably-fine\n---\n\n# A\n\n## Context\n\nBecause.\n")
+	if got := runValidator(t, ADR, root); !contains(got, "adr.status-invalid") {
+		set, _ := ADR(root)
+		t.Errorf("rules = %v, want adr.status-invalid; findings: %+v", got, set.Sorted())
+	}
+
+	write(t, filepath.Join(paths.ADR(root), "0001-a.md"),
+		"---\ntitle: A\n---\n\n# A\n\n## Context\n\nBecause.\n")
+	if got := runValidator(t, ADR, root); !contains(got, "adr.missing-status") {
+		set, _ := ADR(root)
+		t.Errorf("rules = %v, want adr.missing-status; findings: %+v", got, set.Sorted())
+	}
+}
