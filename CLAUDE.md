@@ -370,3 +370,38 @@ Tests live beside the code and lean on a few package-local helpers rather than a
 Conventional Commits, scoped by package or surface, with a descriptive subject written as a claim about behavior — e.g. `feat(cli): return exit 2 when spec validation reports findings`. Changes land through PRs on `main`.
 
 **No attribution, in a commit message or a PR body.** No `Co-Authored-By` for an assistant, no session link, no generated-with footer, no naming of a model, vendor, or harness. This is the rule scc ships in `rules/delivery.md`, and it binds scc's own history first — a tool that told every workspace not to sign its work and then signed its own would be worth ignoring on both counts. Harness defaults append these unless told not to, so a session working here overrides that default rather than following it.
+
+<!-- scc:codegraph-instructions v1 -->
+## CodeGraph
+Ask the symbol graph before reading files. "Who calls this", "what breaks if I change it",
+"where does this concept live" are one command here and a dozen reads otherwise.
+
+- `scc graph explore "<question>"` — the relevant symbols' source plus the call paths between them. Start here.
+- `scc graph query <name> [--kind function|class] [--limit N]` — find a symbol by name.
+- `scc graph status` — what the graph holds. `--check` exits 2 when there is none.
+- `scc graph sync` — re-index after you have written code you then need to search.
+- `scc graph build [--force]` — first index, or a full rebuild when the graph has gone wrong.
+
+`scc launch` indexes before the session starts, so the graph is current at turn one.
+It goes stale as you edit: sync before searching for something you just wrote.
+The graph is CodeGraph's — never edit `.codegraph/`, and never commit it.
+<!-- /scc:codegraph-instructions -->
+
+<!-- rtk-instructions v2 -->
+## RTK
+Prefix EVERY command with `rtk`, including each link in a `&&` chain (`rtk git add . && rtk git commit -m "x"`).
+No dedicated filter means it passes through unchanged — always safe.
+
+Covered:
+- cargo build/check/clippy/test, go test, tsc, lint, prettier, next build
+- jest, vitest, playwright, pytest, rspec, rake test, test `<cmd>`
+- git (all subcommands)
+- gh pr view/checks, gh run list, gh issue list, gh api
+- pnpm, npm run, npx, prisma, uv run
+- ls, read, grep, find
+- err, log, json, deps, env, summary, diff
+- docker, kubectl, curl, wget
+
+Meta: `rtk gain [--history]`, `rtk discover`, `rtk proxy <cmd>` (no filtering), `rtk init [--global]`
+Caveat: `rtk grep` with `-c -l -L -o -Z` runs raw.
+<!-- /rtk-instructions -->
