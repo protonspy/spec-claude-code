@@ -22,13 +22,41 @@ FROM mcr.microsoft.com/devcontainers/javascript-node:22
 # failed command at a time and falls back to reading whole files — the exact cost
 # this methodology exists to remove.
 #
+# Pinned, and that is not tidiness. `npm install -g <pkg>` with no version is a
+# layer whose hash never changes, so Docker serves the first build's answer for as
+# long as the cache survives while the registry and this workspace both move on —
+# and the rebuild that looks like it fixed that did not. Measured: an image rebuilt
+# the same day carried scc v0.23.0 into a workspace whose settings.json registers
+# the UserPromptSubmit hook v0.24.0 added, so every prompt of the session answered
+# `unknown hook stage "user-prompt"`. Bumping an ARG is what invalidates the layer.
+#
+# SCC_VERSION is the one that has to be kept in step, because it is the only one
+# of the three with a contract to this repository: scc scaffolds the harness hooks
+# in the harness's own settings.json and this scc is what runs them, so a binary
+# older than the scaffold is a vocabulary the container does not have. Keep it at
+# or above the version that scaffolded the workspace. The other two answer to
+# nobody here — Claude Code updates itself at runtime — and are pinned only so a
+# rebuild is reproducible.
+#
 # As `node` rather than as root, because this image puts that user's global prefix
 # (/usr/local/share/npm-global) on PATH and a root install would land somewhere
 # the agent does not look.
+ARG SCC_VERSION=0.25.0
+ARG CLAUDE_CODE_VERSION=2.1.273
+ARG CODEGRAPH_VERSION=1.6.0
 RUN su node -c "npm install -g \
-      @anthropic-ai/claude-code \
-      @protonspy/scc \
-      @colbymchenry/codegraph"
+      @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+      @protonspy/scc@${SCC_VERSION} \
+      @colbymchenry/codegraph@${CODEGRAPH_VERSION}"
+
+# Where the credential volume lands, created here rather than left to the mount.
+# Docker copies an image path's content *and its ownership* into a fresh named
+# volume only when that path already exists; mount onto a path the image never
+# created and Docker creates it root-owned, so the agent's first write under it
+# fails — measured, as an EACCES on the per-session directory it makes at every
+# session start, with the login it could not store then reported back as "not
+# logged in".
+RUN mkdir -p /home/node/.claude && chown node:node /home/node/.claude
 
 # `gh` — the delivery flow opens the pull request with it, and `scc validate --pr`
 # reads the PR body through it.

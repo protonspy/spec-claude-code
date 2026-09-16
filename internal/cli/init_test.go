@@ -310,6 +310,63 @@ func TestInitSeedsTheDevContainer(t *testing.T) {
 	}
 }
 
+// The image pins the one tool whose vocabulary the workspace depends on.
+//
+// `npm install -g <pkg>` with no version is a layer whose hash never changes, so
+// Docker keeps serving the first build's answer while the registry moves on — and
+// the rebuild that looks like it fixed that did not. Measured: an image rebuilt the
+// same day carried scc v0.23.0 into a workspace whose settings.json registered the
+// UserPromptSubmit hook a later version added, and every prompt of the session
+// answered `unknown hook stage "user-prompt"`. scc is the one of the three with a
+// contract to the files around it, so it is the one this test holds; Claude Code
+// updates itself at runtime and codegraph answers to nobody here.
+func TestTheSeededImagePinsTheToolItMustMatch(t *testing.T) {
+	root := initWorkspace(t)
+	docker, err := os.ReadFile(filepath.Join(root, paths.DevcontainerSeg, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	// The install has to name a version, and the version has to be a build arg
+	// rather than a literal in the RUN line: bumping the arg is what invalidates
+	// the layer, and a literal buried in a shell string is not a knob.
+	if !strings.Contains(string(docker), "ARG SCC_VERSION=") {
+		t.Errorf("the image does not pin scc to a build arg:\n%s", docker)
+	}
+	if !strings.Contains(string(docker), "@protonspy/scc@${SCC_VERSION}") {
+		t.Errorf("the image installs scc unversioned, so Docker's layer cache picks the version:\n%s", docker)
+	}
+}
+
+// And it creates the directory the credential volume lands on.
+//
+// Docker copies an image path's content *and its ownership* into a fresh named
+// volume only when that path already exists. Mount onto a path the image never
+// created and Docker creates it root-owned, so the agent — which runs as node —
+// cannot write its own state: measured as `EACCES: permission denied, mkdir
+// '/home/node/.claude/session-env'` at every session start, with the login it could
+// not store then reported back as "not logged in".
+//
+// Asserted across both files, because neither states it alone: the Dockerfile
+// creates the path and devcontainer.json is what mounts a volume over it.
+func TestTheSeededImageOwnsTheCredentialDirectory(t *testing.T) {
+	root := initWorkspace(t)
+	docker, err := os.ReadFile(filepath.Join(root, paths.DevcontainerSeg, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(root, paths.DevcontainerSeg, "devcontainer.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	const home = "/home/node/.claude"
+	if !strings.Contains(string(cfg), "target="+home+",type=volume") {
+		t.Fatalf("the seeded config does not mount a volume at %s, so this test is checking the wrong path:\n%s", home, cfg)
+	}
+	if !strings.Contains(string(docker), "mkdir -p "+home) || !strings.Contains(string(docker), "chown node:node "+home) {
+		t.Errorf("the image does not create %s as node, so the volume lands root-owned:\n%s", home, docker)
+	}
+}
+
 // The two seeded files describe one container between them, and the one thing
 // neither can state alone is the user. devcontainer.json names it as remoteUser
 // and mounts the agent's credentials into that home; the Dockerfile drops to it
