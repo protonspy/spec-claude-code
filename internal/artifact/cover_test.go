@@ -581,3 +581,101 @@ func TestEnsureAndSetFrontmatterOnAFileWithNone(t *testing.T) {
 		t.Errorf("the key is recorded twice:\n%s", strings.Join(got, "\n"))
 	}
 }
+
+// Sorted as text `1.10` comes before `1.9`, so a loop that asked for the next task
+// got the tenth before the ninth as soon as a group grew past nine items. This is
+// a correction rather than a preference, so it is pinned component by component.
+func TestCompareNumbersOrdersLikeAReader(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want int
+	}{
+		{"1.9", "1.10", -1},
+		{"1.10", "1.9", 1},
+		{"1.2", "1.2", 0},
+		{"1.2", "2.1", -1},
+		{"2", "10", -1},
+		{"1.2.3", "1.2.10", -1},
+		// A shorter number sorts before a longer one that shares its prefix: 1.2
+		// is the group 1.2.1 lives in.
+		{"1.2", "1.2.1", -1},
+		{"1.2.1", "1.2", 1},
+		// A component that is not a number falls back to text rather than to a
+		// panic, because the parser accepts what the file says.
+		{"1.a", "1.b", -1},
+		{"1.a", "1.a", 0},
+	} {
+		got := CompareNumbers(tc.a, tc.b)
+		if (got < 0) != (tc.want < 0) || (got > 0) != (tc.want > 0) {
+			t.Errorf("CompareNumbers(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// Group is what `--group` filters on, and Summary is one task on one line — a
+// 61-line task exists, and printing it in a list would defeat the point of the
+// list.
+func TestGroupAndSummary(t *testing.T) {
+	for number, want := range map[string]string{
+		"1.2":   "1",
+		"1.2.3": "1.2",
+		"12":    "12",
+		"":      "",
+	} {
+		if got := (Task{Number: number}).Group(); got != want {
+			t.Errorf("Task{%q}.Group() = %q, want %q", number, got, want)
+		}
+	}
+
+	task := Task{Text: "Build the parser, and prove with a test that it reads a fenced block"}
+	if got := task.Summary(0); got != task.Text {
+		t.Errorf("Summary(0) = %q, want the whole line", got)
+	}
+	if got := task.Summary(-1); got != task.Text {
+		t.Errorf("Summary(-1) = %q, want the whole line", got)
+	}
+	short := task.Summary(20)
+	if len([]rune(short)) > 20 {
+		t.Errorf("Summary(20) = %q, which is %d runes", short, len([]rune(short)))
+	}
+	if short == task.Text {
+		t.Errorf("Summary(20) did not clip: %q", short)
+	}
+}
+
+// The searcher ranks addressable regions rather than lines, so a hit comes back as
+// something `show` accepts. An empty query is no hits rather than every hit.
+func TestSearchRanksRegionsAndRefusesNothing(t *testing.T) {
+	a, _ := load(t)
+
+	hits, err := Search([]*Artifact{a}, "atomic writes", SearchOpts{})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("a term the plan contains matched nothing")
+	}
+	for _, h := range hits {
+		if h.Ref == "" {
+			t.Errorf("a hit is not addressable: %+v", h)
+			continue
+		}
+		if _, err := a.Find(h.Ref); err != nil {
+			t.Errorf("Search returned %q, which Find cannot resolve: %v", h.Ref, err)
+		}
+	}
+
+	// A query with no terms in it is no hits rather than everything: a caller that
+	// got the whole corpus back for an empty string would put it all in context.
+	for _, empty := range []string{"", "   ", "!!!"} {
+		if hits, err := Search([]*Artifact{a}, empty, SearchOpts{}); err != nil || len(hits) != 0 {
+			t.Errorf("Search(%q) = %d hits, %v", empty, len(hits), err)
+		}
+	}
+
+	// A regex that will not compile is an error rather than zero hits, which would
+	// read as "nothing matches".
+	if _, err := Search([]*Artifact{a}, "(unclosed", SearchOpts{Regex: true}); err == nil {
+		t.Error("a malformed regex returned no error")
+	}
+}
