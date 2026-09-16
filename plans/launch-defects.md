@@ -25,6 +25,7 @@ and an entry file that can describe the markers without being edited by them.
 - `internal/mdblock/mdblock.go`
 - `internal/mdscan/mdscan.go`
 - `.devcontainer/` and `internal/assets/templates/devcontainer/`
+- `internal/rtk/rtk.go`
 
 ## Out of scope
 

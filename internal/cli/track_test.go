@@ -258,6 +258,9 @@ func TestSpecSyncFollowsABranchToMerged(t *testing.T) {
 	gitRun("init", "-q", "-b", "main", ".")
 	gitRun("config", "user.email", "t@example.com")
 	gitRun("config", "user.name", "t")
+	// A machine whose global config signs commits would fail every commit below
+	// non-interactively, which is an environment this test does not mean to assert about.
+	gitRun("config", "commit.gpgsign", "false")
 	gitRun("add", "-A")
 	gitRun("commit", "-qm", "init")
 	gitRun("switch", "-qc", "feat/user-auth")
