@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"errors"
+	"flag"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -100,5 +103,53 @@ func TestTheTopLevelSurfaceExplainsItself(t *testing.T) {
 	// version query is not a usage error and findings are not a failure to run.
 	if _, _, code := run(t, "version"); code != ExitOK {
 		t.Errorf("`scc version` exited %d", code)
+	}
+}
+
+// `scc validate help` is what somebody types having just typed `scc map help`,
+// which works because that command has a subcommand to dispatch on. A leaf command
+// has none, so the word arrived as a stray positional and the answer was "validate
+// takes no arguments" — correct, exit 1, and no use to anybody.
+func TestHelpWordRewritesOnlyALoneHelp(t *testing.T) {
+	if got := helpWord([]string{"help"}); len(got) != 1 || got[0] != "-h" {
+		t.Errorf("helpWord([help]) = %v, want [-h]", got)
+	}
+	// Anything else is left exactly as it was: `help` is a perfectly good plan
+	// name, note id or search term, and taking it for a request would make those
+	// unaddressable.
+	for _, args := range [][]string{
+		{},
+		{"help", "me"},
+		{"--json", "help"},
+		{"helpful"},
+		{"sample"},
+	} {
+		got := helpWord(args)
+		if len(got) != len(args) {
+			t.Errorf("helpWord(%v) = %v, want it untouched", args, got)
+			continue
+		}
+		for i := range args {
+			if got[i] != args[i] {
+				t.Errorf("helpWord(%v) = %v, want it untouched", args, got)
+				break
+			}
+		}
+	}
+}
+
+// `--help` is not a failure. flag reports it as one because it has nothing else to
+// return, but the user got exactly what they asked for — and exit 1 there says the
+// command could not run, which an agent branching on the contract reads as a
+// broken command rather than as the help it just printed.
+func TestExitForSeparatesHelpFromAFailure(t *testing.T) {
+	if got := exitFor(flag.ErrHelp); got != ExitOK {
+		t.Errorf("exitFor(ErrHelp) = %d, want %d", got, ExitOK)
+	}
+	if got := exitFor(errors.New("flag provided but not defined: -nope")); got != ExitError {
+		t.Errorf("exitFor(a real failure) = %d, want %d", got, ExitError)
+	}
+	if got := exitFor(fmt.Errorf("wrapped: %w", flag.ErrHelp)); got != ExitOK {
+		t.Errorf("exitFor on a wrapped ErrHelp = %d, want %d", got, ExitOK)
 	}
 }

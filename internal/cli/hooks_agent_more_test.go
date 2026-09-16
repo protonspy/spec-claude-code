@@ -2,13 +2,16 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/git"
+	"github.com/protonspy/spec-claude-code/internal/hooks"
 )
 
 // The Stop stage stopped re-indexing on every turn: syncGraph compares the graph's
@@ -110,5 +113,62 @@ func TestFirstLineClipsAMultiLineMessage(t *testing.T) {
 	}
 	if firstLine("") != "" {
 		t.Error("firstLine invented text for an empty message")
+	}
+}
+
+// The Stop stage intersects findings with what this branch touched: a migrated
+// plan or a stale ADR the task never went near asked the agent, every turn, to go
+// and fix a file it had no business in.
+func TestTouchedHereKeepsOnlyThisBranchesFiles(t *testing.T) {
+	if !git.Found(git.Bin) {
+		t.Skip("git is not on PATH")
+	}
+	root := gitWorkspace(t)
+	gitIn := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(git.Bin, args...)
+		cmd.Dir = root
+		// The workspace has scc own hooks installed, and the fixtures here are
+		// deliberately malformed plans: the gate is not what is under test.
+		cmd.Env = append(os.Environ(), hooks.SkipEnv+"=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v %s", strings.Join(args, " "), err, out)
+		}
+	}
+	gitIn("config", "user.email", "t@example.invalid")
+	gitIn("config", "user.name", "t")
+	gitIn("config", "commit.gpgsign", "false")
+
+	// A file this branch wrote, and one it did not.
+	mine := filepath.Join(root, "plans", "mine.md")
+	theirs := filepath.Join(root, "plans", "theirs.md")
+	if err := os.MkdirAll(filepath.Dir(mine), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for _, p := range []string{mine, theirs} {
+		if err := os.WriteFile(p, []byte("# Plan\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+	gitIn("add", "-A")
+	gitIn("commit", "-qm", "init")
+
+	gitIn("switch", "-qc", "feat/x")
+
+	// Change only one, so the diff against the base names exactly that file.
+	if err := os.WriteFile(mine, []byte("# Plan\n\n## Why\n\nBecause.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	set := &finding.Set{}
+	set.Addf("plans/mine.md", 3, "plan.unknown-section", "a section nobody agreed to")
+	set.Addf("plans/theirs.md", 1, "plan.empty", "a plan with no checklist")
+
+	got := touchedHere(root, set)
+	if got.Len() != 1 {
+		t.Fatalf("touchedHere kept %d of 2 findings: %+v", got.Len(), got.Sorted())
+	}
+	if f := got.Sorted()[0]; !strings.Contains(f.File, "mine.md") {
+		t.Errorf("touchedHere kept the wrong finding: %+v", f)
 	}
 }
