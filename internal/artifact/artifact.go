@@ -514,9 +514,20 @@ func Resolve(root, arg string) ([]string, error) {
 //
 // Symlinks are evaluated on both sides before the comparison, because a temporary
 // directory is itself a symlink on macOS (/var → /private/var) and a purely
-// lexical test would call every file under one an escape. Where a side cannot be
-// evaluated its cleaned absolute path is used, which still catches the `..` that
-// this exists for.
+// lexical test would call every file under one an escape.
+//
+// **Both sides are resolved the same way, and that is the whole of it.** Resolving
+// only what exists is what broke: a target that is not on disk yet — the ordinary
+// case for a file about to be written — failed EvalSymlinks and stayed lexical
+// while the root beside it was resolved, so the two were no longer comparable and
+// a path plainly inside the workspace came back as an escape. Measured on macOS
+// (/var vs /private/var) and on Windows, where a path handed over with an 8.3
+// short name (RUNNER~1) resolves to its long form on one side only.
+//
+// So each side resolves its deepest existing ancestor and re-attaches the rest.
+// The part that does not exist cannot be a symlink — there is nothing there to be
+// one — so nothing is assumed about it, and the `..` this exists to catch is still
+// caught: it is resolved away by Abs before any of this runs.
 func Within(root, target string) bool {
 	r, err := filepath.Abs(root)
 	if err != nil {
@@ -526,17 +537,36 @@ func Within(root, target string) bool {
 	if err != nil {
 		return false
 	}
-	if p, err := filepath.EvalSymlinks(r); err == nil {
-		r = p
-	}
-	if p, err := filepath.EvalSymlinks(t); err == nil {
-		t = p
-	}
-	rel, err := filepath.Rel(r, t)
+	rel, err := filepath.Rel(resolveExisting(r), resolveExisting(t))
 	if err != nil {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolveExisting evaluates symlinks on the deepest existing ancestor of p and
+// re-attaches whatever was below it, so a path that is not on disk yet compares on
+// the same terms as one that is.
+//
+// A path with no existing ancestor at all comes back as it was given, which is the
+// answer for a volume that is not mounted and for the root of a filesystem that
+// does not exist.
+func resolveExisting(p string) string {
+	rest := ""
+	for cur := p; ; {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			if rest == "" {
+				return resolved
+			}
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
 }
 
 // Scan loads every artifact in the workspace: each plan, then each spec's three

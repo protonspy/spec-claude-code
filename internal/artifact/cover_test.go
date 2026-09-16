@@ -679,3 +679,112 @@ func TestSearchRanksRegionsAndRefusesNothing(t *testing.T) {
 		t.Error("a malformed regex returned no error")
 	}
 }
+
+// The regression CI found on macOS and Windows and this machine could not: both
+// sides have to resolve the same way, or a path that is plainly inside the
+// workspace comes back as an escape.
+//
+// It fires wherever the root's spelling is not its resolved one — /var against
+// /private/var on macOS, an 8.3 short name on Windows — and only for a target that
+// is not on disk yet, which is the ordinary case for a file about to be written.
+func TestWithinComparesBothSidesTheSameWay(t *testing.T) {
+	root := t.TempDir()
+
+	// The deepest existing ancestor is the root itself here, and everything below
+	// it is invented. All of it is inside.
+	for _, in := range []string{
+		filepath.Join(root, "not-yet.md"),
+		filepath.Join(root, "plans", "not-yet.md"),
+		filepath.Join(root, "a", "b", "c", "d", "not-yet.md"),
+	} {
+		if !Within(root, in) {
+			t.Errorf("Within(root, %q) = false for a path inside the workspace", in)
+		}
+	}
+
+	// And an invented path that climbs out is still out: `..` is resolved away by
+	// Abs before any of this runs, so nothing below depends on it existing.
+	for _, out := range []string{
+		filepath.Join(root, "..", "sibling", "not-yet.md"),
+		filepath.Join(root, "plans", "..", "..", "escape.md"),
+	} {
+		if Within(root, out) {
+			t.Errorf("Within(root, %q) = true for a path outside the workspace", out)
+		}
+	}
+
+	// A root that does not exist either: both sides fall back together, so the
+	// comparison is still lexical-but-symmetric rather than one of each.
+	missing := filepath.Join(root, "no-such-workspace")
+	if !Within(missing, filepath.Join(missing, "plans", "p.md")) {
+		t.Error("a path under a root that does not exist was called an escape")
+	}
+	if Within(missing, filepath.Join(root, "elsewhere.md")) {
+		t.Error("a sibling of a root that does not exist was called inside it")
+	}
+}
+
+// The same regression stated as the condition that actually produces it: a root
+// reached through a symlink, which is what /var is on macOS and what a workspace
+// under a linked path is anywhere. Resolving the root and not the target put the
+// two on opposite sides of the link.
+func TestWithinFollowsARootReachedThroughASymlink(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("this platform will not create a symlink here: " + err.Error())
+	}
+
+	for _, in := range []string{
+		filepath.Join(link, "not-yet.md"),
+		filepath.Join(link, "plans", "not-yet.md"),
+	} {
+		if !Within(link, in) {
+			t.Errorf("Within(%q, %q) = false, though the target is under the root as given", link, in)
+		}
+	}
+	// A file that does exist under the link resolves to the real directory on both
+	// sides, and is inside either way.
+	existing := filepath.Join(real, "here.md")
+	write(t, existing, "# Here\n")
+	if !Within(link, filepath.Join(link, "here.md")) {
+		t.Error("an existing file under the linked root was called an escape")
+	}
+	if !Within(link, existing) {
+		t.Error("the same file named through the real path was called an escape")
+	}
+}
+
+// resolveExisting is what makes the two sides comparable, and it is testable
+// without a symlink: for a path that exists it must agree with EvalSymlinks, and
+// for one that does not it must return that same resolved ancestor with the rest
+// re-attached — never the unresolved spelling it was handed.
+func TestResolveExistingReattachesWhatIsNotThereYet(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	if got := resolveExisting(dir); got != resolved {
+		t.Errorf("resolveExisting on an existing directory = %q, want %q", got, resolved)
+	}
+
+	for _, rest := range []string{
+		"not-yet.md",
+		filepath.Join("plans", "not-yet.md"),
+		filepath.Join("a", "b", "c", "not-yet.md"),
+	} {
+		want := filepath.Join(resolved, rest)
+		if got := resolveExisting(filepath.Join(dir, rest)); got != want {
+			t.Errorf("resolveExisting(%q) = %q, want %q", rest, got, want)
+		}
+	}
+
+	// Nothing on this path exists, so there is no ancestor to resolve and the
+	// answer is what it was given — which keeps both sides falling back together.
+	nowhere := filepath.Join(string(filepath.Separator), "no-such-root-anywhere", "x.md")
+	if got := resolveExisting(nowhere); got != nowhere {
+		t.Errorf("resolveExisting on a path with no existing ancestor = %q, want %q", got, nowhere)
+	}
+}
