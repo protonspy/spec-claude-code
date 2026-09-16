@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -250,5 +251,79 @@ func TestMapAcceptsANameAsWellAsAPath(t *testing.T) {
 	}
 	if !strings.Contains(stdout+stderr, "no-such-plan") {
 		t.Errorf("the error does not name what was asked for:\n%s%s", stdout, stderr)
+	}
+}
+
+// Indented for a person, compact for everything else: the overwhelming reader of a
+// --json document here is an agent paying by the byte, and measured on a six-task
+// plan the indented form was 2198 bytes against 599 for the human listing.
+//
+// Every read has both forms, and neither may be empty — a command that printed
+// nothing on one of them would send the caller to the file.
+func TestEveryMapReadHasBothForms(t *testing.T) {
+	root := specWorkspace(t)
+
+	for _, args := range [][]string{
+		{"index"},
+		{"outline", "plans/sample.md"},
+		{"brief", "plans/sample.md"},
+		{"tasks", "plans/sample.md"},
+		{"show", "plans/sample.md", "1.2"},
+		{"blocks", "plans/sample.md"},
+		{"trace", "specs/job-store/R1.1"},
+		{"outline", "specs/job-store/requirements.md"},
+		{"show", "specs/job-store/requirements.md", "R1.1"},
+	} {
+		name := strings.Join(args, " ")
+		human, _, code := run(t, append(append([]string{"map"}, args...), "--root", root)...)
+		if code != ExitOK {
+			t.Errorf("`map %s` exited %d", name, code)
+			continue
+		}
+		if strings.TrimSpace(human) == "" {
+			t.Errorf("`map %s` printed nothing", name)
+		}
+		machine, _, code := run(t, append(append([]string{"map"}, args...), "--root", root, "--json")...)
+		if code != ExitOK {
+			t.Errorf("`map %s --json` exited %d", name, code)
+			continue
+		}
+		if !json.Valid([]byte(strings.TrimSpace(machine))) {
+			t.Errorf("`map %s --json` did not print a JSON document:\n%s", name, machine)
+		}
+		// Compact: the document carries no run of leading whitespace, which is
+		// what a third of the indented form was.
+		if strings.Contains(machine, "\n    ") {
+			t.Errorf("`map %s --json` is indented, which an agent pays for by the byte", name)
+		}
+	}
+}
+
+// --width is for a terminal and applies to the listings, which clip to one line
+// because a list of sixty one-line tasks is not a list. --next ignores it and
+// prints the task whole: the line below the checkbox is usually where the decision
+// sits, and a --next that stopped there would send the reader to the file — the
+// exact cost this surface exists to remove.
+func TestWidthClipsTheListingAndNotTheNextTask(t *testing.T) {
+	root := mapWorkspace(t)
+
+	narrow, _, code := run(t, "map", "tasks", "plans/sample.md", "--root", root, "--width", "40")
+	if code != ExitOK {
+		t.Fatalf("--width: exit %d", code)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(narrow), "\n") {
+		if len([]rune(line)) > 80 {
+			t.Errorf("a clipped listing line is %d runes long: %q", len([]rune(line)), line)
+		}
+	}
+
+	next, _, code := run(t, "map", "tasks", "plans/sample.md", "--root", root, "--next", "--width", "40")
+	if code != ExitOK {
+		t.Fatalf("--next --width: exit %d", code)
+	}
+	// 1.2's description runs onto a second line in the fixture, and --next has to
+	// print it.
+	if !strings.Contains(next, "so the secret is never") {
+		t.Errorf("--next stopped at the checkbox line:\n%s", next)
 	}
 }

@@ -134,3 +134,73 @@ func TestPatchFrontmatterWritesAndRefuses(t *testing.T) {
 		t.Error("patch fm accepted an argument with no value")
 	}
 }
+
+// After approval the work is fixed and only discovery moves: `add` allocates the
+// number and demands a reason, `rm` strikes the task out where it stands so the
+// number is never reused, and rewriting a task or the prose is refused.
+func TestDiscoveryOnAnApprovedPlan(t *testing.T) {
+	root := sealWorkspace(t)
+	if _, stderr, code := run(t, "plan", "approve", "sample", "--root", root); code != ExitOK {
+		t.Fatalf("plan approve: exit %d (%s)", code, stderr)
+	}
+	read := func() string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(root, "plans", "sample.md"))
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		return string(b)
+	}
+
+	// Ticking a box is what an approved plan is for.
+	if _, stderr, code := run(t, "patch", "check", "sample", "1.2", "--root", root); code != ExitOK {
+		t.Fatalf("patch check: exit %d (%s)", code, stderr)
+	}
+
+	// add without a reason is refused: discovery on a settled plan is a thing
+	// somebody has to account for.
+	if _, _, code := run(t, "patch", "add", "sample", "--group", "1",
+		"--text", "Something discovered", "--root", root); code == ExitOK {
+		t.Error("add on an approved plan succeeded with no --reason")
+	}
+	if _, stderr, code := run(t, "patch", "add", "sample", "--group", "1",
+		"--text", "Something discovered", "--reason", "found while building 1.2", "--root", root); code != ExitOK {
+		t.Fatalf("patch add: exit %d (%s)", code, stderr)
+	}
+	if !strings.Contains(read(), "Something discovered") {
+		t.Errorf("the discovered task was not written:\n%s", read())
+	}
+
+	// rm strikes the task out where it stands rather than deleting it, so the
+	// number can never come to mean something else. A ticked task is refused —
+	// it was either done or it was not — so this strikes out the one just added.
+	if _, _, code := run(t, "patch", "rm", "sample", "1.1",
+		"--reason", "already done", "--root", root); code == ExitOK {
+		t.Error("rm struck out a task that is ticked")
+	}
+	if _, stderr, code := run(t, "patch", "rm", "sample", "1.3",
+		"--reason", "turned out to be wrong", "--root", root); code != ExitOK {
+		t.Fatalf("patch rm: exit %d (%s)", code, stderr)
+	}
+	after := read()
+	if !strings.Contains(after, "1.1") {
+		t.Errorf("rm deleted the task line, so the number could be reused:\n%s", after)
+	}
+	if !strings.Contains(after, "removed") {
+		t.Errorf("the struck-out task does not say so:\n%s", after)
+	}
+
+	// Rewriting a task, or the prose, is refused: what discovery can never touch
+	// is guaranteed structurally rather than by instruction.
+	for _, args := range [][]string{
+		{"task", "sample", "1.2", "--text", "rewritten"},
+		{"replace", "sample", "#why", "--text", "a different why"},
+		{"append", "sample", "#why", "--text", "an extra sentence"},
+		{"prepend", "sample", "#why", "--text", "an extra sentence"},
+	} {
+		full := append(append([]string{"patch"}, args...), "--root", root)
+		if _, _, code := run(t, full...); code == ExitOK {
+			t.Errorf("`scc patch %s` on an approved plan exited 0", strings.Join(args, " "))
+		}
+	}
+}
