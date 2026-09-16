@@ -1075,7 +1075,7 @@ func (e errNoSuchRule) Error() string {
 // uses wherever a change is cheap to make and expensive to make by accident.
 func TestTheTemplateVersionMovesWithTheTemplates(t *testing.T) {
 	// Bump Version, then replace this with the digest the failure prints.
-	const fingerprint = "de55d2721ee9d0bee6b6c4f92509a55b35baf9567ff6f334ffb8fbae0ff19e18"
+	const fingerprint = "220a7b9ef576f9f83fcfd3f7268952e34cbdc66542ee8be26e4cf755180ca373"
 
 	sum := sha256.New()
 	// Version goes into the hash, and without it this test does not do the job its

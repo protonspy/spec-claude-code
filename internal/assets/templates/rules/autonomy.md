@@ -7,7 +7,8 @@ But autonomy is the user's call, so **ask, once, before writing anything** — t
 questions, together, in the same breath:
 
 1. **Run automatically, or gate each phase for review?**
-2. **When the PR is open, wait for CI, or finish there?**
+2. **When the PR is open, wait for CI, or finish there?** Asked now because by then
+   the work is done and the user may be gone, which is when a block costs the most.
 3. **Answer in English, or in 文言文?** Classical Chinese at maximum terseness. The
    advertised saving counts characters, not tokens. Governs speech, not artifacts.
 

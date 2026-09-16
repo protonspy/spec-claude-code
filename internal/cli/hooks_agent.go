@@ -216,7 +216,7 @@ func sessionStartContext(root string) []string {
 // code at all, while the same agent with no methodology shipped the feature every
 // time. Adding the branch to the rule's prose changed nothing — 0 of 3 again —
 // because the agent was being asked to act on a condition it cannot observe. With
-// this line in front of it, the same arm delivered 5 of 5, with the plan, the
+// this line in front of it, the same arm delivered 6 of 6, with the plan, the
 // ticked box, the branch and a clean `scc validate` the methodology promises.
 //
 // **The signal is undocumented and is treated that way.** `CLAUDE_CODE_SESSION_
@@ -226,6 +226,16 @@ func sessionStartContext(root string) []string {
 // unset included. That default is the safe one in the only direction that matters:
 // a missed line leaves today's behaviour, while a line in front of an attended
 // session would talk somebody out of a question they were right to ask.
+//
+// **The value is set by the harness rather than inherited**, which is what makes it
+// worth reading at all: an environment variable carries no provenance on its own, so
+// a hostile `.envrc` or `devcontainer.json` in a clone would otherwise be able to
+// tell an attended session that nobody is watching — and the one checkpoint a person
+// gets is `gated`. Measured: exported as `1` into the shell that launched `claude
+// -p`, the hook still saw `0`. That is one direction of a symmetric mechanism and
+// not a proof of both, so the last line emitted says the conversation wins. Live
+// user text is the one input no file in the repository can forge, and somebody who
+// asks for a gated run gets one whatever this variable says.
 func unattendedLines() []string {
 	if os.Getenv("CLAUDE_CODE_SESSION_ATTENDED") != "0" {
 		return nil
@@ -234,6 +244,7 @@ func unattendedLines() []string {
 		"scc: this session is unattended, so a question asked this turn reaches nobody.",
 		"Take the kickoff answers as `autonomy: auto`, `ci: no-wait` and the user's own language,",
 		"record them in the artifact's frontmatter as assumed rather than answered, say so in one line, and build.",
+		"If the user does ask for something else in this conversation, they are here after all and what they say wins.",
 	}
 }
 

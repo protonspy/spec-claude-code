@@ -142,6 +142,15 @@ anything else, unset included. The default is the safe one in the only direction
 that matters: a missed line leaves today's behaviour, while a line in front of an
 attended session would talk somebody out of a question they were right to be asked.
 
+The security review asked the right question about it — an environment variable has
+no provenance, so a hostile `.envrc` or `devcontainer.json` in a clone could tell an
+*attended* session that nobody is watching, and the one checkpoint a person gets is
+`gated`. That was testable and was tested: exported as `1` into the shell that
+launched `claude -p`, the hook still saw `0`. **The harness sets the value rather
+than inheriting it.** One direction of a symmetric mechanism is not a proof of both,
+so the injected text ends by saying the conversation wins — live user text is the one
+input no file in the repository can forge.
+
 The price is the honest headline. **$2.22 a run against the control's $0.20** — an
 order of magnitude — because this is the first arm in which the methodology actually
 ran: prior art, a plan, TDD, the gates, a branch and a commit.

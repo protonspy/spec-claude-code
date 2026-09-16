@@ -40,7 +40,9 @@ type Event string
 // The events scc registers, in the order a session meets them.
 const (
 	// SessionStart is where a workspace says what it is missing before any work
-	// is done on it — one message, once, when it can still change the plan.
+	// is done on it — one message, once, when it can still change the plan. It is
+	// also where a session is told that nobody is at the other end of it, which is
+	// the one fact that has to arrive before the first question rather than after.
 	SessionStart Event = "SessionStart"
 	// UserPromptSubmit is the moment a request arrives and before the agent acts
 	// on it — the only point in a turn where saying "read it this way" is still
@@ -79,7 +81,7 @@ func (e Event) Stage() Stage {
 func (e Event) Why() string {
 	switch e {
 	case SessionStart:
-		return "syncs the graph, reports drift, and names what this workspace is missing"
+		return "syncs the graph, reports drift, says when nobody is watching, and names what this workspace is missing"
 	case UserPromptSubmit:
 		return "says how to read an artifact the prompt named, and nothing otherwise"
 	case Stop:
