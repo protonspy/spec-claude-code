@@ -270,7 +270,20 @@ import (
 // and clear this artifact's findings". That moved into the skill bodies, where it is
 // paid by the run that invokes it instead of by every session; `argument-hint` moved
 // with it, since SKILL.md takes the same key.
-const Version = "32"
+//
+// 33: the dev container stops handing the agent a stale binary and a home it cannot
+// write. Two failures measured in one session, both of them Docker's defaults rather
+// than anything scc decided. An unversioned `npm install -g` is a layer whose hash
+// never changes, so an image rebuilt the same day still carried scc v0.23.0 while
+// this workspace's settings.json registered the UserPromptSubmit hook v0.24.0 added
+// — `unknown hook stage "user-prompt"`, on every prompt of the session, from a
+// rebuild that looked like it had fixed it. The three tools are pinned to ARGs now,
+// and SCC_VERSION is the one with a contract to the workspace it runs in. And a
+// named volume mounted onto a path the image never created is created root-owned, so
+// `/home/node/.claude` is created and chowned in the image: without it the first
+// write of every session was `EACCES ... mkdir '/home/node/.claude/session-env'` and
+// the login it could not store read back as "not logged in".
+const Version = "33"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
