@@ -181,6 +181,8 @@ func sessionStartContext(root string) []string {
 	if !workspace.IsWorkspace(root) {
 		return nil
 	}
+	// First, because it changes what the agent does with everything below it.
+	out := unattendedLines()
 	// Drift is reported here rather than at the end of a turn, and the move was
 	// paid for in a broken session. It is a fact about the branch — source changed
 	// with no box ticked, a marker in code, commits on the base branch — so no
@@ -188,7 +190,7 @@ func sessionStartContext(root string) []string {
 	// the conversation, a fact that cannot be resolved is a fact that repeats
 	// until the harness cuts it off. Said once, at the start, where it is
 	// information rather than an instruction the agent cannot carry out.
-	out := driftLines(root)
+	out = append(out, driftLines(root)...)
 
 	cfg, err := gate.Load(root)
 	if err != nil || cfg.Any() {
@@ -201,6 +203,49 @@ func sessionStartContext(root string) []string {
 		`The test gate has to print {"total": N, "coverage": P} on stdout and keep the suite's exit status.`,
 		fmt.Sprintf("`%s check help` has the rest.", prog()),
 	)
+}
+
+// unattendedLines says, once, that nobody is going to read a question asked this
+// turn.
+//
+// `rules/autonomy.md` opens every piece of work with three questions, and that is
+// right whenever there is somebody to answer them. In a headless run there is not,
+// and the rule alone cannot tell the difference: from inside the turn an unattended
+// session looks exactly like an attended one. Measured, on a pinned ticket at n=3:
+// the scaffolded harness ended every run holding the kickoff questions and wrote no
+// code at all, while the same agent with no methodology shipped the feature every
+// time. Adding the branch to the rule's prose changed nothing — 0 of 3 again —
+// because the agent was being asked to act on a condition it cannot observe. With
+// this line in front of it, the same arm delivered 6 of 6, with the plan, the
+// ticked box, the branch and a clean `scc validate` the methodology promises.
+//
+// **The signal is undocumented and is treated that way.** `CLAUDE_CODE_SESSION_
+// ATTENDED=0` is in the environment of a hook during `claude -p`, verified against
+// 2.1.273; Claude Code's own documentation describes neither the variable nor its
+// values, so this reads exactly one spelling and says nothing for anything else,
+// unset included. That default is the safe one in the only direction that matters:
+// a missed line leaves today's behaviour, while a line in front of an attended
+// session would talk somebody out of a question they were right to ask.
+//
+// **The value is set by the harness rather than inherited**, which is what makes it
+// worth reading at all: an environment variable carries no provenance on its own, so
+// a hostile `.envrc` or `devcontainer.json` in a clone would otherwise be able to
+// tell an attended session that nobody is watching — and the one checkpoint a person
+// gets is `gated`. Measured: exported as `1` into the shell that launched `claude
+// -p`, the hook still saw `0`. That is one direction of a symmetric mechanism and
+// not a proof of both, so the last line emitted says the conversation wins. Live
+// user text is the one input no file in the repository can forge, and somebody who
+// asks for a gated run gets one whatever this variable says.
+func unattendedLines() []string {
+	if os.Getenv("CLAUDE_CODE_SESSION_ATTENDED") != "0" {
+		return nil
+	}
+	return []string{
+		"scc: this session is unattended, so a question asked this turn reaches nobody.",
+		"Take the kickoff answers as `autonomy: auto`, `ci: no-wait` and the user's own language,",
+		"record them in the artifact's frontmatter as assumed rather than answered, say so in one line, and build.",
+		"If the user does ask for something else in this conversation, they are here after all and what they say wins.",
+	}
 }
 
 // stopContext is what the end of a turn has to say: what the validators found,

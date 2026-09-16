@@ -350,3 +350,38 @@ func TestHookTimeoutsMatchWhatTheStageDoes(t *testing.T) {
 		}
 	}
 }
+
+// An unattended session is told so, once, and an attended one is told nothing.
+//
+// The direction of the default is the point. Measured on a pinned ticket at n=3,
+// the scaffolded harness ended every headless run holding autonomy.md's kickoff
+// questions and wrote no code; with this line in front of it the same arm
+// delivered. But a line shown to an attended session would talk a person out of a
+// question they were right to be asked, so anything other than the one spelling
+// the harness actually sets — unset included — says nothing.
+func TestSessionStartSpeaksOnlyToAnUnattendedSession(t *testing.T) {
+	root := initWorkspace(t)
+	setTest(t, root, echoJSON(10, "99"))
+	skipRest(t, root, "test")
+
+	t.Setenv("CLAUDE_CODE_SESSION_ATTENDED", "0")
+	stdout, _, code := run(t, "hooks", "run", "session-start", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d — a harness hook never blocks", code, ExitOK)
+	}
+	ctx := additionalContext(t, stdout)
+	if !strings.Contains(ctx, "unattended") || !strings.Contains(ctx, "no-wait") {
+		t.Errorf("an unattended session was not told so: %q", ctx)
+	}
+
+	for _, v := range []string{"1", "", "true", "yes"} {
+		t.Setenv("CLAUDE_CODE_SESSION_ATTENDED", v)
+		stdout, _, code = run(t, "hooks", "run", "session-start", "--root", root)
+		if code != ExitOK {
+			t.Fatalf("exit = %d for %q", code, v)
+		}
+		if strings.Contains(stdout, "unattended") {
+			t.Errorf("CLAUDE_CODE_SESSION_ATTENDED=%q was read as unattended: %q", v, stdout)
+		}
+	}
+}

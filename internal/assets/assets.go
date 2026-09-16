@@ -270,7 +270,7 @@ import (
 // and clear this artifact's findings". That moved into the skill bodies, where it is
 // paid by the run that invokes it instead of by every session; `argument-hint` moved
 // with it, since SKILL.md takes the same key.
-const Version = "31"
+const Version = "32"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
