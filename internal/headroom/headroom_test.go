@@ -1,7 +1,11 @@
 package headroom
 
 import (
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -199,4 +203,112 @@ func TestInstallReportsAMissingProgram(t *testing.T) {
 	if !strings.Contains(err.Error(), "not on PATH") {
 		t.Errorf("error = %q, want it to say the program is not on PATH", err)
 	}
+}
+
+// The binary half, driven against stand-ins on a replaced PATH: the real install
+// resolves and builds a Python distribution, which is not a thing a test suite
+// does to whoever runs it.
+func TestTheBinaryHalfAnswersAboutWhatIsOnPATH(t *testing.T) {
+	onlyPath(t, t.TempDir())
+	if i, ok := Available(); ok {
+		t.Errorf("Available returned %+v with an empty PATH", i)
+	}
+	if p, ok := Path(); ok {
+		t.Errorf("Path found %q with an empty PATH", p)
+	}
+	if got := Version("definitely-not-a-real-program"); got != "" {
+		t.Errorf("Version invented %q for a binary that is not there", got)
+	}
+	// A build that cannot answer means scc passes no options rather than guessing.
+	if got := WrapHelp("definitely-not-a-real-program", "claude"); got != "" {
+		t.Errorf("WrapHelp invented %q", got)
+	}
+	// A missing program is reported as itself: the user has to get uv or pip
+	// first, which is a different problem from an install that broke.
+	err := Install(Installer{Prog: "definitely-not-a-real-program", Cmd: "nope"}, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("Install with a missing program returned no error")
+	}
+	if !strings.Contains(err.Error(), "not on PATH") {
+		t.Errorf("error = %q, want it to say the program is not on PATH", err)
+	}
+
+	// uv first, because it is what Headroom's own docs lead with — so a machine
+	// carrying both has to choose it.
+	uv, pip := fakeBin(t, "uv", "", 0), fakeBin(t, "pip", "", 0)
+	onlyPath(t, pip, uv)
+	i, ok := Available()
+	if !ok {
+		t.Fatal("Available false with both installers on PATH")
+	}
+	if i.Prog != "uv" {
+		t.Errorf("Available chose %q with uv present", i.Prog)
+	}
+	if err := Install(i, io.Discard, io.Discard); err != nil {
+		t.Errorf("Install with a working uv: %v", err)
+	}
+
+	onlyPath(t, pip)
+	if i, ok := Available(); !ok || i.Prog != "pip" {
+		t.Errorf("Available = %+v, %v on a machine with only pip", i, ok)
+	}
+
+	// The binary, and the help a wrap reads its opt-outs out of.
+	onlyPath(t, fakeBin(t, Bin, "headroom 1.2.3", 0))
+	p, ok := Path()
+	if !ok {
+		t.Fatal("Path did not find the binary on PATH")
+	}
+	if got := Version(p); got != "headroom 1.2.3" {
+		t.Errorf("Version = %q", got)
+	}
+	if got := WrapHelp(p, "claude"); !strings.Contains(got, "headroom 1.2.3") {
+		t.Errorf("WrapHelp = %q, want whatever the build printed", got)
+	}
+
+	// An install that fails is reported as the command that failed, so the user
+	// can run it again themselves and see the same output.
+	onlyPath(t, fakeBin(t, "uv", "", 1))
+	i, _ = Available()
+	if err := Install(i, io.Discard, io.Discard); err == nil {
+		t.Error("Install returned no error when the installer failed")
+	}
+}
+
+// fakeBin writes an executable named name into its own directory and returns that
+// directory, so a test can put it on PATH and drive a lookup or an install without
+// the real tool being installed on the machine running the suite.
+func fakeBin(t *testing.T, name, stdout string, exit int) string {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		body := "@echo off\r\n"
+		if stdout != "" {
+			body += "echo " + stdout + "\r\n"
+		}
+		body += fmt.Sprintf("exit /b %d\r\n", exit)
+		writeFile(t, filepath.Join(dir, name+".cmd"), body, 0o644)
+		return dir
+	}
+	body := "#!/bin/sh\n"
+	if stdout != "" {
+		body += "printf '%s\n' '" + strings.ReplaceAll(stdout, "'", `'\''`) + "'\n"
+	}
+	body += fmt.Sprintf("exit %d\n", exit)
+	writeFile(t, filepath.Join(dir, name), body, 0o755)
+	return dir
+}
+
+func writeFile(t *testing.T, path, body string, mode os.FileMode) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), mode); err != nil {
+		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+// onlyPath replaces PATH with dirs for the length of the test, so a lookup finds
+// exactly what the test put there and nothing the machine happens to have.
+func onlyPath(t *testing.T, dirs ...string) {
+	t.Helper()
+	t.Setenv("PATH", strings.Join(dirs, string(os.PathListSeparator)))
 }

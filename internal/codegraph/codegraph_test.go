@@ -1,9 +1,11 @@
 package codegraph
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -122,4 +124,95 @@ func TestRunSeparatesAFailedExitFromAFailedStart(t *testing.T) {
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)
 	}
+}
+
+// The binary half, driven against a stand-in npm and a stand-in codegraph on a
+// replaced PATH: npm is the only installer scc will run, and a test that ran it
+// would install a global package on whoever runs the suite.
+func TestTheBinaryHalfAnswersAboutWhatIsOnPATH(t *testing.T) {
+	onlyPath(t, t.TempDir())
+	if i, ok := Available(); ok {
+		t.Errorf("Available returned %+v with an empty PATH", i)
+	}
+	if p, ok := Path(); ok {
+		t.Errorf("Path found %q with an empty PATH", p)
+	}
+	if got := Version("definitely-not-a-real-program"); got != "" {
+		t.Errorf("Version invented %q for a binary that is not there", got)
+	}
+
+	onlyPath(t, fakeBin(t, "npm", "", 0), fakeBin(t, Bin, "1.5.0", 0))
+	i, ok := Available()
+	if !ok {
+		t.Fatal("Available false with npm right there")
+	}
+	p, ok := Path()
+	if !ok {
+		t.Fatal("Path did not find the binary on PATH")
+	}
+	if got := Version(p); got != "1.5.0" {
+		t.Errorf("Version = %q", got)
+	}
+	if err := Install(i, io.Discard, io.Discard); err != nil {
+		t.Errorf("Install with a working npm: %v", err)
+	}
+
+	onlyPath(t, fakeBin(t, "npm", "", 1))
+	i, _ = Available()
+	if err := Install(i, io.Discard, io.Discard); err == nil {
+		t.Error("Install returned no error when npm failed")
+	}
+}
+
+// Indexed is what tells `init` from `sync`, and it answers on the directory the
+// tool actually writes rather than on the workspace having been seen before.
+func TestIndexedAnswersOnTheGraphDirectory(t *testing.T) {
+	root := t.TempDir()
+	if Indexed(root) {
+		t.Error("Indexed on a workspace with no graph")
+	}
+	if err := os.MkdirAll(filepath.Join(root, Dir), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if !Indexed(root) {
+		t.Error("Indexed false with the graph directory right there")
+	}
+}
+
+// fakeBin writes an executable named name into its own directory and returns that
+// directory, so a test can put it on PATH and drive a lookup or an install without
+// the real tool being installed on the machine running the suite.
+func fakeBin(t *testing.T, name, stdout string, exit int) string {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		body := "@echo off\r\n"
+		if stdout != "" {
+			body += "echo " + stdout + "\r\n"
+		}
+		body += fmt.Sprintf("exit /b %d\r\n", exit)
+		writeFile(t, filepath.Join(dir, name+".cmd"), body, 0o644)
+		return dir
+	}
+	body := "#!/bin/sh\n"
+	if stdout != "" {
+		body += "printf '%s\n' '" + strings.ReplaceAll(stdout, "'", `'\''`) + "'\n"
+	}
+	body += fmt.Sprintf("exit %d\n", exit)
+	writeFile(t, filepath.Join(dir, name), body, 0o755)
+	return dir
+}
+
+func writeFile(t *testing.T, path, body string, mode os.FileMode) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), mode); err != nil {
+		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+// onlyPath replaces PATH with dirs for the length of the test, so a lookup finds
+// exactly what the test put there and nothing the machine happens to have.
+func onlyPath(t *testing.T, dirs ...string) {
+	t.Helper()
+	t.Setenv("PATH", strings.Join(dirs, string(os.PathListSeparator)))
 }

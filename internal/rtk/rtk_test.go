@@ -1,6 +1,11 @@
 package rtk
 
 import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -276,4 +281,94 @@ func TestASentenceAboutHeadroomsMarkerIsNotHeadroomsBlock(t *testing.T) {
 	if f, ok := ForeignBlock(fenced); ok {
 		t.Errorf("ForeignBlock reported %s's block in a fenced example", f.Tool)
 	}
+}
+
+// The binary half of this package, driven against a stand-in cargo and a stand-in
+// rtk on a replaced PATH — the real install is a Rust build that takes minutes and
+// is not a thing a test suite does to whoever runs it.
+func TestTheBinaryHalfAnswersAboutWhatIsOnPATH(t *testing.T) {
+	onlyPath(t, t.TempDir())
+	if Available() {
+		t.Error("Available true with no cargo on PATH")
+	}
+	if p, ok := Path(); ok {
+		t.Errorf("Path found %q with an empty PATH", p)
+	}
+	if got := Version("definitely-not-a-real-program"); got != "" {
+		t.Errorf("Version invented %q for a binary that is not there", got)
+	}
+	// Missing cargo is reported as itself rather than as a failed build: the user
+	// has to install a toolchain, which is a different problem from a build that
+	// broke, and "cargo install failed" would send them looking in the wrong place.
+	err := Install(io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("Install with no cargo returned no error")
+	}
+	if !strings.Contains(err.Error(), "cargo is not on PATH") {
+		t.Errorf("error = %q, want it to name the missing toolchain", err)
+	}
+
+	onlyPath(t, fakeBin(t, "cargo", "", 0), fakeBin(t, Bin, "rtk 0.42.4", 0))
+	if !Available() {
+		t.Error("Available false with cargo right there")
+	}
+	p, ok := Path()
+	if !ok {
+		t.Fatal("Path did not find the binary on PATH")
+	}
+	if got := Version(p); got != "rtk 0.42.4" {
+		t.Errorf("Version = %q", got)
+	}
+	if err := Install(io.Discard, io.Discard); err != nil {
+		t.Errorf("Install with a working cargo: %v", err)
+	}
+
+	// A build that fails is reported as the command that failed, so the user can
+	// run it again themselves and see the same output.
+	onlyPath(t, fakeBin(t, "cargo", "", 1))
+	err = Install(io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("Install returned no error when cargo failed")
+	}
+	if !strings.Contains(err.Error(), InstallCmd()) {
+		t.Errorf("error = %q, which does not name the command that failed", err)
+	}
+}
+
+// fakeBin writes an executable named name into its own directory and returns that
+// directory, so a test can put it on PATH and drive the install and lookup paths
+// without the real tool being installed on the machine running the suite.
+func fakeBin(t *testing.T, name, stdout string, exit int) string {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		body := "@echo off\r\n"
+		if stdout != "" {
+			body += "echo " + stdout + "\r\n"
+		}
+		body += fmt.Sprintf("exit /b %d\r\n", exit)
+		writeFile(t, filepath.Join(dir, name+".cmd"), body, 0o644)
+		return dir
+	}
+	body := "#!/bin/sh\n"
+	if stdout != "" {
+		body += "printf '%s\n' '" + strings.ReplaceAll(stdout, "'", `'\''`) + "'\n"
+	}
+	body += fmt.Sprintf("exit %d\n", exit)
+	writeFile(t, filepath.Join(dir, name), body, 0o755)
+	return dir
+}
+
+func writeFile(t *testing.T, path, body string, mode os.FileMode) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), mode); err != nil {
+		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+// onlyPath replaces PATH with dirs for the length of the test, so a lookup finds
+// exactly what the test put there and nothing the machine happens to have.
+func onlyPath(t *testing.T, dirs ...string) {
+	t.Helper()
+	t.Setenv("PATH", strings.Join(dirs, string(os.PathListSeparator)))
 }
