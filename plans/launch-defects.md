@@ -49,6 +49,9 @@ and an entry file that can describe the markers without being edited by them.
 - [x] 1.5 (Unit) Mask the document in `rtk.ForeignBlock` too: a sentence naming
       Headroom's marker is not Headroom's block, and reporting it sends the reader to
       `headroom unwrap` for a block nobody wrote.
+- [x] 2.1 (Unit) Raise coverage to the 86% floor the delivery gate requires, package by
+      package from the least-covered, so `pre-push` passes on its own terms rather than
+      on `SCC_SKIP_HOOKS`.
 
 ## Done when
 
@@ -56,5 +59,5 @@ and an entry file that can describe the markers without being edited by them.
   and reports the RTK block as absent rather than present.
 - `devcontainer up` completes its `postCreateCommand` on Windows, so `scc launch`
   reports the container rather than falling back to the host.
-- `scc validate` reports no findings, and `scc validate --checks` fails only on the
-  coverage floor it already failed on before this branch — 73.6% on `main`, 73.8% here.
+- `scc validate --checks` is clean, which it was not on `main`: the suite went from
+  73.6% to 86.0%, the floor this workspace records.
