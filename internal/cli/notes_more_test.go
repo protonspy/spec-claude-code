@@ -165,3 +165,86 @@ func TestNotesValidateReportsAHandWrittenLine(t *testing.T) {
 		t.Errorf("a malformed line exited %d, want %d", code, ExitFindings)
 	}
 }
+
+// A rollback that left a seeded file behind would report a note as not written and
+// still change the workspace — so the first `notes add` that fails has to take the
+// file it just created with it.
+func TestAFailedFirstNoteLeavesNoLogBehind(t *testing.T) {
+	root := mapWorkspace(t)
+	path := filepath.Join(root, "docs", "notes.md")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// A tag the grammar cannot round-trip is refused, and the refusal happens
+	// after the seed has been prepared — which is the case the rollback is for.
+	if _, _, code := run(t, "notes", "add", "a note", "--tag", "Not Kebab Case", "--root", root); code == ExitOK {
+		t.Fatal("a tag the grammar rejects was accepted")
+	}
+	if _, err := os.Stat(path); err == nil {
+		b, _ := os.ReadFile(path)
+		t.Errorf("the refused note left a log behind:\n%s", b)
+	}
+
+	// And the first note that succeeds creates it, seeded with the format so the
+	// file explains itself to whoever opens it next.
+	if _, stderr, code := run(t, "notes", "add", "the first note", "--tag", "gotcha", "--root", root); code != ExitOK {
+		t.Fatalf("notes add: exit %d (%s)", code, stderr)
+	}
+	body := notesText(t, root)
+	if !strings.Contains(body, "the first note") {
+		t.Errorf("the note was not written:\n%s", body)
+	}
+	if !strings.Contains(body, "## Log") {
+		t.Errorf("the seeded log carries no format for the next reader:\n%s", body)
+	}
+}
+
+// --since is one of the questions a substring cannot answer, and --limit is what
+// keeps a long log from arriving whole in a session's context.
+func TestNotesFindSinceAndLimit(t *testing.T) {
+	root := mapWorkspace(t)
+	for i, date := range []string{"2026-01-01", "2026-06-01", "2026-09-01"} {
+		args := []string{"notes", "add", "note " + string(rune('a'+i)), "--tag", "gotcha",
+			"--date", date, "--root", root}
+		if _, stderr, code := run(t, args...); code != ExitOK {
+			t.Fatalf("notes add %s: exit %d (%s)", date, code, stderr)
+		}
+	}
+
+	var doc struct {
+		Notes []struct {
+			Date string `json:"date"`
+		} `json:"notes"`
+		Count int `json:"count"`
+	}
+	stdout, _, code := run(t, "notes", "find", "--since", "2026-06-01", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("--since: exit %d", code)
+	}
+	decode(t, stdout, &doc)
+	if doc.Count != 2 {
+		t.Errorf("--since returned %d notes, want the two on or after that date: %+v", doc.Count, doc.Notes)
+	}
+	for _, n := range doc.Notes {
+		if n.Date < "2026-06-01" {
+			t.Errorf("--since returned a note dated %s", n.Date)
+		}
+	}
+
+	stdout, _, code = run(t, "notes", "find", "--limit", "1", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("--limit: exit %d", code)
+	}
+	capped := doc
+	decode(t, stdout, &capped)
+	if capped.Count != 1 {
+		t.Errorf("--limit 1 returned %d notes", capped.Count)
+	}
+
+	// A date the grammar would not parse back is refused rather than silently
+	// matching nothing, which reads as "no notes since then".
+	if _, _, code := run(t, "notes", "find", "--since", "yesterday", "--root", root); code == ExitOK {
+		t.Error("--since accepted a date the grammar cannot parse")
+	}
+}

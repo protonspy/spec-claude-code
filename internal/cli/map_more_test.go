@@ -327,3 +327,95 @@ func TestWidthClipsTheListingAndNotTheNextTask(t *testing.T) {
 		t.Errorf("--next stopped at the checkbox line:\n%s", next)
 	}
 }
+
+// `map find` is undocumented rather than removed: with the plan small, searching
+// inside one stopped making sense, while searching the corpus is still the only
+// alternative to reading a file. Its flags are the whole of what it offers over a
+// grep, so each has a case.
+func TestMapFindNarrowsByFlag(t *testing.T) {
+	root := specWorkspace(t)
+
+	all, _, code := run(t, "map", "find", "atomic", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("map find: exit %d", code)
+	}
+	if strings.TrimSpace(all) == "" {
+		t.Fatal("map find printed nothing for a term the workspace contains")
+	}
+
+	var doc struct {
+		Query string `json:"query"`
+		Hits  []struct {
+			Ref  string `json:"ref"`
+			Path string `json:"path"`
+			Kind string `json:"kind"`
+		} `json:"hits"`
+		Count int `json:"count"`
+	}
+	stdout, _, code := run(t, "map", "find", "atomic", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("map find --json: exit %d", code)
+	}
+	decode(t, stdout, &doc)
+	if doc.Count == 0 || len(doc.Hits) != doc.Count {
+		t.Fatalf("the document disagrees with itself: %+v", doc)
+	}
+	if doc.Query != "atomic" {
+		t.Errorf("query = %q", doc.Query)
+	}
+
+	// --in restricts to one artifact, which is what makes a hit list readable in a
+	// workspace with more than a handful of files.
+	stdout, _, code = run(t, "map", "find", "atomic", "--root", root, "--in", "job-store", "--json")
+	if code != ExitOK {
+		t.Fatalf("--in: exit %d", code)
+	}
+	scoped := doc
+	decode(t, stdout, &scoped)
+	for _, h := range scoped.Hits {
+		if !strings.Contains(h.Path, "job-store") {
+			t.Errorf("--in job-store returned a hit in %s", h.Path)
+		}
+	}
+
+	// --limit caps the list, and --kind narrows it to one addressable unit.
+	stdout, _, code = run(t, "map", "find", "the", "--root", root, "--limit", "2", "--any", "--json")
+	if code != ExitOK {
+		t.Fatalf("--limit: exit %d", code)
+	}
+	capped := doc
+	decode(t, stdout, &capped)
+	if capped.Count > 2 {
+		t.Errorf("--limit 2 returned %d hits", capped.Count)
+	}
+
+	stdout, _, code = run(t, "map", "find", "job", "--root", root, "--kind", "task", "--any", "--json")
+	if code != ExitOK {
+		t.Fatalf("--kind: exit %d", code)
+	}
+	kinds := doc
+	decode(t, stdout, &kinds)
+	for _, h := range kinds.Hits {
+		if h.Kind != "task" {
+			t.Errorf("--kind task returned a %s", h.Kind)
+		}
+	}
+
+	// A regex that will not compile is an error rather than zero hits, which would
+	// read as "nothing matches".
+	if _, _, code := run(t, "map", "find", "(unclosed", "--root", root, "--regex"); code == ExitOK {
+		t.Error("a malformed regex exited 0")
+	}
+	// And nothing to look for is a usage error rather than the whole corpus.
+	if _, _, code := run(t, "map", "find", "--root", root); code != ExitError {
+		t.Error("map find with no query did not report a usage error")
+	}
+	// A term nothing matches is an answer, said out loud.
+	stdout, _, code = run(t, "map", "find", "zzzznothingmatchesthis", "--root", root)
+	if code != ExitOK {
+		t.Errorf("a term nothing matches exited %d", code)
+	}
+	if !strings.Contains(stdout, "nothing") {
+		t.Errorf("an empty result said nothing about being empty:\n%s", stdout)
+	}
+}
