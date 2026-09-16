@@ -302,3 +302,50 @@ func TestAnApprovedPlanWithNoChecksumIsAFinding(t *testing.T) {
 		t.Errorf("a draft plan reported %+v", set.Sorted())
 	}
 }
+
+// The pull request is the half no hook can reach: a commit message passes through
+// commit-msg on the machine that wrote it, and a PR body is typed straight into
+// the forge, which is why the footer that dies everywhere else survives there.
+//
+// Like its sibling it never returns an error. No gh, no authentication, no pull
+// request for this branch: all of them mean there is nothing to check, and none of
+// them is this validator failing.
+func TestAttributionPRIsSilentWhenThereIsNothingToAsk(t *testing.T) {
+	// Not a repository at all.
+	set, err := AttributionPR(t.TempDir())
+	if err != nil {
+		t.Fatalf("AttributionPR outside a repository: %v", err)
+	}
+	if !set.Empty() {
+		t.Errorf("a directory that is not a repository reported %+v", set.Sorted())
+	}
+
+	// A repository with no gh on PATH: the question cannot be asked, which is not
+	// the same as an answer of "clean" and is certainly not an error.
+	t.Setenv("PATH", t.TempDir())
+	set, err = AttributionPR(t.TempDir())
+	if err != nil {
+		t.Fatalf("AttributionPR with no gh: %v", err)
+	}
+	if !set.Empty() {
+		t.Errorf("a workspace with no gh reported %+v", set.Sorted())
+	}
+}
+
+// clipSubject names the commit in words next to the short sha a finding is filed
+// under: the sha is what `git show` takes, the subject is what the reader
+// recognizes, and neither on its own finds the commit again after a rebase.
+func TestClipSubjectKeepsTheLineReadable(t *testing.T) {
+	short := "feat(cli): return exit 2 on findings"
+	if got := clipSubject(short); got != short {
+		t.Errorf("clipSubject shortened a subject that fits: %q", got)
+	}
+	long := strings.Repeat("x", 200)
+	got := clipSubject(long)
+	if len(got) >= len(long) {
+		t.Errorf("clipSubject did not shorten a %d-character subject", len(long))
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("a clipped subject does not say it was clipped: %q", got)
+	}
+}

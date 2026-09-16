@@ -189,3 +189,32 @@ func TestInternalCommaDoesNotBreakWellFormedness(t *testing.T) {
 		t.Errorf("req = %+v, want the system and response intact", req)
 	}
 }
+
+// A finding that quotes an entire paragraph back at the user is a finding they will
+// not read, so the text a parse error carries is clipped — and a requirement long
+// enough to need clipping is exactly the one most likely to be malformed.
+func TestAParseErrorQuotesAReadableAmount(t *testing.T) {
+	// No `the` before `shall`, which is the error that quotes the head back.
+	long := strings.Repeat("a very long condition ", 20) + "shall happen"
+	_, err := Parse(long)
+	if err == nil {
+		t.Fatalf("a requirement with no subject parsed: %q", long)
+	}
+	if len(err.Error()) > 200 {
+		t.Errorf("the error is %d characters long:\n%s", len(err.Error()), err)
+	}
+	if !strings.Contains(err.Error(), "…") {
+		t.Errorf("a clipped quote does not say it was clipped: %s", err)
+	}
+
+	// A short one is quoted whole: clipping what already fits would hide the very
+	// text the reader has to fix.
+	short := "nothing shall happen"
+	_, err = Parse(short)
+	if err == nil {
+		t.Fatalf("a requirement with no subject parsed: %q", short)
+	}
+	if !strings.Contains(err.Error(), "nothing") {
+		t.Errorf("a short requirement was not quoted whole: %s", err)
+	}
+}
