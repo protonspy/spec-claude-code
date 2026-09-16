@@ -489,3 +489,35 @@ func skipRest(t *testing.T, root, keep string) {
 		}
 	}
 }
+
+// A finding about the configuration points at the manifest, and it names it
+// relative to the workspace root — which is what every other command's relPath
+// answers. Against the working directory the same file came back as
+// `.claude/scc-manifest.json` from the root and `../.claude/scc-manifest.json`
+// from `specs/`, one field naming one file two ways.
+func TestTheWrittenManifestsAreNamedFromTheRoot(t *testing.T) {
+	root := initWorkspace(t)
+
+	stdout, stderr, code := run(t, "check", "set", "build", "go build ./...", "--root", root, "--json")
+	if code != ExitOK {
+		t.Fatalf("check set: exit %d (%s)", code, stderr)
+	}
+	var doc struct {
+		Wrote []string `json:"files"`
+	}
+	decode(t, stdout, &doc)
+	if len(doc.Wrote) == 0 {
+		t.Fatalf("check set reported no files written: %s", stdout)
+	}
+	for _, p := range doc.Wrote {
+		if filepath.IsAbs(p) {
+			t.Errorf("a written path is absolute: %q", p)
+		}
+		if strings.HasPrefix(p, "..") {
+			t.Errorf("a written path escapes the workspace: %q", p)
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(p))); err != nil {
+			t.Errorf("the reported path does not resolve under the root: %q", p)
+		}
+	}
+}
