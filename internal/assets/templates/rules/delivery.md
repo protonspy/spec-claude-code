@@ -37,10 +37,10 @@ Once the last task is done:
 3. **Commit and push.** Conventional Commits, written from the diff and the spec.
 4. **Open the PR.** Body: what changed, which spec or plan, how it was verified.
 
-**The work is the user's, and the record says so.** No `Co-Authored-By` for an assistant,
-no session link, no "generated with" footer or badge, no naming of a model, vendor or
-harness — not in a commit message, not in a PR title or body. The `commit-msg` hook
-rejects it as you write it, `SCC_SKIP_HOOKS=1` is not the fix, `--pr` reads the PR body.
+**The work is the user's, and the record says so.** No `Co-Authored-By` for an assistant, no
+vendor link, no "generated with" footer or badge, no crediting a tool ("thanks to", "with the
+help of", "used X to"), no naming a model, vendor or harness — not in a commit, a PR title,
+body or comment. `commit-msg` rejects a commit, `--pr` the forge; `SCC_SKIP_HOOKS=1` is no fix.
 
 **The gates are commands, not claims.** What this workspace recorded for build, format,
 lint and test; the last reads back `{"total": N, "coverage": P}` and is held to a floor.

@@ -51,12 +51,18 @@ const (
 	// address. It is separate from the other two because it survives them: a
 	// footer rewritten by hand usually keeps the URL.
 	//
-	// A session link and a no-reply address fire wherever they sit — nobody cites
-	// either to explain a change. Any other vendor URL has to be alone on its line,
-	// because documentation lives on those hosts and an argument that cannot cite
-	// the vendor's own docs is one nobody can check. That gate costs a real miss:
-	// a bare host inside a sentence is no longer reported, which is this package's
-	// standing trade.
+	// It fires wherever the URL sits — inside prose, inside a parenthesis, inside
+	// an HTML comment — and the one thing that buys an exemption is being
+	// *documentation*. That split replaces an earlier one that asked whether the
+	// URL was alone on its line, and it was measured rather than argued: a harness
+	// told not to sign its work wrote the product link into a sentence, and a rule
+	// that only looked at lines standing by themselves read it as prose. A product
+	// page is nobody's citation, so the position it sits in says nothing.
+	//
+	// Documentation keeps the old gate. `code.claude.com/docs/…` is a source, and
+	// a technical argument that cannot cite the vendor's own documentation is one
+	// nobody can check — so a docs URL is reported only when it stands alone,
+	// where it is the footer's surviving half rather than a reference.
 	RuleLink = "assistant-link"
 	// RuleBadge is a Markdown link or image whose label or target names an
 	// assistant — the `[Claude Code](…)` half of the footer the harnesses append.
@@ -84,17 +90,40 @@ const (
 var (
 	// A git trailer: a known key at the start of a line, with a value.
 	trailer = regexp.MustCompile(`(?i)^[ \t]*(co-?authored-by|assisted-by|generated-by|signed-off-by)[ \t]*:[ \t]*(\S.*?)[ \t]*$`)
-	// The footer phrase. It is only half a shape: the caller requires the name to
+	// The footer phrase, and every other way a line hands this change to whoever
+	// it names next. It is only half a shape: the caller requires the name to
 	// follow it on the same line, so a sentence that happens to say "written by"
 	// about something else stays prose.
-	footer = regexp.MustCompile(`(?i)\b(?:generated|created|authored|written|made|built|produced|drafted)\s+(?:with|by|using|via)\b`)
-	// A session link, a vendor's own page, or a vendor no-reply address, which is
-	// a signature on its own: nobody cites any of these to explain a change.
+	//
+	// Three families, and the second and third are what a session writes once it
+	// has been told not to write the first. "Generated with" is the harness
+	// default; "with the help of" and "thanks to" are what it collapses to when
+	// somebody rephrases it in their own words; and the verb list is wider than
+	// the footer's because the sentence being rewritten is about this work, so any
+	// verb for making it will do.
+	footer = regexp.MustCompile(`(?i)\b(?:` +
+		`(?:generated|created|authored|written|made|built|produced|drafted|implemented|developed|refactored|scaffolded|assembled|composed|prepared|completed|reviewed)\s+(?:with|by|using|via)` +
+		`|(?:with|using)\s+(?:the\s+)?(?:help|assistance|support|aid)\s+(?:of|from)` +
+		`|thanks\s+to|powered\s+by|driven\s+by|came\s+from|courtesy\s+of` +
+		`|pair(?:ed|[- ]programmed)?\s+with|in\s+(?:collaboration|partnership)\s+with` +
+		`)\b`)
+	// The other half of crediting: the assistant as the instrument rather than the
+	// agent — "used Claude Code to draft the tests". The name has to be what
+	// follows the verb, not merely somewhere after it, because the passive reading
+	// of the same words is ordinary technical prose: "the settings format used by
+	// Claude Code" describes a product, it does not hand it the work.
+	useVerb = regexp.MustCompile(`(?i)\b(?:used|using|ran)\s+(?:the\s+|a\s+|an\s+|my\s+|our\s+)?`)
+	// A session link, a vendor's own page, or a vendor no-reply address.
 	//
 	// Whole hosts, rather than the one path today's footer happens to use.
 	// claude.com/claude-code is the spelling that walked past a rule written
 	// around claude.ai, and the next rewording moves the path again.
 	link = regexp.MustCompile(`(?i)\b(?:https?://)?(?:[\w-]+\.)*(?:claude\.(?:ai|com)|anthropic\.com|chatgpt\.com|openai\.com|cursor\.(?:com|sh)|copilot\.microsoft\.com|codeium\.com|windsurf\.com|sourcegraph\.com/cody)(?:/\S*)?|\b[\w.+-]+@(?:anthropic|openai)\.com\b`)
+	// What makes a vendor URL citable: a documentation host, or a path whose first
+	// meaningful segment is documentation. Everything else on a vendor host is a
+	// product page, and nobody cites a product page to explain a change.
+	docHost = regexp.MustCompile(`(?i)^(?:https?://)?(?:docs?|developers?|platform|api|help|support|code)\.`)
+	docPath = regexp.MustCompile(`(?i)^(?:https?://)?[^/\s]+/(?:[\w-]+/){0,3}?(?:docs?|reference|api|guides?|blog|news|engineering|research|help|support|changelog|papers?)(?:[/#?]|$)`)
 	// A Markdown link or image: a label in brackets and a target in parentheses,
 	// with an optional leading bang. Both halves are measured, so a badge survives
 	// having either one of them rewritten.
@@ -208,16 +237,77 @@ func scanLine(line string, last bool) (Hit, bool) {
 	if at := footer.FindStringIndex(line); at != nil && Names(line[at[1]:]) {
 		return Hit{Rule: RuleFooter, Match: strings.TrimSpace(line)}, true
 	}
+	if instrumental(line) {
+		return Hit{Rule: RuleFooter, Match: strings.TrimSpace(line)}, true
+	}
 	if m := badge.FindStringSubmatch(line); m != nil && (Names(m[1]) || Names(m[2])) && signsAlone(line, m[0]) {
 		return Hit{Rule: RuleBadge, Match: strings.TrimSpace(m[0])}, true
 	}
-	if m := link.FindString(line); m != "" && (session.MatchString(m) || strings.Contains(m, "@") || signsAlone(line, m)) {
+	if m := link.FindString(line); m != "" && linkSigns(line, m) {
 		return Hit{Rule: RuleLink, Match: m}, true
 	}
 	if m, ok := mention(line, last); ok {
 		return Hit{Rule: RuleMention, Match: m}, true
 	}
 	return Hit{}, false
+}
+
+// instrumental reports a line that uses an assistant to do this work — "used
+// Claude Code to draft the tests", "ran Codex over the diff".
+//
+// It is the footer rule's other voice, and it is separated from it because it
+// needs a stricter test. The footer phrase can look anywhere after itself for the
+// name, since "generated with" is already about this change. "Used" is not: the
+// same verb in the passive describes a product rather than crediting one, and
+// this repository's own history writes that sentence — "the settings format used
+// by Claude Code" is prose about a harness scc supports.
+//
+// So the name has to be the verb's own object — the very next word, article
+// aside — and it must not be possessive. "Used by Claude Code" puts a preposition
+// there and is the passive; "using Claude Code's hook surface" is a sentence
+// about a hook surface; "using Claude Code to write this" hands over the work.
+// Those two tests are cheap, and they stand in for a distinction that would
+// otherwise need a parser.
+func instrumental(line string) bool {
+	at := useVerb.FindStringIndex(line)
+	if at == nil {
+		return false
+	}
+	rest := strings.Fields(line[at[1]:])
+	if len(rest) == 0 || !Names(rest[0]) {
+		return false
+	}
+	return !strings.ContainsAny(firstWords(rest, 3), "'’")
+}
+
+// firstWords is the opening of a fragment, punctuation kept. Kept rather than
+// stripped because the punctuation is what instrumental reads: an apostrophe
+// three words in is the difference between a credit and a description.
+func firstWords(f []string, n int) string {
+	if len(f) > n {
+		f = f[:n]
+	}
+	return strings.Join(f, " ")
+}
+
+// linkSigns decides whether a vendor URL on this line is a signature.
+//
+// A session link and a no-reply address always are: nobody cites either to
+// explain a change. Documentation is the one exemption, and it keeps the older
+// "alone on its line" gate, because a docs URL in a sentence is a source and the
+// same URL by itself at the end of a message is the footer with the words taken
+// off. Everything else on a vendor host is a product page, and a product page is
+// a signature wherever it sits — in prose, in a parenthesis, or inside an HTML
+// comment, which is where one was measured getting through.
+func linkSigns(line, m string) bool {
+	switch {
+	case session.MatchString(m), strings.Contains(m, "@"):
+		return true
+	case docHost.MatchString(m), docPath.MatchString(m):
+		return signsAlone(line, m)
+	default:
+		return true
+	}
 }
 
 // mention reports a line that is nothing but an assistant's name, in the place a
@@ -247,6 +337,13 @@ func mention(line string, last bool) (string, bool) {
 	for _, w := range words {
 		low := strings.ToLower(w)
 		switch {
+		// A file is not a name, and this repository is the reason the distinction
+		// had to be drawn: `CLAUDE.md` is a path the vocabulary matches on, so a
+		// last line naming the file — which a review bot writes and a commit body
+		// listing what it touched writes too — was read as somebody signing it.
+		// The line says something else, so it is not a bare mention.
+		case isFilename(low):
+			return "", false
 		case Names(low):
 			named = true
 		case filler[low], isVersion(low):
@@ -268,11 +365,44 @@ func mention(line string, last bool) (string, bool) {
 // of harnesses starts. A signature's decoration and a list's bullet look alike
 // enough that guessing between them is how this rule would earn its first false
 // positive.
+//
+// Saying that was not enough to make it true, and the gap was measured rather
+// than argued. `unicode.IsSymbol` returns true for `>`, which is Sm — so every
+// blockquoted line opened a signature, and `> Claude Code, Codex, and opencode`
+// was reported: the very sentence the rule above promises never to report, quoted
+// back. A review bot's comment is written entirely in blockquotes, and `--pr` now
+// reads comments, so the paragraph and the code had to be made to agree.
+//
+// The symbol has to be non-ASCII. That is what a signature's decoration actually
+// is — the robot, a sparkle, a trademark — while ASCII's symbol block is Markdown
+// punctuation: `>`, `|`, `=`, `+`, `^`, the backtick, `~`. The one ASCII
+// character kept is the tilde, named above and never a Markdown opener at the
+// start of a line.
 func signed(line string) bool {
 	for _, r := range strings.TrimLeft(line, " \t") {
-		return unicode.IsSymbol(r) || r == '—' || r == '–' || r == '~'
+		return (unicode.IsSymbol(r) && r > unicode.MaxASCII) || r == '—' || r == '–' || r == '~'
 	}
 	return false
+}
+
+// isFilename reports a token that is a file rather than a name: a dot with a
+// short alphabetic tail, which is an extension.
+//
+// It sits beside isVersion because it is the same kind of test — a shape rather
+// than a word — and it is deliberately narrow. A model name keeps its dots
+// ("claude-3.5-sonnet" ends in "5-sonnet", which is not an extension), and a
+// vendor host ending in one ("claude.ai") is the link rule's to report and is
+// reached before this.
+func isFilename(w string) bool {
+	i := strings.LastIndexByte(w, '.')
+	if i <= 0 || i == len(w)-1 {
+		return false
+	}
+	ext := w[i+1:]
+	if len(ext) > 4 {
+		return false
+	}
+	return strings.IndexFunc(ext, func(r rune) bool { return !unicode.IsLetter(r) }) < 0
 }
 
 // isVersion accepts the scraps of a model name that are not words: "5", "4.5",
