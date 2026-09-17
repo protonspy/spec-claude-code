@@ -230,14 +230,7 @@ func scanLine(line string, last bool) (Hit, bool) {
 	if m := trailer.FindStringSubmatch(line); m != nil && Names(m[2]) {
 		return Hit{Rule: RuleTrailer, Match: strings.TrimSpace(line)}, true
 	}
-	// The name has to come *after* the phrase, not merely somewhere on the line.
-	// Measured on this project's own history: "opencode has one AGENTS.md written
-	// by whichever ran first" carries the phrase and the vocabulary and is a
-	// sentence about opencode, not a line signed by it.
-	if at := footer.FindStringIndex(line); at != nil && Names(line[at[1]:]) {
-		return Hit{Rule: RuleFooter, Match: strings.TrimSpace(line)}, true
-	}
-	if instrumental(line) {
+	if credited(line) || instrumental(line) {
 		return Hit{Rule: RuleFooter, Match: strings.TrimSpace(line)}, true
 	}
 	if m := badge.FindStringSubmatch(line); m != nil && (Names(m[1]) || Names(m[2])) && signsAlone(line, m[0]) {
@@ -250,6 +243,26 @@ func scanLine(line string, last bool) (Hit, bool) {
 		return Hit{Rule: RuleMention, Match: m}, true
 	}
 	return Hit{}, false
+}
+
+// credited reports a line that hands this change to whoever it names: the footer
+// phrase, or one of the ways somebody rephrases it.
+//
+// The name has to come *after* the phrase, not merely somewhere on the line.
+// Measured on this project's own history: "opencode has one AGENTS.md written by
+// whichever ran first" carries the phrase and the vocabulary and is a sentence
+// about opencode, not a line signed by it.
+//
+// And the occurrence must not be quoted, for the reason instrumental gives below:
+// a commit explaining this rule quotes the phrases it catches, and the rule that
+// reported that would fire on the fix for its own finding.
+func credited(line string) bool {
+	for _, at := range footer.FindAllStringIndex(line, -1) {
+		if Names(line[at[1]:]) && !quoted(line[:at[0]]) {
+			return true
+		}
+	}
+	return false
 }
 
 // instrumental reports a line that uses an assistant to do this work — "used
@@ -268,16 +281,36 @@ func scanLine(line string, last bool) (Hit, bool) {
 // about a hook surface; "using Claude Code to write this" hands over the work.
 // Those two tests are cheap, and they stand in for a distinction that would
 // otherwise need a parser.
+// A quoted occurrence is skipped, which is the anchoring the other rules get from
+// their shape and this one has nowhere else to get. Measured on this package's own
+// history: a commit explaining this very rule quotes the line it now catches, and
+// a check that reported that would fire on the fix for its own finding — the
+// failure the package comment names at the top of this file.
 func instrumental(line string) bool {
-	at := useVerb.FindStringIndex(line)
-	if at == nil {
-		return false
+	for _, at := range useVerb.FindAllStringIndex(line, -1) {
+		rest := strings.Fields(line[at[1]:])
+		switch {
+		case len(rest) == 0, !Names(rest[0]):
+		case strings.ContainsAny(firstWords(rest, 3), "'’"):
+		case quoted(line[:at[0]]):
+		default:
+			return true
+		}
 	}
-	rest := strings.Fields(line[at[1]:])
-	if len(rest) == 0 || !Names(rest[0]) {
-		return false
-	}
-	return !strings.ContainsAny(firstWords(rest, 3), "'’")
+	return false
+}
+
+// quoted reports whether what follows this much of a line sits inside a
+// quotation: an odd number of straight quotes or backticks behind it, or a
+// typographic quotation still open.
+//
+// The apostrophe is deliberately not counted. It is a possessive in ordinary
+// English far more often than it opens anything, and instrumental already reads
+// one three words along to tell a credit from a description.
+func quoted(before string) bool {
+	return strings.Count(before, `"`)%2 == 1 ||
+		strings.Count(before, "`")%2 == 1 ||
+		strings.Count(before, "“") > strings.Count(before, "”")
 }
 
 // firstWords is the opening of a fragment, punctuation kept. Kept rather than

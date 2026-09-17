@@ -359,3 +359,26 @@ func TestAFileIsNotAName(t *testing.T) {
 		}
 	}
 }
+
+// TestQuotingTheShapeIsNotWearingIt is the failure the package comment names at
+// the top of the file: a commit message that merely quotes one of these lines,
+// which is exactly what a fix for this finding looks like. Measured on this
+// change's own commit and pull request, both of which were reported by the rule
+// they were explaining.
+func TestQuotingTheShapeIsNotWearingIt(t *testing.T) {
+	for _, line := range []string{
+		`voice, "used Claude Code to draft the tests". The last needs the stricter test`,
+		"the instrumental voice, `used Claude Code to draft the tests`, needs a stricter test",
+		`"thanks to", "with the help of", and "used Claude Code to" are the phrasings it catches`,
+	} {
+		if hits := Scan("fix: thing\n\n" + line); len(hits) != 0 {
+			t.Errorf("a quoted shape reported as a signature: %q → %+v", line, hits)
+		}
+	}
+	// And an unquoted credit on the same line as a quotation is still caught, so
+	// the gate is per occurrence rather than per line.
+	line := `The footer said "Generated with X", and I used Claude Code to rewrite it.`
+	if hits := Scan("fix: thing\n\n" + line); len(hits) != 1 {
+		t.Errorf("the unquoted credit went unreported: %q → %+v", line, hits)
+	}
+}
