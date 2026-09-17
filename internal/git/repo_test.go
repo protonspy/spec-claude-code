@@ -503,3 +503,47 @@ func TestViewPRReadsWhatTheForgeSays(t *testing.T) {
 		t.Error("LookPR accepted output that is not JSON")
 	}
 }
+
+// A comment is the half of the pull request that nothing else can reach: no hook
+// runs when a tool posts one. The query reads the issue comments and the review
+// bodies as one list, and drops a review that is an approval click with nothing
+// written in it.
+func TestPRCommentsReadsWhatWasWrittenAfterwards(t *testing.T) {
+	const body = `{"comments":[{"author":{"login":"someone"},"url":"https://example.invalid/pr/7#c1","body":"looks good"}],` +
+		`"reviews":[{"author":{"login":"other"},"url":"https://example.invalid/pr/7#r1","body":"one nit"},` +
+		`{"author":{"login":"third"},"url":"https://example.invalid/pr/7#r2","body":"   "}]}`
+	t.Setenv("PATH", fakeBin(t, GHBin, body, 0))
+
+	got, err := PRComments(t.TempDir(), 7)
+	if err != nil {
+		t.Fatalf("PRComments: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d comments, want 2 (the empty review is an approval click): %+v", len(got), got)
+	}
+	// Issue comments first, then reviews, so a reader meets them in the order the
+	// pull request page shows them.
+	if got[0].Author != "someone" || got[0].Body != "looks good" {
+		t.Errorf("first = %+v", got[0])
+	}
+	if got[1].Author != "other" || got[1].URL != "https://example.invalid/pr/7#r1" {
+		t.Errorf("second = %+v", got[1])
+	}
+
+	// The current branch's pull request is the same query with no number, which is
+	// gh's own default.
+	if _, err := PRComments(t.TempDir(), 0); err != nil {
+		t.Errorf("PRComments(0): %v", err)
+	}
+
+	// And every way of having no answer is an error the caller turns into silence,
+	// never a half-read list.
+	t.Setenv("PATH", fakeBin(t, GHBin, "not json", 0))
+	if _, err := PRComments(t.TempDir(), 7); err == nil {
+		t.Error("PRComments accepted output that is not JSON")
+	}
+	t.Setenv("PATH", t.TempDir())
+	if _, err := PRComments(t.TempDir(), 7); err != ErrUnavailable {
+		t.Errorf("err = %v, want ErrUnavailable when gh is not on PATH", err)
+	}
+}

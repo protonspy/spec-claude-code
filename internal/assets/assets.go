@@ -283,7 +283,7 @@ import (
 // `/home/node/.claude` is created and chowned in the image: without it the first
 // write of every session was `EACCES ... mkdir '/home/node/.claude/session-env'` and
 // the login it could not store read back as "not logged in".
-const Version = "33"
+const Version = "35"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.

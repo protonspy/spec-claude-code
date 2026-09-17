@@ -3,6 +3,7 @@ package validate
 import (
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/protonspy/spec-claude-code/internal/attribution"
 	"github.com/protonspy/spec-claude-code/internal/finding"
@@ -51,7 +52,8 @@ func Attribution(root string) (*finding.Set, error) {
 }
 
 // AttributionPR reports the same signatures in the pull request this branch has
-// open — its title and its body.
+// open — its title, its body, and everything written on it since: the issue
+// comments and the bodies of the reviews.
 //
 // It is the other half of the record and the half no hook can reach. A commit
 // message passes through `commit-msg` on the machine that wrote it; a PR body is
@@ -66,7 +68,9 @@ func Attribution(root string) (*finding.Set, error) {
 //
 // Like its sibling it never returns an error. No gh, no authentication, no
 // network, no pull request for this branch: all of them mean there is nothing to
-// check, and none of them is this validator failing.
+// check, and none of them is this validator failing. The comment query degrades
+// the same way and on its own — a forge that answers about the pull request and
+// not about its comments still gets the title and body checked.
 func AttributionPR(root string) (*finding.Set, error) {
 	set := &finding.Set{}
 	if !git.IsRepo(root) || !git.Found(git.GHBin) {
@@ -79,7 +83,27 @@ func AttributionPR(root string) (*finding.Set, error) {
 	// Title first and body after, as one text, so a finding's line number reads
 	// against what a person sees on the pull request page: line 1 is the title.
 	report(set, prName(pr), clipSubject(pr.Title), pr.Title+"\n"+pr.Body)
+	// And then what was written on it afterwards. A comment is the one part of
+	// the record nothing else can reach — no hook runs when a tool posts one — and
+	// it is the same text under the same rule, so it is checked the same way.
+	// Each comment is its own text, because its line numbers are its own.
+	comments, err := git.PRComments(root, pr.Number)
+	if err != nil {
+		return set, nil
+	}
+	for _, c := range comments {
+		report(set, prName(pr)+" comment", commentBy(c), c.Body)
+	}
 	return set, nil
+}
+
+// commentBy names a comment the way its finding is read: by who wrote it, since a
+// comment has no title and the number is already on the left of the line.
+func commentBy(c git.PRComment) string {
+	if c.Author == "" {
+		return "a comment"
+	}
+	return "a comment by " + clipSubject(c.Author)
 }
 
 // prName is what a pull-request finding is filed under: the number, because it is
@@ -107,16 +131,41 @@ var advice = map[string]string{
 	attribution.RuleMention: "a line that says nothing but the name is a signature",
 }
 
-// clip keeps a finding to one readable line. A trailer is short, but a footer can
-// carry a full URL and a message that wrapped the terminal would defeat the
-// grouping the report is built around.
+// clip keeps a finding to one readable line, and makes that line safe to print.
+//
+// Two jobs, and the second is not cosmetic. What is being clipped is the
+// offending line itself, and under `--pr` that line arrives from a pull request
+// comment — written by anybody with an account who can comment, rather than by
+// whoever opened the pull request or by anybody with push access. It reaches a
+// real terminal through finding.Set.Report on every `git push`, because that is
+// where pre-push runs this check. A raw ESC surviving the trip is a control
+// sequence the reader's emulator obeys: enough to scroll a finding off the screen
+// and paint a clean report over the top of it, which is exactly the lie this
+// validator exists to prevent. The subject printed beside the match goes out
+// through %q and is escaped by the verb; the match goes out through %s, so it is
+// escaped here.
+//
+// Every non-graphic rune becomes a space before the collapse — the C0 and C1
+// controls, and the format category, which is where the bidirectional overrides
+// live. strings.Fields then folds the result back into the single line this
+// function was always for.
+//
+// And the cut is by rune rather than by byte, for the same reason the escaping is
+// here at all: halving a multi-byte rune puts invalid UTF-8 in the report, and
+// the text is now chosen by somebody who would like it to.
 func clip(s string) string {
 	const max = 64
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsGraphic(r) {
+			return r
+		}
+		return ' '
+	}, s)
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= max {
-		return s
+	if r := []rune(s); len(r) > max {
+		return string(r[:max-1]) + "…"
 	}
-	return s[:max-1] + "…"
+	return s
 }
 
 // clipSubject names the commit in words, next to the short sha the finding is

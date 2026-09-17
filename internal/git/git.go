@@ -278,6 +278,71 @@ func viewPR(dir, arg string) (PR, error) {
 	}, nil
 }
 
+// PRComment is one thing somebody wrote on a pull request after it was opened —
+// an issue comment or the body of a review.
+//
+// It is separate from PR.Body because it is the one part of the record nothing
+// else can reach. A commit message passes through commit-msg on the machine that
+// wrote it; a pull request body is at least typed once by whoever opened it; a
+// comment is posted straight into the forge at any point afterwards, by a tool as
+// readily as by a person. Whatever rule binds the first two binds this.
+//
+// Author is the login, which is how a reader finds the comment again — the URL is
+// exact but unreadable in a terminal, so both are kept.
+type PRComment struct {
+	Author string `json:"author"`
+	URL    string `json:"url"`
+	Body   string `json:"body"`
+}
+
+// PRComments is everything written on a pull request after it was opened: the
+// issue comments and the bodies of the reviews, in that order.
+//
+// A number of 0 means the pull request for the checked-out branch, which is gh's
+// own default and the same convention CurrentPR follows.
+//
+// It is a second call rather than another field on PR, and that is deliberate:
+// spec sync asks LookPR about every spec in the workspace, and it has no use for
+// comment bodies. Only the attribution check pays for these, and only under
+// `scc validate --pr`.
+func PRComments(dir string, number int) ([]PRComment, error) {
+	args := []string{"pr", "view"}
+	if number > 0 {
+		args = append(args, strconv.Itoa(number))
+	}
+	out, err := run(GHBin, dir, append(args, "--json", "comments,reviews")...)
+	if err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Comments []rawComment `json:"comments"`
+		Reviews  []rawComment `json:"reviews"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, err
+	}
+	var all []PRComment
+	for _, c := range append(append([]rawComment{}, raw.Comments...), raw.Reviews...) {
+		// A review with no body is an approval click, and there is nothing in it to
+		// read. Dropping it here keeps the caller from reporting an empty record.
+		if strings.TrimSpace(c.Body) == "" {
+			continue
+		}
+		all = append(all, PRComment{Author: c.Author.Login, URL: c.URL, Body: c.Body})
+	}
+	return all, nil
+}
+
+// rawComment is gh's shape for both lists, which differ only in fields neither
+// caller reads.
+type rawComment struct {
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	URL  string `json:"url"`
+	Body string `json:"body"`
+}
+
 // Commit is one commit's identity and its message in full.
 //
 // Message is the whole thing — subject, body and trailers — because the trailers

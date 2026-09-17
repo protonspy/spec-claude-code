@@ -115,10 +115,6 @@ func TestTheFooterRewrittenIsStillCaught(t *testing.T) {
 		{"badge named by target", "[the tool](https://claude.ai/code)", RuleBadge},
 		{"image badge", "![Claude](https://img.example/badge.svg)", RuleBadge},
 		{"vendor page", "https://www.anthropic.com/claude-code", RuleLink},
-		// Alone on the line, which is where a footer's surviving URL sits. A vendor
-		// host *inside* a sentence is now a deliberate miss: documentation lives on
-		// these domains, and this package trades a miss for a false positive every
-		// time — one wrong finding teaches the reader to disbelieve the other ten.
 		{"vendor host alone", "claude.com/claude-code", RuleLink},
 		{"session link mid-sentence", "picked up from https://claude.ai/code/session_01abc in passing", RuleLink},
 		{"bare name under a symbol", "\U0001F916 Claude Code", RuleMention},
@@ -194,5 +190,195 @@ func TestBadgeTellsACitationFromASignature(t *testing.T) {
 		if hits[0].Rule != RuleBadge && hits[0].Rule != RuleLink {
 			t.Errorf("%q reported as %q, want the badge or the link rule", line, hits[0].Rule)
 		}
+	}
+}
+
+// TestAProductPageIsASignatureWhereverItSits is the measured escape this rule was
+// widened for. A harness told not to sign its work kept the link and moved it into
+// a sentence, and the gate that asked whether the line stood alone read that as
+// prose. A product page is nobody's citation, so where it sits says nothing about
+// what it is.
+func TestAProductPageIsASignatureWhereverItSits(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		line string
+	}{
+		{"in prose", "See https://claude.com/claude-code for the tool that helped here."},
+		{"in an HTML comment", "<!-- drafted at https://claude.com/claude-code -->"},
+		{"in a parenthesis", "Part of the work happened elsewhere (claude.com/claude-code)."},
+		{"bare host mid-sentence", "Some of the tests came out of claude.com and were tidied by hand."},
+		{"trailing punctuation", "Tooling: https://claude.com/claude-code."},
+		{"a vendor page that is not the product", "written up at https://www.anthropic.com/claude in more detail"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hits := Scan("fix: thing\n\n" + tc.line)
+			if len(hits) != 1 || hits[0].Rule != RuleLink {
+				t.Fatalf("got %+v, want one %s hit", hits, RuleLink)
+			}
+		})
+	}
+}
+
+// TestDocumentationStaysCitable is the other side of that trade, and the more
+// important one. An argument that cannot cite the vendor's own documentation is
+// one nobody can check, and a validator that fires on scc's own pull requests is
+// the worst bug in this product.
+func TestDocumentationStaysCitable(t *testing.T) {
+	for _, line := range []string{
+		"Anthropic's own guidance at https://code.claude.com/docs/en/devcontainer warns about exfiltration.",
+		"The event list is at code.claude.com/docs/en/hooks, which is where the stage names come from.",
+		"Measured against https://docs.anthropic.com/en/api/messages and the SDK's own defaults.",
+		"The post at https://www.anthropic.com/news/claude-opus-5 is where the figure comes from.",
+		"Rate limits: platform.openai.com/docs/guides/rate-limits, for the comparison.",
+	} {
+		if hits := Scan("fix: thing\n\n" + line); len(hits) != 0 {
+			t.Errorf("citation reported as a signature: %q → %+v", line, hits)
+		}
+	}
+
+	// It is still reported standing by itself, which is where a footer's surviving
+	// URL lands once the words in front of it are gone.
+	if hits := Scan("fix: thing\n\nhttps://code.claude.com/docs/en/overview"); len(hits) != 1 {
+		t.Errorf("a docs URL alone on its line is the footer with the words off: got %+v", hits)
+	}
+}
+
+// TestCreditingAToolIsAttribution covers the phrasings a session reaches for once
+// it has been told not to write "Generated with" — the same claim in somebody's
+// own words.
+func TestCreditingAToolIsAttribution(t *testing.T) {
+	for _, line := range []string{
+		"Part of the work used Claude Code to draft the tests.",
+		"Some of this came from Claude Code.",
+		"Written with the help of Claude Code.",
+		"Thanks to Claude for the refactor.",
+		"Powered by Codex.",
+		"Pair-programmed with Claude Opus 5.",
+		"Scaffolded with opencode, then finished by hand.",
+		"Reviewed by Claude before it was pushed.",
+		"Using Claude Code, the tests were rewritten from the requirement.",
+	} {
+		hits := Scan("fix: thing\n\n" + line)
+		if len(hits) != 1 || hits[0].Rule != RuleFooter {
+			t.Errorf("credit not reported: %q → %+v", line, hits)
+		}
+	}
+}
+
+// TestTalkingAboutAHarnessIsNotCreditingIt is where the widened rule is weakest,
+// and the bar is this repository's own history: fifteen of its commits discuss
+// Claude Code as the harness scc scaffolds for, and not one of them credits it
+// with the work. Every line here is taken from that history or written in its
+// register.
+func TestTalkingAboutAHarnessIsNotCreditingIt(t *testing.T) {
+	for _, text := range []string{
+		"refactor(assets): drop the command files on Claude Code, move the prefix onto the skill",
+		"feat(assets): scaffold the methodology into Codex and opencode, not only Claude Code",
+		"fix: x\n\nClaude Code registers a skill at skills/<name>/SKILL.md as /<name> by itself.",
+		"fix: x\n\nThe settings format used by Claude Code is JSON, and scc splices into it.",
+		"fix: x\n\nUsing Claude Code's hook surface, the Stop stage can report findings.",
+		"fix: x\n\nThe rules are loaded by Claude Code at launch with the same priority as CLAUDE.md.",
+		"feat(launch): sandbox by default, with a dev container for Windows",
+		"fix: x\n\nThe image carries Claude Code, scc, codegraph and rtk, pinned to build ARGs.",
+		"fix: x\n\nMeasured on a freshly scaffolded Claude Code workspace: 47KB in every request.",
+	} {
+		if hits := Scan(text); len(hits) != 0 {
+			t.Errorf("Scan(%q) reported %+v, want nothing", text, hits)
+		}
+	}
+}
+
+// TestMarkdownStructureIsNotASignaturePosition is the measured regression, and
+// the corpus is this repository's own pull requests: every body, every issue
+// comment and every review comment. Two lines were reported before the position
+// gate was made to mean what its own paragraph claimed — a quoted bullet in a
+// review bot's file list, and a table row from PR #6 comparing the three
+// harnesses. `unicode.IsSymbol` is true for `>` and `|`, so Markdown's own
+// structure opened a signature.
+//
+// Reading comments is what made this live traffic: a review bot writes entirely
+// in blockquotes.
+func TestMarkdownStructureIsNotASignaturePosition(t *testing.T) {
+	for _, line := range []string{
+		"> * `CLAUDE.md`",
+		"> Claude Code registers a skill as a command by itself.",
+		"| | Claude Code | Codex | opencode |",
+		"| Claude Code | yes |",
+		"= Claude Code",
+		"+ Claude Code",
+		"^ Claude Code",
+	} {
+		// Not the last line, which is a signature's other position and tested
+		// below: this is about the decoration in front of it.
+		if hits := Scan("fix: thing\n\n" + line + "\n\nand then some prose."); len(hits) != 0 {
+			t.Errorf("Markdown structure read as a signature: %q → %+v", line, hits)
+		}
+	}
+}
+
+// And the decoration that really does open a signature still does. Every one of
+// these is non-ASCII or the typographic dash the rule always named.
+func TestRealDecorationStillOpensASignature(t *testing.T) {
+	for _, line := range []string{
+		"🤖 Claude Code",
+		"✨ Claude Opus 5",
+		"— Claude Code",
+		"– via Codex",
+		"~ Claude",
+	} {
+		hits := Scan("fix: thing\n\n" + line + "\n\nand then some prose.")
+		if len(hits) != 1 || hits[0].Rule != RuleMention {
+			t.Errorf("signature not reported: %q → %+v", line, hits)
+		}
+	}
+}
+
+// TestAFileIsNotAName is the other half of the same corpus result. `CLAUDE.md` is
+// a path the vocabulary matches on, so a last line naming the file — which a
+// review bot writes, and so does a commit body listing what it touched — read as
+// somebody signing the work.
+func TestAFileIsNotAName(t *testing.T) {
+	for _, line := range []string{
+		"CLAUDE.md",
+		"🤖 CLAUDE.md",
+		"claude.md",
+		"— AGENTS.md and CLAUDE.md",
+	} {
+		if hits := Scan("fix: thing\n\n" + line); len(hits) != 0 {
+			t.Errorf("a filename read as a signature: %q → %+v", line, hits)
+		}
+	}
+	// A model name keeps its dots and is still a name: the gate is an extension,
+	// not a full stop.
+	for _, line := range []string{
+		"🤖 claude-3.5-sonnet",
+		"— Claude Opus 5",
+	} {
+		if hits := Scan("fix: thing\n\n" + line); len(hits) != 1 {
+			t.Errorf("model name not reported: %q → %+v", line, hits)
+		}
+	}
+}
+
+// TestQuotingTheShapeIsNotWearingIt is the failure the package comment names at
+// the top of the file: a commit message that merely quotes one of these lines,
+// which is exactly what a fix for this finding looks like. Measured on this
+// change's own commit and pull request, both of which were reported by the rule
+// they were explaining.
+func TestQuotingTheShapeIsNotWearingIt(t *testing.T) {
+	for _, line := range []string{
+		`voice, "used Claude Code to draft the tests". The last needs the stricter test`,
+		"the instrumental voice, `used Claude Code to draft the tests`, needs a stricter test",
+		`"thanks to", "with the help of", and "used Claude Code to" are the phrasings it catches`,
+	} {
+		if hits := Scan("fix: thing\n\n" + line); len(hits) != 0 {
+			t.Errorf("a quoted shape reported as a signature: %q → %+v", line, hits)
+		}
+	}
+	// And an unquoted credit on the same line as a quotation is still caught, so
+	// the gate is per occurrence rather than per line.
+	line := `The footer said "Generated with X", and I used Claude Code to rewrite it.`
+	if hits := Scan("fix: thing\n\n" + line); len(hits) != 1 {
+		t.Errorf("the unquoted credit went unreported: %q → %+v", line, hits)
 	}
 }
