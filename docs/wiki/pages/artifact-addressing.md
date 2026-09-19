@@ -48,6 +48,70 @@ alone are an index a twentieth of the size.
 workspace's 31 specs, so `scc map trace R2.5` unscoped answers with the list of
 specs and stops, rather than concatenating nine traces.
 
+## The reading surface is what gives "never open the plan" its authority
+
+Forbidding the read without offering the equivalent query produces an agent that
+disobeys the rule, correctly — so the surface shipped in the phase before the rule
+did. `map brief` is the header, `map tasks` is the checklist, and no command returns
+both, so a session pays `brief` once and `--next` per task.
+
+`--next` is **determined** rather than first-in-file: eligible tasks first, then
+priority ascending with absent last, then the number compared *numerically* — which
+is also the fix for `1.10` sorting before `1.9`. `--ready`, `--blocked` and `--deps`
+share that one implementation, because two notions of eligibility would be two
+answers to *what do I work on*.
+
+**`--next` prints the task whole; the listings clip.** Every task in a real plan runs
+past one line, and the line below the checkbox is usually where the decision sits, so
+a `--next` that stopped at the line break sent the reader back to the file — the exact
+cost this surface exists to remove. It therefore ignores `--width`. A list of sixty
+one-line tasks is still a list, so the listings clip: `Task.Continuation()` is the raw
+lines with the flags removed, and `Task.Detail` is the same text collapsed to one
+line, right for a row in a table and wrong for anything meant to be read.
+
+## No search engine
+
+`map find` ranks the workspace with BM25 in the binary, and the obvious reach for it
+was an inverted index. At 352KB and 94 artifacts a linear pass ranks the whole corpus
+in 55ms, and Tantivy or its kin would cost a CGO surface or a second binary against a
+stdlib-only `go.mod` and a six-platform cross-compile.
+
+What precision needed was not a better index but a better **unit**: BM25 over
+addressable regions rather than lines, so a hit comes back as something `show`
+accepts. The seam is `artifact.Search` — it takes artifacts and returns hits, and
+nothing outside that file knows how it found them.
+
+The command is now **undocumented rather than removed**. Its stated reason was the
+whole corpus, not the plan, and with the plan small, searching *inside* one stopped
+making sense — while searching the knowledge base is still the only alternative to
+opening a file. Deleting the code would save nothing; deleting the line from the
+rules and the entry file saves tokens in every request of every session.
+
+## The seal is tamper-evidence, not prevention
+
+`scc plan approve` validates, then writes `status: approved` and a `checksum:` over
+the file minus its own checksum line, LF-normalized. `reseal --force` is one command
+away and sha256 is public, so this is recorded as evidence rather than as a guarantee,
+in case somebody later builds one on it.
+
+The check runs **before an edit is applied**, which is the whole value: a harness that
+edited by hand and then ran `patch check` would otherwise have its edit resealed by
+the command that should have reported it. A plan with no `status:` is never checked,
+which is what lets every pre-existing plan keep working.
+
+After approval the work is fixed and only discovery moves. `add` allocates the number
+from a high-water mark that includes removed tasks — so nothing is stored anywhere —
+and demands `--reason`; `rm` strikes the task out where it stands rather than deleting
+it; rewriting a task or the prose is refused. What discovery can never touch is
+guaranteed **structurally** rather than by instruction: `Why`, `Out of scope`, `Done
+when` and the title are reachable only through `append`, `prepend` and `replace`, and
+those are exactly the three that are refused.
+
+`scc plan migrate` moves a v1 plan across: it renames `Decomposition` to `References`,
+moves every other heading into `plans/archive/<name>-notes.md`, creates the missing
+required sections **empty and lets the findings appear** — a placeholder that satisfied
+the validator would be a plan that lies — and writes `status: draft`, never `approved`.
+
 ## The grammar lives with the reader, not the checker
 
 `internal/artifact` owns every grammar — task, requirement, spec reference, flag —

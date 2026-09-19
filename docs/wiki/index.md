@@ -17,6 +17,8 @@ the source most of it was reconstructed from.
   reads at session start is paid again in every request.
 - [[spec-or-plan]] — the two vehicles for work, how the choice is made, and why a
   plan is a contract rather than a document.
+- [[note-log]] — why a gotcha is one line in `docs/notes.md` rather than a comment
+  beside the code that taught it.
 
 ## The artifacts
 
@@ -44,3 +46,8 @@ the source most of it was reconstructed from.
 
 - [[integration-boundary]] — six third-party binaries, one package each, and why
   everything degrades except the sandbox.
+
+## Shipping it
+
+- [[release]] — the dispatch-only pipeline, an immutable version, and the two
+  launcher tiers npm's similarity check forced into existence.

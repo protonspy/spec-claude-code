@@ -72,7 +72,7 @@ nobody recorded a reason, this file says so rather than inventing one.
 ## Integrated binaries — driven, never vendored
 
 Each is a third-party CLI scc composes a command line for and starts. None is a Go
-dependency; none is vendored. The shared reason is in `CLAUDE.md`: a third party's
+dependency; none is vendored. The shared reason is `adr:0001-stdlib-only-dependencies`: a third party's
 binary name, install command and argument vocabulary all age on that third party's
 schedule, so each lives in its own package and a version bump never touches the
 dispatcher. The shared cost is that scc cannot guarantee any of them is present,

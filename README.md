@@ -274,7 +274,8 @@ make build    # -> ./scc
 make help     # every target
 ```
 
-See [CLAUDE.md](CLAUDE.md) for architecture and conventions.
+See [docs/codewiki/packages.md](docs/codewiki/packages.md) for the package map and
+[.claude/rules/project.md](.claude/rules/project.md) for this project's commands and conventions.
 
 ## License
 

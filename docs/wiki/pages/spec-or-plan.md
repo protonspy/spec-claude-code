@@ -52,6 +52,39 @@ introduces requirements that conflict, and correctness drops. The same holds for
 it as a decision somebody made, and honors it. So a heading with nothing real to say
 is deleted rather than filled, and `scc` requires no section in a design at all.
 
+## The spec records where it is being built
+
+A branch was the one part of this methodology that left no trace in the artifacts.
+The spec said which boxes were ticked, git said a branch had been unmerged for three
+weeks, and nothing joined the two — so *which of these actually shipped* was
+answerable only by somebody holding both halves. Under `autonomy: auto` that is
+nobody.
+
+Three keys sit on `requirements.md` beside the kickoff answers — `branch:`, `pr:` and
+`delivery: in-progress | in-review | merged | abandoned` — with the vocabulary closed
+for the reason a task's flags are, and graded by the validator only when present, so
+every spec written before them keeps passing.
+
+**`scc spec track` records what the caller knows; `scc spec sync` derives what git
+knows.** `--here` takes the branch from the checkout and `--pr <n>` the pull request;
+`sync` walks every spec, asks git and, where it is installed, `gh`, and writes the
+answer back under the same verify-and-roll-back contract as `scc patch`. **Neither
+guesses**: a deleted branch with no PR to ask about is reported undetermined and left
+alone, because merged and abandoned are indistinguishable once the ref is gone.
+
+Two things were wrong in the first cut and are worth keeping wrong-proof. **Merged is
+not "is an ancestor of the base"** — a branch created ten seconds ago satisfies that
+trivially, and the first run declared a spec delivered before a line of it existed. It
+is *ahead == 0 and behind > 0*, and the fast-forward case no ref can resolve is called
+**not** merged, because this record exists to surface unfinished work. And **a settled
+record is not re-litigated**: a deleted branch on a spec already `merged` is what a
+merged branch looks like, and warning about it would put a line on every finished spec
+forever.
+
+Plans are deliberately out for now, for a naming reason rather than a principle: `pr:`
+on a plan already means the delivery *shape* asked for at kickoff, so one key would
+carry two meanings on one file. Plan tracking starts by renaming that answer.
+
 ## A spec meets existing code as a delta
 
 Changing an existing spec means amending individual requirements — `(ADDED)`,

@@ -20,6 +20,13 @@ four commands; the bar for a further key is that something inside the binary rea
 it, and that bar is deliberately high. A `scc.json` read by nothing would be dead
 weight, and a key nothing reads is the same dead weight with a shorter path.
 
+That input has a failure mode worth naming, because it is silent. `scc init` and
+`scc update` both build the next manifest **from scratch**, so without
+`Manifest.CarryOver` a re-run of `init` deleted the gate's four commands — and had
+already been deleting the unknown fields `UnmarshalJSON` goes to the trouble of
+preserving. `Manifest.commands` is the one table read, carry-over and write all
+share, so a fifth key cannot be preserved on read and dropped on a re-scaffold.
+
 ## Four categories, four lifecycles
 
 | Kind | Rendered from | Tracked | Updated |
@@ -49,6 +56,14 @@ That choice cuts both ways, deliberately:
 - **`scc`'s own markers for CodeGraph**, because CodeGraph writes nothing into the
   entry file and the block is `scc`'s account of `scc graph`. Namespacing leaves a
   future CodeGraph release free to add its own.
+
+**A block somebody else wrote for the same job is reported, never touched.**
+Headroom namespaces its copy of the RTK guidance as `headroom:rtk-instructions`,
+which is not a substring of RTK's own pair — so a workspace wired by both ends up
+carrying the instructions twice. `rtk.ForeignBlock` detects exactly that, names
+Headroom in the report, and gives `headroom unwrap <agent>` as the fix. It is
+reported rather than removed because the block belongs to Headroom: `scc` removing
+it would be authoring somebody else's file to undo somebody else's registration.
 
 The same reasoning governs `settings.json`, which is spliced rather than authored:
 `scc`'s entries are identified by their command, replaced in place, and every other

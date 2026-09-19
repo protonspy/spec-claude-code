@@ -1,5 +1,6 @@
 ---
 name: scc-security-review
+effort: high
 description: Reviews a diff for exploitable weaknesses, attack-class agnostic — traces attacker-controlled input to effect and reports reachable paths. Use it alongside scc-code-review before opening a PR — the two are deliberately separate lenses.
 ---
 

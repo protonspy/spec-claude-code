@@ -701,7 +701,8 @@ change is its worst reader — they see what they meant. And a reviewer reads in
 of writes, so running one on a cheaper model costs far less than delegating
 authorship would.
 
-**Both pin `model: sonnet` and `effort: high`.** The mid tier is the right trade for
+**Both pin `model: sonnet`; the effort is per agent — `scc-code-review` at medium,
+`scc-security-review` at high.** The mid tier is the right trade for
 work that reads and judges rather than authors, and the reasoning budget is where the
 quality actually comes from here: tracing a value from an argument to a shell, or a
 ticked box to the code behind it, is chains-of-inference work, not knowledge work. A

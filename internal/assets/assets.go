@@ -283,7 +283,7 @@ import (
 // `/home/node/.claude` is created and chowned in the image: without it the first
 // write of every session was `EACCES ... mkdir '/home/node/.claude/session-env'` and
 // the login it could not store read back as "not logged in".
-const Version = "35"
+const Version = "37"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -831,6 +831,7 @@ func expand(name, raw string, l layout) (string, error) {
 type meta struct {
 	name        string
 	description string
+	effort      string
 	extra       map[string]string // keys only some harnesses understand
 	body        string
 }
@@ -858,6 +859,8 @@ func splitMeta(name, raw string) (meta, error) {
 		switch key {
 		case "name":
 			m.name = value
+		case "effort":
+			m.effort = value
 		case "description":
 			m.description = value
 		default:
@@ -870,15 +873,33 @@ func splitMeta(name, raw string) (meta, error) {
 	return m, nil
 }
 
-// The reasoning budget both reviewers run on. Review is chains-of-inference work
-// — tracing a value from an argument to a shell, or a ticked box to the code
-// behind it — and that is what effort buys. Every harness that expresses it gets
-// it; the model tier is pinned only where the harness has a stable alias for one
+// A review agent declares its own reasoning budget, in its own template, and the
+// two do not share one.
+//
+// Review is chains-of-inference work — tracing a value from an argument to a
+// shell, or a ticked box to the code behind it — and that is what effort buys, so
+// the question is per agent rather than per product. `scc-code-review` runs at
+// medium: its job is the closest thing here to checklist-shaped, against a task
+// list, a test run and a linter. `scc-security-review` runs at high, because it
+// has no checklist to fall back on — it is asked for a traced path from
+// attacker-controlled input to effect, which is the case where the budget is the
+// product rather than a multiplier on it.
+//
+// The cost argument is real and it is what lowered the first of those: delivery.md
+// dispatches both on every diff, not on the ones that look risky, and a gate
+// expensive enough to skip is a gate that gets skipped — taking the other one with
+// it. But that argument is about running *both* at the maximum, and it does not
+// divide equally between them.
+//
+// It is required rather than defaulted, for the reason a declined delivery gate is
+// the word `skipped` rather than an absent key: a budget nobody chose is not the
+// same as a budget somebody chose and wrote down. A third reviewer added without
+// one fails to render rather than inheriting a number by accident.
+//
+// The model tier is pinned only where the harness has a stable alias for one
 // (Claude Code's "sonnet"), because a pinned `gpt-5.6` or `anthropic/claude-x`
 // would be a guess about a name that churns and a provider the user may not have
 // configured.
-const reviewEffort = "high"
-
 func renderAgent(h paths.Harness, f File, raw string) (string, error) {
 	m, err := splitMeta(f.Name, raw)
 	if err != nil {
@@ -886,6 +907,9 @@ func renderAgent(h paths.Harness, f File, raw string) (string, error) {
 	}
 	if m.name == "" {
 		return "", fmt.Errorf("template %q: an agent needs a name", f.Name)
+	}
+	if m.effort == "" {
+		return "", fmt.Errorf("template %q: an agent needs an effort", f.Name)
 	}
 	switch h.ID {
 	case paths.Codex.ID:
@@ -895,7 +919,7 @@ func renderAgent(h paths.Harness, f File, raw string) (string, error) {
 		var b strings.Builder
 		fmt.Fprintf(&b, "name = %q\n", m.name)
 		fmt.Fprintf(&b, "description = %q\n", m.description)
-		fmt.Fprintf(&b, "model_reasoning_effort = %q\n", reviewEffort)
+		fmt.Fprintf(&b, "model_reasoning_effort = %q\n", m.effort)
 		fmt.Fprintf(&b, "developer_instructions = '''\n%s'''\n", m.body)
 		return b.String(), nil
 	case paths.OpenCode.ID:
@@ -919,7 +943,7 @@ func renderAgent(h paths.Harness, f File, raw string) (string, error) {
 		fmt.Fprintf(&b, "description: %s\n", m.description)
 		b.WriteString("tools: Read, Grep, Glob, Bash\n")
 		b.WriteString("model: sonnet\n")
-		fmt.Fprintf(&b, "effort: %s\n", reviewEffort)
+		fmt.Fprintf(&b, "effort: %s\n", m.effort)
 		b.WriteString("---\n\n")
 		b.WriteString(m.body)
 		return b.String(), nil
