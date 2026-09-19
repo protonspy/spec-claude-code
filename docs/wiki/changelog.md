@@ -13,7 +13,9 @@ change rather than left pointing at the old slug.
   Windows dev container, one graph per scoped tree), [[managed-files]] (`CarryOver`),
   [[artifact-addressing]] (the reading surface, BM25 over regions, the seal) and
   [[spec-or-plan]] (the spec's delivery record); added [[note-log]] and [[release]],
-  and `docs/codewiki/packages.md` and the first two ADRs.
+  and `docs/codewiki/packages.md` and the first two ADRs. Review follow-up: named
+  Headroom's foreign RTK block in [[managed-files]], and corrected four codewiki
+  citations to the lines that actually evidence them.
 - 2026-09-15 — first pass, reconstructed from `CLAUDE.md`, `.claude/rules/`, `design/`
   and the tree itself: added [[context-budget]], [[scoped-rules]],
   [[artifact-addressing]], [[spec-or-plan]], [[harness-profile]], [[managed-files]],

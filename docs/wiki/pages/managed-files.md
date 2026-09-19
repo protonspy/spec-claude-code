@@ -57,6 +57,14 @@ That choice cuts both ways, deliberately:
   entry file and the block is `scc`'s account of `scc graph`. Namespacing leaves a
   future CodeGraph release free to add its own.
 
+**A block somebody else wrote for the same job is reported, never touched.**
+Headroom namespaces its copy of the RTK guidance as `headroom:rtk-instructions`,
+which is not a substring of RTK's own pair — so a workspace wired by both ends up
+carrying the instructions twice. `rtk.ForeignBlock` detects exactly that, names
+Headroom in the report, and gives `headroom unwrap <agent>` as the fix. It is
+reported rather than removed because the block belongs to Headroom: `scc` removing
+it would be authoring somebody else's file to undo somebody else's registration.
+
 The same reasoning governs `settings.json`, which is spliced rather than authored:
 `scc`'s entries are identified by their command, replaced in place, and every other
 entry, event and unknown key survives. **A file `scc` cannot parse is one `scc` will

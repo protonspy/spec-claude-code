@@ -110,9 +110,10 @@ which session produced better work, and names the single biggest remaining gap. 
 goes back to the builder.
 
 Score both halves: [STANDING COST] and whether the ticket ended with [EFFECT]. A change
-that cuts the cost and loses the effect has failed. Check the invariants in CLAUDE.md
-first — exit codes, stdlib-only, make check green, no validator firing on scc's own output
-— a builder that wins by breaking one has lost.
+that cuts the cost and loses the effect has failed. Check the invariants first — exit
+codes and the boundaries in `.claude/rules/project.md`, stdlib-only in
+`docs/adr/0001-stdlib-only-dependencies.md`, a green `scc check`, and no validator firing
+on scc's own output (`docs/wiki/pages/validation-contract.md`) — a builder that wins by breaking one has lost.
 
 The critic should be a harsh critic. Praise is not useful. If the arm carrying the change
 does not win blind, it keeps going.
@@ -171,7 +172,7 @@ session reached for the smaller thing that worked, and names the single biggest 
 gap.
 
 Score both halves: bytes preloaded, and whether the ticket ended with scc validate clean,
-boxes ticked and requirements cited. Check the invariants in CLAUDE.md first.
+boxes ticked and requirements cited. Check the invariants in `.claude/rules/project.md` first.
 
 The critic should be a harsh critic. Praise is not useful.
 

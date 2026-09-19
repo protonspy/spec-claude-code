@@ -91,12 +91,18 @@ readily as from the user, so the check belongs here rather than in a handler.
 One schedule implementation is shared by `--next`, `--ready` and `--blocked`. Two
 notions of eligibility would be two answers to *what do I work on*.
 
-[internal/ears/ears.go:102-120]() · [internal/mdscan/mdscan.go:1-20]()
+[internal/ears/ears.go:102-120]()
 
-`mdscan` is the only Markdown parser, and its `Body` — comments and fences stripped —
-is what every validator applies its grammar to. That is also what lets the templates
-carry their instructions in HTML comments without tripping the validators they ship
-with.
+`internal/ears` owns the EARS grammar the requirement validator reports against, the
+way `internal/artifact` owns the task grammar — the checker consumes a grammar it
+does not define.
+
+[internal/mdscan/mdscan.go:215-240]()
+
+`mdscan` is the only Markdown parser, and `stripComments` is why: the body every
+validator applies its grammar to has HTML comments and fences taken out, which is
+what lets the templates carry their instructions inline without tripping the
+validators they ship with.
 
 ## The record, and the one thing in it that is an input
 
@@ -152,19 +158,26 @@ the agent has usually written code and not yet committed it.
 
 ## Hooks are events, not scripts
 
-[internal/hooks/harness.go:42-60]()
+[internal/hooks/harness.go:42-60]() · [internal/hooks/harness.go:127-140]()
 
-The scripts and settings entries are one line and call back into
-`scc hooks run <stage>`, so every decision is Go — tested, and upgraded with the
-binary rather than by rewriting a file in somebody's `.git`.
+Three events, and `command` is the whole of what each entry runs: one line calling
+back into `scc hooks run <stage>`. Every decision is Go — tested, and upgraded with
+the binary rather than by rewriting a file in somebody's `.git` or settings.
 
 ## Testing conventions
 
-[internal/cli/cli_test.go:1-40]()
+[internal/cli/cli_test.go:14-40]()
 
 `capture(t, f)` swaps `os.Stdout`/`os.Stderr` for pipes and drains both concurrently,
 so a command that outruns the pipe buffer fails the test instead of deadlocking — the
-only safe way to assert on output, since `render` writes to the real files. Compare
-resolved paths with `os.SameFile` rather than string equality: `t.TempDir()` can sit
-under a symlink and Windows reports 8.3 short names. A test may not assert on the
-*spelling* of a `--json` document; `decode` unmarshals it.
+only safe way to assert on output, since `render` writes to the real files.
+
+[internal/cli/cli_test.go:86-100]()
+
+A test may not assert on the *spelling* of a `--json` document, because that is an
+assertion about the reader rather than about the command: `decode` unmarshals it.
+
+[internal/workspace/workspace_test.go:285-295]()
+
+Resolved paths are compared with `os.SameFile` rather than string equality —
+`t.TempDir()` can sit under a symlink and Windows reports 8.3 short names.

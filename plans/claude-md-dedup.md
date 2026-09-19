@@ -44,7 +44,11 @@ out, and `scc validate` is clean.
   _Depends 1.1_
 - [x] 2.2 (Unit) Write `docs/codewiki/packages.md` — the package map from `## Architecture`, every section citing the lines it explains
   _Depends 2.1_
-- [x] 2.3 (Unit) Write the ADRs for the decisions that are hard to reverse and cite no page — stdlib-only, one manifest and no config file, the exit-code contract, sharing RTK's markers, the sandbox on by default, and what was narrowed out of `csdd`
+- [x] 2.3 (Unit) Write ADRs for the decisions that are hard to reverse *and* that no
+      wiki page already records with its rationale — which is two, stdlib-only and the
+      narrowing from csdd; the rest (the markers, the sandbox default, the exit-code
+      contract) resolve to a page already, and a second copy is the duplication this
+      work removes
   _Depends 2.2_
 - [x] 3.1 (Unit) Replace `CLAUDE.md` with the rendered entry template plus the RTK and CodeGraph blocks
   _Depends 2.3_

@@ -415,7 +415,7 @@ func TestReviewAgentsCarryTheHeaderTheirHarnessParses(t *testing.T) {
 				for _, want := range []string{
 					"name = \"" + name + "\"\n",
 					"description = \"",
-					"model_reasoning_effort = \"medium\"\n",
+					"model_reasoning_effort = \"",
 					"developer_instructions = '''\n",
 				} {
 					if !strings.Contains(out, want) {
@@ -437,24 +437,43 @@ func TestReviewAgentsCarryTheHeaderTheirHarnessParses(t *testing.T) {
 	}
 }
 
-// The reasoning budget is pinned wherever the harness expresses one, because
-// review is chains-of-inference work and that is what effort buys. The model tier
-// is pinned only where the harness has a stable alias for one: a hardcoded
-// provider-prefixed model would name something the user may not have configured.
+// The reasoning budget is pinned per agent wherever the harness expresses one,
+// because review is chains-of-inference work and that is what effort buys — and
+// the two reviewers do not need the same amount of it. The code reviewer's job is
+// the closest thing here to checklist-shaped; the security reviewer is asked for a
+// traced path with no checklist to fall back on. The model tier is pinned only
+// where the harness has a stable alias for one: a hardcoded provider-prefixed model
+// would name something the user may not have configured.
 func TestReviewAgentsPinTheirEffort(t *testing.T) {
-	want := map[string][]string{
-		paths.Claude.ID:   {"\nmodel: sonnet\n", "\neffort: medium\n"},
-		paths.Codex.ID:    {"model_reasoning_effort = \"medium\"\n"},
-		paths.OpenCode.ID: {"\nmode: subagent\n", "\n  edit: deny\n"},
+	effort := map[string]string{
+		"scc-code-review":     "medium",
+		"scc-security-review": "high",
 	}
 	for _, h := range paths.Harnesses() {
 		for _, name := range ReviewAgents {
+			// A reviewer this table has never heard of is the failure worth catching:
+			// the renderer refuses a template with no effort, so the way a new agent
+			// gets one by accident is somebody copying a template and this test not
+			// noticing which budget it inherited.
+			e, ok := effort[name]
+			if !ok {
+				t.Fatalf("%s: no effort recorded for it here; decide one rather than letting it inherit", name)
+			}
+			var want []string
+			switch h.ID {
+			case paths.Claude.ID:
+				want = []string{"\nmodel: sonnet\n", "\neffort: " + e + "\n"}
+			case paths.Codex.ID:
+				want = []string{"model_reasoning_effort = \"" + e + "\"\n"}
+			default:
+				want = []string{"\nmode: subagent\n", "\n  edit: deny\n"}
+			}
 			f := findFile(t, h, h.Dir+"/"+h.AgentsSeg+"/"+name+h.AgentExt())
 			out, err := Render(h, f)
 			if err != nil {
 				t.Fatalf("%s %s: %v", h.ID, name, err)
 			}
-			for _, w := range want[h.ID] {
+			for _, w := range want {
 				if !strings.Contains(out, w) {
 					t.Errorf("%s %s: missing %q", h.ID, name, strings.TrimSpace(w))
 				}
@@ -1075,7 +1094,7 @@ func (e errNoSuchRule) Error() string {
 // uses wherever a change is cheap to make and expensive to make by accident.
 func TestTheTemplateVersionMovesWithTheTemplates(t *testing.T) {
 	// Bump Version, then replace this with the digest the failure prints.
-	const fingerprint = "a5612f4b643d1fe01dd406ff1194d1c7a51735f74e09b9d1eca6a23572a14218"
+	const fingerprint = "794099bc0da9eac98407c16a4700f022284bd4c851a07a8bc2f9972c5378221a"
 
 	sum := sha256.New()
 	// Version goes into the hash, and without it this test does not do the job its
