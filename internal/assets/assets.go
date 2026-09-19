@@ -283,7 +283,7 @@ import (
 // `/home/node/.claude` is created and chowned in the image: without it the first
 // write of every session was `EACCES ... mkdir '/home/node/.claude/session-env'` and
 // the login it could not store read back as "not logged in".
-const Version = "35"
+const Version = "36"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -877,7 +877,13 @@ func splitMeta(name, raw string) (meta, error) {
 // (Claude Code's "sonnet"), because a pinned `gpt-5.6` or `anthropic/claude-x`
 // would be a guess about a name that churns and a provider the user may not have
 // configured.
-const reviewEffort = "high"
+//
+// It is medium rather than the maximum because the budget is paid twice on every
+// pull request by design: delivery.md dispatches both reviewers on every diff, not
+// on the ones that look risky, and a gate expensive enough to skip is a gate that
+// gets skipped — taking the other one with it. Medium is the point where the
+// inference work still happens and the recurrence stays proportionate.
+const reviewEffort = "medium"
 
 func renderAgent(h paths.Harness, f File, raw string) (string, error) {
 	m, err := splitMeta(f.Name, raw)

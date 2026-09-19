@@ -415,7 +415,7 @@ func TestReviewAgentsCarryTheHeaderTheirHarnessParses(t *testing.T) {
 				for _, want := range []string{
 					"name = \"" + name + "\"\n",
 					"description = \"",
-					"model_reasoning_effort = \"high\"\n",
+					"model_reasoning_effort = \"medium\"\n",
 					"developer_instructions = '''\n",
 				} {
 					if !strings.Contains(out, want) {
@@ -443,8 +443,8 @@ func TestReviewAgentsCarryTheHeaderTheirHarnessParses(t *testing.T) {
 // provider-prefixed model would name something the user may not have configured.
 func TestReviewAgentsPinTheirEffort(t *testing.T) {
 	want := map[string][]string{
-		paths.Claude.ID:   {"\nmodel: sonnet\n", "\neffort: high\n"},
-		paths.Codex.ID:    {"model_reasoning_effort = \"high\"\n"},
+		paths.Claude.ID:   {"\nmodel: sonnet\n", "\neffort: medium\n"},
+		paths.Codex.ID:    {"model_reasoning_effort = \"medium\"\n"},
 		paths.OpenCode.ID: {"\nmode: subagent\n", "\n  edit: deny\n"},
 	}
 	for _, h := range paths.Harnesses() {
@@ -1075,7 +1075,7 @@ func (e errNoSuchRule) Error() string {
 // uses wherever a change is cheap to make and expensive to make by accident.
 func TestTheTemplateVersionMovesWithTheTemplates(t *testing.T) {
 	// Bump Version, then replace this with the digest the failure prints.
-	const fingerprint = "ca004345d7bd327f81c7361b2ceca205d8e2e1609e4b527118b1e1a7e9c65a05"
+	const fingerprint = "a5612f4b643d1fe01dd406ff1194d1c7a51735f74e09b9d1eca6a23572a14218"
 
 	sum := sha256.New()
 	// Version goes into the hash, and without it this test does not do the job its
