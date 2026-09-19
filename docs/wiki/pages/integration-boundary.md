@@ -88,6 +88,72 @@ underneath it; and `scc` is mapped as the real binary behind the npm shim, becau
 `os.Executable()` is the Go binary and mapping it at the name `PATH` knows takes
 node out of the picture.
 
+## Windows has no jail, so it has a container
+
+The sandbox stands on Linux namespaces and Apple's sandbox interface, and ai-jail has
+neither backend on Windows. There `internal/devcontainer` takes over: `devcontainer
+up` and then `devcontainer exec`, so the agent runs inside the container without an
+editor in the loop — which is the whole reason the Dev Containers **CLI** is the
+integration rather than the VS Code flow.
+
+**The two boundaries are not equals, and the run that gets the lesser one says so.**
+ai-jail hides `~/.ssh`, `~/.aws` and `~/.gnupg` outright and keeps no escape hatch; a
+container isolates at the Docker boundary, and Anthropic's own guidance warns that
+under `--dangerously-skip-permissions` it does not prevent a malicious project from
+exfiltrating anything reachable inside the container, credentials included. So
+`containerReport.Weaker` is written down for machines, the human line names WSL2, and
+WSL2 stays the better Windows answer rather than a workaround: `scc` inside WSL2 is
+`scc` on Linux.
+
+**Credentials are forwarded, never mounted.** `~/.claude` is a named volume plus
+`CLAUDE_CONFIG_DIR` — the token lives under `~/.claude` but `.claude.json` sits
+outside it, so the volume alone signs you out on rebuild — `.gitconfig` is bound
+read-only because identity is not a secret, and git and `gh` authenticate from
+`GH_TOKEN`/`GITHUB_TOKEN` forwarded out of the launching shell. Binding `~/.ssh`
+would make push work in one line and hand a compromised dependency the signing keys,
+which is the exact thing the container exists to keep away from them.
+`TestInitSeedsTheDevContainer` asserts that mount is absent, so the test matches the
+mount rather than the prose explaining it.
+
+The image carries the agent's own toolchain — the harness, `scc`, `codegraph`, `rtk` —
+for the same reason the jail maps those three back in. `.devcontainer/` itself is a
+**seed** on the terms the `docs/` anchors are: written once when absent, recorded in
+no manifest, never updated, because a Dockerfile belongs to whoever has to debug it at
+three in the morning. It is seeded on every platform even though only Windows launches
+through it, because the files are committed and a team is not one platform.
+
+## One graph per tree, not one graph filtered
+
+`scc graph scope set backend/src frontend/src` narrows what gets indexed, and the
+distinction in that heading is the whole feature. It is not a design preference: it is
+measured against CodeGraph 1.5.0, whose `init` takes a single optional `[path]` and
+refuses two, whose commands carry no include or exclude flag, and whose only exclusion
+is `.gitignore` — git's file about git, not an index scope.
+
+So a recorded scope means *two graphs*, one `.codegraph/` inside each directory, and
+`build`, `sync`, `status`, `query` and `explore` all answering once per root. That is
+said out loud wherever a user meets it, because "scoped to two trees" and "there are
+two graphs" are the same fact and only the second explains why `status` answers twice.
+An empty scope — the default — is one graph at the root, exactly as before; the scope
+earns its cost on a monorepo whose vendored trees are re-walked on every sync, and
+costs more than it buys on a repository that is one tree.
+
+**The patterns are normalized rather than taken literally**, because what people write
+is `backend/src/*` and what they mean is the directory. A trailing `/*` or `/**` is
+stripped, an interior glob is expanded to the directories it matches with files
+dropped, and anything escaping the workspace is refused — a manifest arrives with a
+clone, and `..` there would mean writing a `.codegraph/` outside the repository. A
+pattern matching nothing is named and skipped; *every* pattern matching nothing stops
+the run, because falling back to the whole workspace is the opposite of what the scope
+asked for.
+
+The fan-out touches no argument vector: every CodeGraph command discovers its project
+from the working directory, so scoping is `cmd.Dir` per root and the builders never
+learn it exists. The one place it shows is `--json` over several roots, where N
+documents concatenated are not a document — `graphFanJSON` emits an array of
+`{path, output}` and passes each root's output through as `json.RawMessage`, since
+nesting a document is not reading one.
+
 ## Only npm, and only sometimes
 
 CodeGraph's headline install pipes a remote script into a shell. That is a fine

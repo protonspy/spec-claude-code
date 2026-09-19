@@ -20,6 +20,13 @@ four commands; the bar for a further key is that something inside the binary rea
 it, and that bar is deliberately high. A `scc.json` read by nothing would be dead
 weight, and a key nothing reads is the same dead weight with a shorter path.
 
+That input has a failure mode worth naming, because it is silent. `scc init` and
+`scc update` both build the next manifest **from scratch**, so without
+`Manifest.CarryOver` a re-run of `init` deleted the gate's four commands — and had
+already been deleting the unknown fields `UnmarshalJSON` goes to the trouble of
+preserving. `Manifest.commands` is the one table read, carry-over and write all
+share, so a fifth key cannot be preserved on read and dropped on a re-scaffold.
+
 ## Four categories, four lifecycles
 
 | Kind | Rendered from | Tracked | Updated |

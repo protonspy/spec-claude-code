@@ -35,6 +35,24 @@ different act with a different consequence.
 person to open the manifest sees the four questions this project has to answer
 rather than a file that says nothing about them.
 
+Empty costs nothing in meaning — `""` and absent both read as *nobody has decided*,
+and the state that needed telling apart is the word `skipped`. The floor is
+deliberately left out: it has a working default, and writing it into the base would
+pin every workspace to today's number while looking configured.
+
+The four keys are **grouped** into one object rather than sitting flat beside the
+file hashes, and that was measured rather than chosen: this file sorts its keys, and
+flat, `build` landed on line 2 with its three siblings on line 170 — on the far side
+of every content hash in the workspace, which is precisely not the glance the shape
+exists for. The flat keys an earlier version wrote are still read and migrated on the
+next write.
+
+Within a gate the findings stay distinct — `check.not-configured`, `check.failed`,
+`check.timed-out`, `tests.no-report`, `tests.none`, `tests.below-floor` — because they
+are different things to go and do. **`scc` cannot derive the commands**: they depend
+on a toolchain it never sees, so `check.not-configured` names both ways out, the
+command that records a gate and the one that declines it.
+
 ## The test gate asks for one thing more
 
 It prints a JSON object on stdout:
