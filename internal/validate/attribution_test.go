@@ -93,6 +93,27 @@ func TestAttributionIgnoresWhatIsAlreadyOnTheBase(t *testing.T) {
 	}
 }
 
+// A local main nobody pulled is the common shape once pull requests merge on the
+// forge. A signed commit that already reached origin/main through somebody else's
+// merge is not this branch's to fix, and blocking the push over it blocks every
+// branch cut from the remote until the local copy is pulled.
+func TestAttributionIgnoresWhatIsAlreadyOnTheRemoteBase(t *testing.T) {
+	root := repo(t)
+	remote := t.TempDir()
+	gitIn(t, remote, "init", "--bare", "--initial-branch=main")
+	gitIn(t, root, "remote", "add", "origin", remote)
+	gitIn(t, root, "push", "-u", "origin", "main")
+	commit(t, root, signed)
+	gitIn(t, root, "push", "origin", "main")
+	gitIn(t, root, "switch", "-c", "fix/thing")
+	gitIn(t, root, "branch", "-f", "main", "HEAD~1")
+	commit(t, root, "fix: something clean")
+
+	if got := runValidator(t, Attribution, root); len(got) != 0 {
+		t.Errorf("findings from a commit already on origin/main: %v", got)
+	}
+}
+
 // Standing on the base with no remote leaves nothing to compare against, which is
 // silence rather than a failure — and the common shape of a fresh local repo.
 func TestAttributionIsSilentOnTheBaseWithNoRemote(t *testing.T) {

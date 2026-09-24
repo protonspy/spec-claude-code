@@ -372,6 +372,12 @@ const (
 // history, and a caller that reported on it would report the same thing on every
 // branch in the repository forever.
 //
+// "On base" means on either copy of it. A local `main` nobody has pulled in weeks
+// is the ordinary shape of a repository whose pull requests merge on the forge,
+// and a branch cut from `origin/main` would otherwise claim every commit the local
+// copy has not caught up with — somebody else's merged work, reported as this
+// branch's, on every push.
+//
 // Absence is a normal answer here as it is everywhere else in this package: no
 // git, no repository, an unborn HEAD, a shallow clone with no base ref, or a
 // branch that is exactly its base all return no commits and no error. A caller
@@ -384,12 +390,13 @@ func Commits(dir, base string) ([]Commit, error) {
 	if base == "" {
 		base = Base(dir)
 	}
-	against := compareRef(dir, base)
-	if against == "" {
+	against := baseRefs(dir, base)
+	if len(against) == 0 {
 		return nil, nil
 	}
 	format := strings.Join([]string{"%H", "%h", "%s", "%B"}, fieldSep) + recordSep
-	out, err := run(Bin, dir, "log", "--no-merges", "--format="+format, against+"..HEAD")
+	args := append([]string{"log", "--no-merges", "--format=" + format, "HEAD", "--not"}, against...)
+	out, err := run(Bin, dir, args...)
 	if err != nil {
 		// An unborn HEAD, a range git cannot resolve, a repository mid-rebase.
 		// Nothing to report, and nothing worth failing a validation run over.
@@ -398,24 +405,51 @@ func Commits(dir, base string) ([]Commit, error) {
 	return parseLog(out), nil
 }
 
-// compareRef is what "not on base" is measured against, or "" when no ref can
-// answer.
+// baseRefs is every ref "not on base" is measured against, or none when no ref
+// can answer: the local base and the remote's copy, whichever of them exist.
 //
 // Standing on the base branch is the case worth spelling out: refs/heads/main
 // compared against itself is empty, so a check run there would silently pass on
 // every commit in the repository. The remote's copy is the honest comparison —
 // what is here and not yet pushed — and a base branch with no remote at all
 // leaves genuinely nothing to compare against.
-func compareRef(dir, base string) string {
+func baseRefs(dir, base string) []string {
+	remote := "refs/remotes/origin/" + base
 	branch, err := CurrentBranch(dir)
 	if err == nil && branch == base {
-		remote := "refs/remotes/origin/" + base
 		if verify(dir, remote) {
-			return remote
+			return []string{remote}
 		}
-		return ""
+		return nil
 	}
-	return ref(dir, base)
+	var refs []string
+	for _, r := range []string{"refs/heads/" + base, remote} {
+		if verify(dir, r) {
+			refs = append(refs, r)
+		}
+	}
+	return refs
+}
+
+// compareRef is the one ref a diff is taken against, or "" when no ref can
+// answer: the fresher copy of the base, which is the remote's whenever the local
+// branch is merely behind it. A diff cannot exclude two refs the way a log can,
+// so a local base that has diverged from its remote keeps the local answer.
+func compareRef(dir, base string) string {
+	refs := baseRefs(dir, base)
+	switch {
+	case len(refs) == 0:
+		return ""
+	case len(refs) == 2 && isAncestor(dir, refs[0], refs[1]):
+		return refs[1]
+	}
+	return refs[0]
+}
+
+// isAncestor reports whether ancestor is reachable from descendant.
+func isAncestor(dir, ancestor, descendant string) bool {
+	_, err := run(Bin, dir, "merge-base", "--is-ancestor", ancestor, descendant)
+	return err == nil
 }
 
 // verify reports whether a ref resolves.
