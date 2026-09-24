@@ -272,6 +272,49 @@ func TestCommitsOnTheBaseBranchCompareAgainstTheRemote(t *testing.T) {
 	}
 }
 
+// staleBase builds the shape a forge-merged workflow leaves behind: origin/main
+// carries a commit the local main never pulled, and feat/x is cut from
+// origin/main with one commit of its own on top.
+func staleBase(t *testing.T) string {
+	t.Helper()
+	remote := t.TempDir()
+	dir := repo(t)
+	git(t, remote, "init", "--bare", "-b", DefaultBase)
+	commit(t, dir, "a.txt", "one\n", "feat: one")
+	git(t, dir, "remote", "add", "origin", remote)
+	git(t, dir, "push", "-u", "origin", DefaultBase)
+	commit(t, dir, "merged.txt", "theirs\n", "feat: merged on the forge")
+	git(t, dir, "push", "origin", DefaultBase)
+	git(t, dir, "switch", "-c", "feat/x")
+	git(t, dir, "branch", "-f", DefaultBase, "HEAD~1")
+	commit(t, dir, "mine.txt", "mine\n", "feat: mine")
+	return dir
+}
+
+// A local base behind its remote is not this branch's work: a commit already on
+// origin/main is somebody else's history, whatever the local copy says.
+func TestCommitsIgnoreWhatOnlyTheRemoteBaseHas(t *testing.T) {
+	dir := staleBase(t)
+	got, err := Commits(dir, DefaultBase)
+	if err != nil {
+		t.Fatalf("Commits: %v", err)
+	}
+	if len(got) != 1 || got[0].Subject != "feat: mine" {
+		t.Errorf("commits = %+v, want only the one this branch added", got)
+	}
+}
+
+func TestChangedDiffsAgainstTheFresherBase(t *testing.T) {
+	dir := staleBase(t)
+	got, err := Changed(dir, DefaultBase)
+	if err != nil {
+		t.Fatalf("Changed: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "mine.txt" {
+		t.Errorf("changes = %+v, want only mine.txt", got)
+	}
+}
+
 func TestDirtyAndCommentChar(t *testing.T) {
 	dir := repo(t)
 	commit(t, dir, "a.txt", "one\n", "feat: one")
