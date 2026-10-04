@@ -200,6 +200,40 @@ func TestTestRunReportsAndPasses(t *testing.T) {
 	}
 }
 
+// --timeout takes minutes above zero; anything else is a usage error rather than
+// a gate with no bound.
+func TestCheckTimeoutTakesPositiveMinutes(t *testing.T) {
+	root := initWorkspace(t)
+	skipRest(t, root, "test")
+	setTest(t, root, echoJSON(412, "88.4"))
+
+	if _, stderr, code := run(t, "check", "--root", root, "--timeout", "300"); code != ExitOK {
+		t.Fatalf("--timeout 300: exit = %d, want %d (stderr: %s)", code, ExitOK, stderr)
+	}
+	// The last wraps when multiplied into a time.Duration.
+	for _, bad := range []string{"0", "-5", "ten", "9223372036854775807"} {
+		if _, _, code := run(t, "check", "--root", root, "--timeout", bad); code != ExitError {
+			t.Errorf("--timeout %s: exit = %d, want %d", bad, code, ExitError)
+		}
+	}
+}
+
+// --timeout on validate bounds the gates, so it asks for them: a flag accepted and
+// then ignored is how somebody believes they set it.
+func TestValidateTimeoutRunsTheGates(t *testing.T) {
+	root := initWorkspace(t)
+	skipRest(t, root, "test")
+	marker := filepath.Join(root, "ran.txt")
+	setTest(t, root, "echo ran > "+filepath.ToSlash(marker))
+
+	if _, stderr, code := run(t, "validate", "--root", root, "--timeout", "45"); code != ExitFindings {
+		t.Fatalf("validate --timeout: exit = %d, want %d (stderr: %s)", code, ExitFindings, stderr)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("--timeout did not run the gates: %v", err)
+	}
+}
+
 // Under the floor is exit 2 — a finding, not a crash. CI and an agent both branch
 // on that code, and collapsing it into 1 would make "the coverage is low"
 // indistinguishable from "scc could not run".

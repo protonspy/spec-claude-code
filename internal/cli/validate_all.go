@@ -31,10 +31,22 @@ func runValidateAll(args []string) int {
 	// delivery gate, so the pre-push hook passes it — the moment a branch becomes a
 	// pull request — and a bare pre-commit run never waits on a build.
 	withChecks := fs.Bool("checks", false, "also run this workspace's build, format, lint and test commands")
+	timeout := addTimeout(fs)
 	jsonOut := addJSON(fs)
 	rest, err := parseFlags(fs, helpWord(args))
 	if err != nil {
 		return exitFor(err)
+	}
+	// --timeout bounds the gates, so it is itself a request for them: accepting it
+	// and then running nothing it could bound is how somebody believes they set it.
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "timeout" {
+			*withChecks = true
+		}
+	})
+	limit, ok := gateLimit(*timeout)
+	if !ok {
+		return ExitError
 	}
 	if !noPositionals(rest, "validate") {
 		return ExitError
@@ -49,7 +61,7 @@ func runValidateAll(args []string) int {
 		opts = append(opts, validate.WithPR())
 	}
 	if *withChecks {
-		opts = append(opts, validate.WithChecks())
+		opts = append(opts, validate.WithChecks(), validate.WithTimeout(limit))
 	}
 	set, results, err := validate.Everything(target, opts...)
 	if err != nil {

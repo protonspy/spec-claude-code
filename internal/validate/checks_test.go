@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/gate"
@@ -39,9 +40,10 @@ func TestCheckFindingsTellsTheFailuresApart(t *testing.T) {
 	}{
 		{
 			name: "timed out",
-			res:  gate.Result{Kind: gate.Test, Command: "go test ./...", TimedOut: true},
+			res:  gate.Result{Kind: gate.Test, Command: "go test ./...", TimedOut: true, Limit: 45 * time.Minute},
 			rule: "check.timed-out",
-			says: []string{"go test ./...", "still running"},
+			// The limit it was held to, since --timeout can move it.
+			says: []string{"go test ./...", "still running", "45m0s"},
 		},
 		{
 			name: "failed",

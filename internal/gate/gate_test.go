@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The report is the whole interface between scc and a project's tests, so what
@@ -81,6 +82,40 @@ func TestFloorDefaults(t *testing.T) {
 	// by recording a number that happens to be zero.
 	if got := (Config{MinCoverage: 0}).Floor(); got != DefaultMinCoverage {
 		t.Errorf("floor = %v, want the default for an unset value", got)
+	}
+}
+
+// The bound is the default until a run asks for another, and zero is "unset" for
+// the same reason the floor's is: a run cannot turn the bound off by passing zero.
+func TestLimitDefaults(t *testing.T) {
+	if got := (Config{}).Limit(); got != DefaultTimeout {
+		t.Errorf("limit = %v, want the default %v", got, DefaultTimeout)
+	}
+	if DefaultTimeout != 30*time.Minute {
+		t.Errorf("DefaultTimeout = %v, want 30m", DefaultTimeout)
+	}
+	if got := (Config{Timeout: 5 * time.Minute}).Limit(); got != 5*time.Minute {
+		t.Errorf("limit = %v, want the requested 5m", got)
+	}
+}
+
+// A command still running at the limit is stopped and reported as such, with the
+// limit it was held to, rather than hanging the push that ran it.
+func TestRunStopsAtTheLimit(t *testing.T) {
+	sleep := "sleep 3"
+	if runtime.GOOS == "windows" {
+		sleep = "ping -n 4 127.0.0.1 >nul"
+	}
+	cfg := Config{Commands: map[Kind]string{Build: sleep}, Timeout: 200 * time.Millisecond}
+	res, err := Run(t.TempDir(), Build, cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.TimedOut || res.Passed() {
+		t.Errorf("result = %+v, want a timed-out failure", res)
+	}
+	if res.Limit != 200*time.Millisecond {
+		t.Errorf("limit = %v, want the configured 200ms", res.Limit)
 	}
 }
 

@@ -123,10 +123,10 @@ const Skipped = "skipped"
 // where a weakened gate should have to be argued for.
 const DefaultMinCoverage = 86.0
 
-// Timeout bounds one run. A suite or a linter that hangs would otherwise hang the
-// push that called it, and a gate that hangs is a gate somebody removes rather
-// than debugs.
-const Timeout = 10 * time.Minute
+// DefaultTimeout bounds one run unless the caller asks for another. A suite or a
+// linter that hangs would otherwise hang the push that called it, and a gate that
+// hangs is a gate somebody removes rather than debugs.
+const DefaultTimeout = 30 * time.Minute
 
 // Config is what a workspace recorded about its own commands.
 type Config struct {
@@ -137,6 +137,10 @@ type Config struct {
 	// DefaultMinCoverage — the manifest key is absent in every workspace written
 	// before this existed, and an absent floor has to mean the default.
 	MinCoverage float64 `json:"min_coverage,omitempty"`
+	// Timeout bounds each gate of this run; zero means DefaultTimeout. Never
+	// written to the manifest: a suite that needs longer today is a flag on the
+	// command, not a change to a committed file.
+	Timeout time.Duration `json:"-"`
 }
 
 // Command is what this gate runs, or "" when nothing is recorded.
@@ -172,6 +176,14 @@ func (c Config) Floor() float64 {
 		return DefaultMinCoverage
 	}
 	return c.MinCoverage
+}
+
+// Limit is how long one gate may run before it is stopped.
+func (c Config) Limit() time.Duration {
+	if c.Timeout <= 0 {
+		return DefaultTimeout
+	}
+	return c.Timeout
 }
 
 // Load reads the recorded commands out of this workspace's manifests.
@@ -293,8 +305,10 @@ type Result struct {
 	// fails. The whole output would put a build log into a JSON document and into
 	// a session's context, which is what the report exists to avoid.
 	Tail string `json:"tail,omitempty"`
-	// TimedOut says the command was killed at Timeout rather than finishing.
+	// TimedOut says the command was killed at Limit rather than finishing.
 	TimedOut bool `json:"timed_out,omitempty"`
+	// Limit is how long the command was allowed, so a timeout can say after what.
+	Limit time.Duration `json:"-"`
 }
 
 // Passed reports whether this run clears every bar that applies to its gate: the
@@ -321,7 +335,7 @@ func (r Result) Passed() bool {
 // that ran and failed is a Result, not an error: it is an answer to the question,
 // and the caller turns answers into findings.
 func Run(root string, k Kind, cfg Config, out io.Writer) (Result, error) {
-	res := Result{Kind: k, Command: cfg.Command(k)}
+	res := Result{Kind: k, Command: cfg.Command(k), Limit: cfg.Limit()}
 	if k == Test {
 		res.Floor = cfg.Floor()
 	}
@@ -329,7 +343,7 @@ func Run(root string, k Kind, cfg Config, out io.Writer) (Result, error) {
 		return res, fmt.Errorf("no %s command is recorded for this workspace", k)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), res.Limit)
 	defer cancel()
 
 	cmd := command(ctx, res.Command)
