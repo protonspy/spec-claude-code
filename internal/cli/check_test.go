@@ -210,7 +210,8 @@ func TestCheckTimeoutTakesPositiveMinutes(t *testing.T) {
 	if _, stderr, code := run(t, "check", "--root", root, "--timeout", "300"); code != ExitOK {
 		t.Fatalf("--timeout 300: exit = %d, want %d (stderr: %s)", code, ExitOK, stderr)
 	}
-	for _, bad := range []string{"0", "-5", "ten"} {
+	// The last wraps when multiplied into a time.Duration.
+	for _, bad := range []string{"0", "-5", "ten", "9223372036854775807"} {
 		if _, _, code := run(t, "check", "--root", root, "--timeout", bad); code != ExitError {
 			t.Errorf("--timeout %s: exit = %d, want %d", bad, code, ExitError)
 		}

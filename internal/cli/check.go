@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -121,9 +122,11 @@ func addTimeout(fs *flag.FlagSet) *int {
 }
 
 // gateLimit turns --timeout into a duration. Zero or less is refused rather than
-// read as the default: somebody typed a bound, and it was not one.
+// read as the default: somebody typed a bound, and it was not one. So is a number
+// too large to multiply into a time.Duration, which would wrap to a bound nobody
+// asked for.
 func gateLimit(minutes int) (time.Duration, bool) {
-	if minutes <= 0 {
+	if minutes <= 0 || int64(minutes) > math.MaxInt64/int64(time.Minute) {
 		render.Err(fmt.Sprintf("--timeout must be a whole number of minutes above 0, got %d", minutes))
 		return 0, false
 	}
