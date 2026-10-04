@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/gate"
@@ -66,7 +67,8 @@ func checkUsage() {
 	fmt.Fprintf(os.Stderr, `%s check — the project's own commands, as a gate
 
 Usage:
-  %s check [<gate>] [--json]      Run every recorded gate, or one; exit 2 on findings
+  %s check [<gate>] [--json] [--timeout <minutes>]
+                                  Run every recorded gate, or one; exit 2 on findings
   %s check set <gate> "<command>" Record a gate's command (--min <percent> for test)
   %s check skip <gate>            This project has no such step; the gate goes quiet
   %s check show                   Print what this workspace records
@@ -91,6 +93,9 @@ total is how many tests ran and coverage is the percentage — a string like
 coverage says, since a suite that does not exist covers nothing. The floor is
 %s%% unless this workspace records another.
 
+Each gate is stopped after --timeout minutes, %d unless given. A gate that hangs
+would otherwise hang the push that ran it.
+
 A gate nobody has recorded is a finding; one you have skipped is silence. That
 is the difference between a project that has no formatter and a project that
 forgot to say what its formatter is.
@@ -104,7 +109,25 @@ shell. They are committed, so treat them the way you treat a Makefile target:
 something a fresh clone of this repository is expected to run.
 `, prog(), prog(), prog(), prog(), prog(), prog(),
 		gate.Build.What(), gate.Format.What(), gate.Lint.What(), gate.Test.What(),
-		gate.Percent(gate.DefaultMinCoverage), prog(), prog())
+		gate.Percent(gate.DefaultMinCoverage), defaultMinutes(), prog(), prog())
+}
+
+// defaultMinutes is gate.DefaultTimeout in the unit --timeout takes.
+func defaultMinutes() int { return int(gate.DefaultTimeout / time.Minute) }
+
+// addTimeout binds --timeout, in minutes, for every command that runs the gates.
+func addTimeout(fs *flag.FlagSet) *int {
+	return fs.Int("timeout", defaultMinutes(), "minutes each gate may run before it is stopped")
+}
+
+// gateLimit turns --timeout into a duration. Zero or less is refused rather than
+// read as the default: somebody typed a bound, and it was not one.
+func gateLimit(minutes int) (time.Duration, bool) {
+	if minutes <= 0 {
+		render.Err(fmt.Sprintf("--timeout must be a whole number of minutes above 0, got %d", minutes))
+		return 0, false
+	}
+	return time.Duration(minutes) * time.Minute, true
 }
 
 // checkReport is the frozen JSON shape of a run, and the same values the human
@@ -128,9 +151,14 @@ func runCheckRun(args []string) int {
 	fs.SetOutput(os.Stderr)
 	root := addRoot(fs)
 	jsonOut := addJSON(fs)
+	timeout := addTimeout(fs)
 	rest, err := parseFlags(fs, args)
 	if err != nil {
 		return exitFor(err)
+	}
+	limit, ok := gateLimit(*timeout)
+	if !ok {
+		return ExitError
 	}
 	target, ok := resolveRoot(*root)
 	if !ok || !requireWorkspace(target) {
@@ -141,6 +169,7 @@ func runCheckRun(args []string) int {
 		render.Err(fmt.Sprintf("check: %v", err))
 		return ExitError
 	}
+	cfg.Timeout = limit
 
 	// A named gate runs alone; no name runs the pipeline.
 	want := gate.Kinds()

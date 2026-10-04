@@ -3,6 +3,7 @@ package validate
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/gate"
@@ -24,11 +25,15 @@ import (
 // --checks` and the pre-push hook run them, and those are the two moments they
 // are worth their cost: the second is where a branch becomes a pull request,
 // which is where this methodology says the claim is actually made.
-func Checks(root string) (*finding.Set, error) {
+func Checks(root string) (*finding.Set, error) { return checksWithin(root, 0) }
+
+// checksWithin is Checks with each gate bounded by limit; zero is the default.
+func checksWithin(root string, limit time.Duration) (*finding.Set, error) {
 	cfg, err := gate.Load(root)
 	if err != nil {
 		return nil, err
 	}
+	cfg.Timeout = limit
 	set := &finding.Set{}
 	at := rel(root, gate.ManifestPath(root))
 
@@ -91,7 +96,7 @@ func CheckFindings(root string, res gate.Result) *finding.Set {
 	if res.TimedOut {
 		set.Addf(at, 0, "check.timed-out",
 			"the %s gate — `%s` — was still running after %s and was stopped",
-			res.Kind, res.Command, gate.Timeout)
+			res.Kind, res.Command, res.Limit)
 		return set
 	}
 	if res.ExitCode != 0 {

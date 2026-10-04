@@ -2,6 +2,7 @@ package validate
 
 import (
 	"sort"
+	"time"
 
 	"github.com/protonspy/spec-claude-code/internal/finding"
 )
@@ -55,6 +56,7 @@ type Option func(*options)
 type options struct {
 	pr            bool
 	checks        bool
+	timeout       time.Duration
 	noAttribution bool
 }
 
@@ -82,6 +84,10 @@ func WithPR() Option { return func(o *options) { o.pr = true } }
 // request.
 func WithChecks() Option { return func(o *options) { o.checks = true } }
 
+// WithTimeout bounds each gate WithChecks runs by d instead of gate.DefaultTimeout.
+// It adds no check of its own, so it is not a third reason to pay a cost.
+func WithTimeout(d time.Duration) Option { return func(o *options) { o.timeout = d } }
+
 func extra(opts []Option) []Validator {
 	var o options
 	for _, fn := range opts {
@@ -91,7 +97,10 @@ func extra(opts []Option) []Validator {
 	// Checks before pr: they are the slow ones, and a run that is going to fail on
 	// a broken build should say so before it spends a network round trip on the forge.
 	if o.checks {
-		out = append(out, Validator{Name: "checks", Run: Checks})
+		limit := o.timeout
+		out = append(out, Validator{Name: "checks", Run: func(root string) (*finding.Set, error) {
+			return checksWithin(root, limit)
+		}})
 	}
 	if o.pr {
 		out = append(out, Validator{Name: "pr", Run: AttributionPR})
