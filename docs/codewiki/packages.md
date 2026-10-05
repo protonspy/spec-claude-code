@@ -7,7 +7,7 @@ cmd/scc/main.go         os.Exit(cli.Run(os.Args[1:]))
         |
    internal/cli         the whole command surface
         |
-   scaffold · validate · hooks         write / check / gate
+   scaffold · validate · hooks · view  write / check / gate / serve
         |          \
    assets · manifest   ears · mdscan · artifact · notes   templates, hashes, grammars
         |
@@ -155,6 +155,25 @@ per root: the builders never learn that scoping exists.
 workspace safe by construction. `Changed` is the only one that reads content, and it
 compares against the *working* tree rather than `HEAD`, because at the end of a turn
 the agent has usually written code and not yet committed it.
+
+## The viewer is one more reader, not a second parser
+
+[internal/view/page.go:41-69]() · [internal/view/page.go:98-115]()
+
+`scc view` serves the record to a person, which `adr:0002-narrowed-from-csdd`
+ruled out until `adr:0003-local-read-only-viewer` reopened it on three conditions.
+The one visible here: every route reads through `artifact.Load` and
+`artifact.Within`, so the page can never disagree with `scc map` about what a file
+says or where the workspace ends. `resolve` is the single containment check both
+the page and the source route pass through.
+
+[internal/view/view.go:68-100]()
+
+The other two conditions are the middleware: GET and HEAD only, and a `Host`
+header that names loopback by name. A domain that merely resolves to `127.0.0.1`
+is refused on purpose — that is what a DNS-rebinding page does. The React frontend
+is built from `web/` into `internal/view/dist/` and embedded, so none of it is in
+the Go module.
 
 ## Hooks are events, not scripts
 
