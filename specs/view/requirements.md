@@ -2,7 +2,8 @@
 autonomy: auto
 ci: wait
 branch: feat/view
-delivery: in-progress
+delivery: in-review
+pr: 56
 ---
 
 # View — requirements
