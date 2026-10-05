@@ -84,6 +84,8 @@ func Run(args []string) int {
 		return runCheck(args[1:])
 	case "hooks":
 		return runHooks(args[1:])
+	case "view":
+		return runView(args[1:])
 	default:
 		render.Err(fmt.Sprintf("unknown command %q", args[0]))
 		fmt.Fprintf(os.Stderr, "run `%s help` for the available commands\n", prog())
@@ -132,6 +134,7 @@ Commands:
   validate  Run every applicable validator; exit 2 on findings
   check     The delivery gate — build, format, lint, test: run | set | skip | show
   hooks     Git hooks that run the validators — install | check | remove
+  view      Serve docs, plans and specs as a read-only web page on 127.0.0.1
   version   Print the version
   help      Show this help
 
@@ -146,5 +149,6 @@ Exit codes:
   2  validation findings
 
 "%s launch" is the one exception: it returns whatever the agent it started returned.
-`, render.Bold(prog()), prog(), prog(), prog())
+"%s view" runs until interrupted, and an interrupt is a 0.
+`, render.Bold(prog()), prog(), prog(), prog(), prog())
 }

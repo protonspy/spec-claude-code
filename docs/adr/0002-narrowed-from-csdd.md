@@ -39,3 +39,7 @@ When something from `csdd` is wanted here, the *decision* is ported and not the 
   the three platforms. The reversal does not weaken the other three — it is the
   editor-free `devcontainer up` / `devcontainer exec` path, not the VS Code flow, so
   the surface is still arguments in and a process out.
+- **A second item was reversed by its own record.** The embedded web dashboard is
+  now `scc view`, under `adr:0003-local-read-only-viewer`: read-only,
+  loopback-only, and reading through the same parsers as the CLI. The TUI and the
+  MCP server stay decided against.

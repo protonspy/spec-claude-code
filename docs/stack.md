@@ -69,6 +69,27 @@ nobody recorded a reason, this file says so rather than inventing one.
   assembles the publish tree. Cost: a node dependency for people who only wanted a
   Go binary — which is why direct download from the GitHub Release stays supported.
 
+## The view frontend — `web/`
+
+Build machinery outside the Go module, as `npm/` is: its output,
+`internal/view/dist/`, is committed and embedded, so `go build` needs no node. Why a
+React page exists at all is `adr:0003-local-read-only-viewer`. Every version is
+pinned exactly in `web/package.json` and locked in `web/package-lock.json`.
+
+- **React 19 and react-dom** — the page `scc view` serves. Chosen by the user over
+  a build-free alternative; the component model is what keeps three views and a
+  sidebar small.
+- **react-markdown 10 and remark-gfm 4** — render the record's Markdown, tables and
+  task lists included. Chosen over an HTML-emitting renderer because it escapes
+  raw HTML by default, and repository Markdown is untrusted input to the page.
+- **Vite 8 and @vitejs/plugin-react** — the bundler that writes `dist/`; `npm run
+  dev` proxies `/api` to a running `scc view` for hot reload.
+- **TypeScript 7** — typechecks `web/src` as the first half of `npm run build`.
+- **Vitest 5** — runs `web/src/links.test.ts`, the one module with logic worth a
+  test: where every link in a page goes.
+- **Node.js ≥ 22.12** — what Vite 8 and Vitest 5 require; needed only to change
+  `web/`. CI's `web` job uses it to rebuild `dist/` and fail on a diff.
+
 ## Integrated binaries — driven, never vendored
 
 Each is a third-party CLI scc composes a command line for and starts. None is a Go
