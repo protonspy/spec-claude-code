@@ -684,12 +684,13 @@ created yet is the note most worth having.
 
 ## 7 · Agents — review only
 
-Two subagents ship with the workspace, and both of them read rather than write:
+Three subagents ship with the workspace, and all of them read rather than write:
 
 | Agent | Role |
 |---|---|
 | **code-review** | Runs five gates over the diff: the ticked boxes are true, the code matches the tasks, the feature's tests, the lint, and the best practices no linter has an opinion about. |
 | **security-review** | Looks for what the change makes possible, attack-class agnostic: surface, trust boundaries, reachability, deliberate attack. |
+| **plan-review** | Holds a draft plan to `docs/`, the specs and plans already written, and the code, before `scc plan approve` seals it: context, settled decisions, what is already built, the tasks against done-when, direction. Returns findings, questions for the user and `scc patch` amendments. Dispatched by the `scc-prd` and `scc-plan-run` skills, not by delivery — no diff exists yet. |
 
 Splitting review by lens is deliberate: a single reviewer asked for "everything"
 reliably under-weights security, because the correctness findings are easier to
@@ -701,8 +702,8 @@ change is its worst reader — they see what they meant. And a reviewer reads in
 of writes, so running one on a cheaper model costs far less than delegating
 authorship would.
 
-**Both pin `model: sonnet`; the effort is per agent — `scc-code-review` at medium,
-`scc-security-review` at high.** The mid tier is the right trade for
+**All pin `model: sonnet`; the effort is per agent — `scc-code-review` at medium,
+`scc-security-review` and `scc-plan-review` at high.** The mid tier is the right trade for
 work that reads and judges rather than authors, and the reasoning budget is where the
 quality actually comes from here: tracing a value from an argument to a shell, or a
 ticked box to the code behind it, is chains-of-inference work, not knowledge work. A

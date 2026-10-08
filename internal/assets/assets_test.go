@@ -439,14 +439,16 @@ func TestReviewAgentsCarryTheHeaderTheirHarnessParses(t *testing.T) {
 
 // The reasoning budget is pinned per agent wherever the harness expresses one,
 // because review is chains-of-inference work and that is what effort buys — and
-// the two reviewers do not need the same amount of it. The code reviewer's job is
-// the closest thing here to checklist-shaped; the security reviewer is asked for a
-// traced path with no checklist to fall back on. The model tier is pinned only
+// the reviewers do not need the same amount of it. The code reviewer's job is the
+// closest thing here to checklist-shaped; the security reviewer is asked for a
+// traced path, and the plan reviewer for where prose and records disagree, neither
+// with a checklist to fall back on. The model tier is pinned only
 // where the harness has a stable alias for one: a hardcoded provider-prefixed model
 // would name something the user may not have configured.
 func TestReviewAgentsPinTheirEffort(t *testing.T) {
 	effort := map[string]string{
 		"scc-code-review":     "medium",
+		"scc-plan-review":     "high",
 		"scc-security-review": "high",
 	}
 	for _, h := range paths.Harnesses() {
@@ -1094,7 +1096,7 @@ func (e errNoSuchRule) Error() string {
 // uses wherever a change is cheap to make and expensive to make by accident.
 func TestTheTemplateVersionMovesWithTheTemplates(t *testing.T) {
 	// Bump Version, then replace this with the digest the failure prints.
-	const fingerprint = "794099bc0da9eac98407c16a4700f022284bd4c851a07a8bc2f9972c5378221a"
+	const fingerprint = "f3e33303e0db673f7a4535d601a20a942097ae371af67b02150d39ad8e45f3d4"
 
 	sum := sha256.New()
 	// Version goes into the hash, and without it this test does not do the job its
