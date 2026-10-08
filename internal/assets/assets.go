@@ -283,7 +283,12 @@ import (
 // `/home/node/.claude` is created and chowned in the image: without it the first
 // write of every session was `EACCES ... mkdir '/home/node/.claude/session-env'` and
 // the login it could not store read back as "not logged in".
-const Version = "37"
+//
+// 38: `scc-plan-review`, a third read-only agent, reviews a draft plan's substance
+// before `scc plan approve` seals it — the validator checks its shape, and nothing
+// checked it against the ADRs, the stack, the specs already written, or the code. The
+// two skills that approve a plan dispatch it first; no preloaded rule mentions it.
+const Version = "38"
 
 // The embedded tree. "all:" so nothing is silently dropped for having a name the
 // default embed pattern skips.
@@ -573,7 +578,7 @@ const CodeGraphTemplate = "codegraph.md"
 // the other.
 func CodeGraphBlock() (string, error) { return Content(CodeGraphTemplate) }
 
-// ReviewAgents names the two subagents scc ships. Both read and neither writes:
+// ReviewAgents names the three subagents scc ships. All read and none writes:
 // review is where a cold context is worth paying for, and authorship is not.
 //
 // **Prefixed, because the unprefixed names are taken.** Claude Code ships its own
@@ -589,7 +594,11 @@ func CodeGraphBlock() (string, error) { return Content(CodeGraphTemplate) }
 // ticked boxes against the code that was actually written, the standard is the
 // artifact rather than taste, and the verdict comes back in a fixed shape the
 // orchestrator branches on. Codex and opencode have no built-in either.
-var ReviewAgents = []string{"scc-code-review", "scc-security-review"}
+//
+// `scc-plan-review` reviews the other end of the work: a plan before it is sealed,
+// held to `docs/` and the code rather than a diff. It is dispatched by the two
+// skills that approve a plan, not by delivery.md — no diff exists yet to review.
+var ReviewAgents = []string{"scc-code-review", "scc-plan-review", "scc-security-review"}
 
 // KnowledgeSkills names the skills that author a `docs/` artifact a validator
 // checks — one per artifact, so a workspace shipping the eight validators never
@@ -873,8 +882,8 @@ func splitMeta(name, raw string) (meta, error) {
 	return m, nil
 }
 
-// A review agent declares its own reasoning budget, in its own template, and the
-// two do not share one.
+// A review agent declares its own reasoning budget, in its own template, and no two
+// share one.
 //
 // Review is chains-of-inference work — tracing a value from an argument to a
 // shell, or a ticked box to the code behind it — and that is what effort buys, so
@@ -883,7 +892,9 @@ func splitMeta(name, raw string) (meta, error) {
 // list, a test run and a linter. `scc-security-review` runs at high, because it
 // has no checklist to fall back on — it is asked for a traced path from
 // attacker-controlled input to effect, which is the case where the budget is the
-// product rather than a multiplier on it.
+// product rather than a multiplier on it. `scc-plan-review` runs at high for the
+// same reason: it holds a plan's prose against ADRs, specs and code, and no list
+// says where they disagree. It is paid once per plan, not once per diff.
 //
 // The cost argument is real and it is what lowered the first of those: delivery.md
 // dispatches both on every diff, not on the ones that look risky, and a gate
@@ -893,8 +904,8 @@ func splitMeta(name, raw string) (meta, error) {
 //
 // It is required rather than defaulted, for the reason a declined delivery gate is
 // the word `skipped` rather than an absent key: a budget nobody chose is not the
-// same as a budget somebody chose and wrote down. A third reviewer added without
-// one fails to render rather than inheriting a number by accident.
+// same as a budget somebody chose and wrote down. A reviewer added without one
+// fails to render rather than inheriting a number by accident.
 //
 // The model tier is pinned only where the harness has a stable alias for one
 // (Claude Code's "sonnet"), because a pinned `gpt-5.6` or `anthropic/claude-x`

@@ -255,7 +255,11 @@ run over. Ask what the invocation did not already answer.
   most tempts you to reach for the file instead. The group list from step 2 is a
   report, not a contract, and a group appended after you started is still part of the
   plan.
-- **The plan is still a draft.** `scc plan approve <plan>` before the first group: it
-  validates, fixes the content, and seals it, so a later edit made outside `scc` is
-  visible rather than silent. A plan that will not approve has findings — report them
-  and stop, rather than running a plan whose own validator rejects it.
+- **The plan is still a draft.** Dispatch the `scc-plan-review` agent first: it holds
+  the plan to `docs/`, the specs already written and the code, which no validator
+  reads. Apply the amendments you accept with `scc patch`, put its questions in the
+  same exchange as the run questions above, and on `rethink` stop and say why. Then
+  `scc plan approve <plan>` before the first group: it validates, fixes the content,
+  and seals it, so a later edit made outside `scc` is visible rather than silent. A
+  plan that will not approve has findings — report them and stop, rather than running
+  a plan whose own validator rejects it.

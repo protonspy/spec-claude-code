@@ -83,9 +83,7 @@ placeholder; a reference to nothing is a broken plan.
 
 ## Before you hand it over
 
-- `scc validate` — exit 0, or fix what it names. Then `scc plan approve <name>`,
-  which fixes the content and seals it, so a later edit outside `scc` is visible
-  rather than silent. Approving is the hand-over.
+- `scc validate` — exit 0, or fix what it names.
 - **Read the list back as a whole and ask what is missing.** Migration, backfill, the
   switch-over, the thing that has to keep working while this ships, and how it gets
   turned off if it goes wrong. Decompositions fail at the seams, not in the middle of
@@ -95,3 +93,10 @@ placeholder; a reference to nothing is a broken plan.
   it costs one edit.
 - **A choice made here that is hard to reverse is an ADR**, not prose in the plan.
   Use the `adr` skill, and cite the record from the item it governs.
+- **Then dispatch the `scc-plan-review` agent.** It holds the plan to `docs/`, the
+  specs already written and the code — the substance `scc validate` never reads, and
+  you, as the author, read worst. Apply the amendments you accept with `scc patch`,
+  put its questions to the user in one exchange, and on `rethink` stop and say why
+  rather than approving. One round, not three.
+- `scc plan approve <name>` fixes the content and seals it, so a later edit outside
+  `scc` is visible rather than silent. Approving is the hand-over.
