@@ -10,8 +10,10 @@ import (
 
 	"github.com/protonspy/spec-claude-code/internal/assets"
 	"github.com/protonspy/spec-claude-code/internal/hooks"
+	"github.com/protonspy/spec-claude-code/internal/mdblock"
 	"github.com/protonspy/spec-claude-code/internal/paths"
 	"github.com/protonspy/spec-claude-code/internal/render"
+	"github.com/protonspy/spec-claude-code/internal/rtk"
 	"github.com/protonspy/spec-claude-code/internal/scaffold"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
@@ -36,6 +38,7 @@ func runUpdate(args []string) int {
 	yes := fs.Bool("yes", false, "apply without asking (required when stdin is not a terminal)")
 	force := fs.Bool("force", false, "also overwrite files you have edited, naming each one")
 	dryRun := fs.Bool("dry-run", false, "report the plan and write nothing")
+	noRTK := fs.Bool("no-rtk", false, "leave the entry files without RTK's usage block")
 	picks := map[string]*bool{}
 	for _, h := range paths.Harnesses() {
 		picks[h.ID] = fs.Bool(h.ID, false, "update only the "+h.ID+" tree")
@@ -69,19 +72,28 @@ func runUpdate(args []string) int {
 		}
 		plans = append(plans, plan)
 	}
+	var rtkMissing []string
+	if !*noRTK {
+		if rtkMissing, err = missingRTKBlocks(target, harnesses); err != nil {
+			render.Err(fmt.Sprintf("update failed: %v", err))
+			return ExitError
+		}
+	}
 
 	if *jsonOut && *dryRun {
 		return emitJSON(struct {
 			Plans []*scaffold.UpdatePlan `json:"plans"`
-		}{plans})
+			RTK   []string               `json:"rtk,omitempty"`
+		}{plans, rtkMissing})
 	}
 	if !*jsonOut {
 		reportPlans(harnesses, plans, *force)
+		reportRTK(rtkMissing)
 		nudgeHooks(target)
 	}
 
-	pending := 0
-	writes := false
+	pending := len(rtkMissing)
+	writes := len(rtkMissing) > 0
 	for _, p := range plans {
 		pending += len(p.Pending())
 		writes = writes || p.Writes(*force)
@@ -91,21 +103,21 @@ func runUpdate(args []string) int {
 	// one output shape, whatever it decided to do.
 	if pending == 0 {
 		if *jsonOut {
-			return emitResults(nil)
+			return emitResults(nil, nil)
 		}
 		render.OK(fmt.Sprintf("already on template version %s — nothing to do", assets.Version))
 		return ExitOK
 	}
 	if *dryRun {
 		if *jsonOut {
-			return emitResults(nil)
+			return emitResults(nil, nil)
 		}
 		render.Info("dry run: nothing was written")
 		return ExitOK
 	}
 	if !writes {
 		if *jsonOut {
-			return emitResults(nil)
+			return emitResults(nil, nil)
 		}
 		render.Info("nothing to apply — the differences are all in files scc will not touch")
 		return ExitOK
@@ -141,9 +153,14 @@ func runUpdate(args []string) int {
 		}
 		results = append(results, res)
 	}
+	rtkFiles, err := addRTKBlocks(target, rtkMissing, *jsonOut)
+	if err != nil {
+		render.Err(fmt.Sprintf("update failed: %v", err))
+		return ExitError
+	}
 
 	if *jsonOut {
-		return emitResults(results)
+		return emitResults(results, rtkFiles)
 	}
 	applied := 0
 	for _, res := range results {
@@ -153,6 +170,9 @@ func runUpdate(args []string) int {
 		}
 	}
 	render.OK(fmt.Sprintf("%d file(s) updated to template version %s", applied, assets.Version))
+	for _, file := range rtkFiles {
+		render.OK(fmt.Sprintf("%s — RTK block %s", file.Path, file.Action))
+	}
 	for _, res := range results {
 		for _, it := range res.Kept {
 			if it.Action == scaffold.UpConflict {
@@ -167,14 +187,84 @@ func runUpdate(args []string) int {
 }
 
 // emitResults writes the one document `update --json` ever emits. Never null: a
-// caller iterating `.results` must not have to special-case the no-op run.
-func emitResults(results []*scaffold.UpdateResult) int {
+// caller iterating `.results` must not have to special-case the no-op run. "rtk"
+// appears only on the runs that added the block, so its absence is the answer to
+// "was an entry file edited".
+func emitResults(results []*scaffold.UpdateResult, rtkFiles []blockFile) int {
 	if results == nil {
 		results = []*scaffold.UpdateResult{}
 	}
 	return emitJSON(struct {
 		Results []*scaffold.UpdateResult `json:"results"`
-	}{results})
+		RTK     []blockFile              `json:"rtk,omitempty"`
+	}{results, rtkFiles})
+}
+
+// missingRTKBlocks lists the entry files of the targeted trees that exist and carry
+// no RTK block — the half of an update that is not a template file.
+//
+// Only a missing block is planned. One already there is kept whatever version it
+// claims: it may be `rtk init`'s own, and replacing it is a trade-off `scc rtk`
+// makes deliberately, not one an update makes as a side effect. An entry file that
+// is not on disk is left to `init`, which owns bringing it into existence.
+func missingRTKBlocks(root string, harnesses []paths.Harness) ([]string, error) {
+	block, err := assets.RTKBlock()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, h := range harnesses {
+		// Codex and opencode share AGENTS.md: planning it twice would add it twice.
+		if seen[h.EntryFile] {
+			continue
+		}
+		seen[h.EntryFile] = true
+		file, err := spliceEntryBlock(root, h.EntryFile, rtk.Markers, block, true, true)
+		if err != nil {
+			return nil, err
+		}
+		if file.Action == string(mdblock.Added) {
+			out = append(out, h.EntryFile)
+		}
+	}
+	return out, nil
+}
+
+// reportRTK adds the entry files about to gain the block to the summary the user
+// is agreeing to: an edit to a file outside the managed trees is still an edit.
+func reportRTK(entries []string) {
+	if len(entries) == 0 {
+		return
+	}
+	render.Info(fmt.Sprintf("RTK usage block — add (%d)", len(entries)))
+	for _, entry := range entries {
+		fmt.Println("      " + entry)
+	}
+	fmt.Println()
+}
+
+// addRTKBlocks writes the block into each entry file missingRTKBlocks planned.
+// keep, so a block that appeared between the plan and the write is left alone.
+func addRTKBlocks(root string, entries []string, quiet bool) ([]blockFile, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	block, err := assets.RTKBlock()
+	if err != nil {
+		return nil, err
+	}
+	var out []blockFile
+	for _, entry := range entries {
+		file, err := spliceEntry(root, entry, block, rtkOptions{keep: true, quiet: quiet})
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", entry, err)
+		}
+		if file.Action == string(mdblock.Added) {
+			out = append(out, file)
+		}
+	}
+	return out, nil
 }
 
 // updateTargets resolves which trees to update: the ones named by flag, or every

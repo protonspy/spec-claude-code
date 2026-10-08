@@ -96,7 +96,7 @@ func TestInitSeedsTheKnowledgeBaseWithoutManagingIt(t *testing.T) {
 // rewrite documents the user authored.
 func TestUpdateIgnoresTheSeededKnowledgeBase(t *testing.T) {
 	root := initWorkspace(t)
-	stdout, stderr, code := run(t, "update", "--root", root, "--json")
+	stdout, stderr, code := run(t, "update", "--root", root, "--json", "--no-rtk")
 	if code != ExitOK {
 		t.Fatalf("update: %d (%s)", code, stderr)
 	}
