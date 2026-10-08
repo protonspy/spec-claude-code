@@ -134,16 +134,18 @@ npx @protonspy/scc rtk --check    # CI: exit 2 when the block is missing
 
 The install is the part that is still a decision — cargo, a Rust toolchain, minutes
 of build — so a bare `init` asks before running it and takes silence for no.
-Nothing is written when the binary is absent: guidance naming a command the machine
-cannot run is worse than no guidance. `scc launch` does the same thing at the top of
-a session, for the workspaces wired before this or scaffolded with `--no-rtk`.
+The block is written either way: it travels with the repository, not with this
+machine, and RTK passes a command it has no filter for through unchanged. `scc
+update` adds it to an entry file that lacks one, and keeps one already there;
+`--no-rtk` skips it on both. `scc launch` does the same thing at the top of a
+session.
 
 The block sits between RTK's own `<!-- rtk-instructions -->` markers, which is what
 makes `rtk init` and `scc rtk` converge on one copy instead of two. `scc rtk`
 replaces what is there with the block this scc ships — same guidance, roughly a
 fifth of the bytes, in a file preloaded into every request — and says so when the
-one it replaced claimed a newer version; `--keep` leaves it alone. `init` and
-`launch` always keep, because replacing somebody's block is a trade-off to make
+one it replaced claimed a newer version; `--keep` leaves it alone. `init`,
+`update` and `launch` always keep, because replacing somebody's block is a trade-off to make
 deliberately rather than as a side effect. Everything outside the markers is
 untouched either way, and `--no-install` writes the block without touching cargo.
 
