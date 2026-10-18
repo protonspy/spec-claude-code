@@ -4,11 +4,14 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/protonspy/spec-claude-code/internal/assets"
+	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/manifest"
 	"github.com/protonspy/spec-claude-code/internal/paths"
+	"github.com/protonspy/spec-claude-code/internal/rtk"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
 
@@ -400,5 +403,33 @@ func TestCountAndWritesDescribeThePlanTheUserIsShown(t *testing.T) {
 	// An action nothing in this plan carries counts zero rather than guessing.
 	if n := plan.Count(UpdateAction("not-an-action")); n != 0 {
 		t.Errorf("Count on an unknown action = %d", n)
+	}
+}
+
+// The usage blocks scc splices into an entry file are scc's own writes, so an entry
+// file that differs from its template only by them is current — CRLF included. One
+// real edit beside them is still the user's file.
+func TestPlanTreatsAnEntryFileWithOnlyUsageBlocksAsCurrent(t *testing.T) {
+	blocks := rtk.Markers.Open + " v2 -->\n## RTK\n" + rtk.Markers.Close + "\n\n" +
+		codegraph.Markers.Open + " v1 -->\n## CodeGraph\n" + codegraph.Markers.Close + "\n"
+	for _, h := range paths.Harnesses() {
+		root := t.TempDir()
+		applyTo(t, root, h, false)
+		entry := read(t, root, h.EntryFile)
+
+		writeManaged(t, root, h, h.EntryFile, entry+"\n"+blocks, false)
+		if got := action(t, planFor(t, root, h), h.EntryFile); got != UpCurrent {
+			t.Errorf("%s: entry file with both blocks = %s, want %s", h.ID, got, UpCurrent)
+		}
+
+		writeManaged(t, root, h, h.EntryFile, strings.ReplaceAll(entry+"\n"+blocks, "\n", "\r\n"), false)
+		if got := action(t, planFor(t, root, h), h.EntryFile); got != UpCurrent {
+			t.Errorf("%s: CRLF entry file with both blocks = %s, want %s", h.ID, got, UpCurrent)
+		}
+
+		writeManaged(t, root, h, h.EntryFile, entry+"\nmine\n\n"+blocks, false)
+		if got := action(t, planFor(t, root, h), h.EntryFile); got != UpOwned {
+			t.Errorf("%s: edited entry file with blocks = %s, want %s", h.ID, got, UpOwned)
+		}
 	}
 }

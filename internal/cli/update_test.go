@@ -7,16 +7,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/hooks"
 	"github.com/protonspy/spec-claude-code/internal/manifest"
 	"github.com/protonspy/spec-claude-code/internal/paths"
+	"github.com/protonspy/spec-claude-code/internal/rtk"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
 
 // A workspace this build just scaffolded is current, so update says so and exits
-// 0 without asking anything.
+// 0 without asking anything — RTK's block in the entry file included, since init
+// wrote it and it is not an edit of the user's.
 func TestUpdateOnACurrentWorkspaceDoesNothing(t *testing.T) {
-	root := initWorkspace(t)
+	isolatedPath(t)
+	root := t.TempDir()
+	if _, stderr, code := run(t, "init", "--claude", "--root", root); code != ExitOK {
+		t.Fatalf("init: exit = %d (%s)", code, stderr)
+	}
 	stdout, stderr, code := run(t, "update", "--root", root)
 	if code != ExitOK {
 		t.Fatalf("exit = %d (%s)", code, stderr)
@@ -285,5 +292,96 @@ func TestUpdateReportsStaleHooksWithoutRewritingThem(t *testing.T) {
 	}
 	if !strings.Contains(stdout+stderr, "hooks") {
 		t.Errorf("update said nothing about the stale hook:\n%s%s", stdout, stderr)
+	}
+}
+
+// A workspace scaffolded without RTK's block gets it from update, planned before
+// it is written like any other change — and the next update has nothing to say,
+// with or without CodeGraph's block beside it, since both are scc's own writes.
+func TestUpdateAddsAMissingRTKBlock(t *testing.T) {
+	root := initWorkspace(t)
+	stdout, stderr, code := run(t, "update", "--root", root, "--dry-run")
+	if code != ExitOK {
+		t.Fatalf("dry run: exit = %d (%s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "RTK usage block") || strings.Contains(readEntry(t, root, paths.Claude.EntryFile), "rtk-instructions") {
+		t.Fatalf("--dry-run did not plan the block, or wrote it:\n%s", stdout)
+	}
+	stdout, stderr, code = run(t, "update", "--root", root, "--dry-run", "--json")
+	if code != ExitOK {
+		t.Fatalf("dry run --json: exit = %d (%s)", code, stderr)
+	}
+	var planned struct {
+		RTK []string `json:"rtk"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &planned); err != nil {
+		t.Fatalf("stdout is not valid JSON (%v): %q", err, stdout)
+	}
+	if len(planned.RTK) != 1 || planned.RTK[0] != paths.Claude.EntryFile {
+		t.Errorf("planned rtk = %v, want [%s]", planned.RTK, paths.Claude.EntryFile)
+	}
+
+	stdout, stderr, code = run(t, "update", "--root", root, "--yes", "--json")
+	if code != ExitOK {
+		t.Fatalf("update: exit = %d (%s)", code, stderr)
+	}
+	var doc struct {
+		RTK []blockFile `json:"rtk"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("stdout is not valid JSON (%v): %q", err, stdout)
+	}
+	if len(doc.RTK) != 1 || doc.RTK[0].Path != paths.Claude.EntryFile || doc.RTK[0].Action != "added" {
+		t.Errorf("rtk = %+v, want CLAUDE.md added", doc.RTK)
+	}
+	if !strings.Contains(readEntry(t, root, paths.Claude.EntryFile), "<!-- rtk-instructions") {
+		t.Fatal("update --yes left no block")
+	}
+
+	entry := filepath.Join(root, paths.Claude.EntryFile)
+	graph := codegraph.Markers.Open + " v1 -->\nscc graph explore\n" + codegraph.Markers.Close + "\n"
+	if err := os.WriteFile(entry, []byte(readEntry(t, root, paths.Claude.EntryFile)+"\n"+graph), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	stdout, stderr, code = run(t, "update", "--root", root)
+	if code != ExitOK || !strings.Contains(stdout, "nothing to do") {
+		t.Errorf("second update: exit = %d, stdout = %q (%s), want nothing to do", code, stdout, stderr)
+	}
+}
+
+// A block already there is kept, whatever version it claims: it may be `rtk
+// init`'s own, and replacing it is `scc rtk`'s call, not an update's side effect.
+func TestUpdateKeepsAnExistingRTKBlock(t *testing.T) {
+	root := initWorkspace(t)
+	mine := rtk.Markers.Open + " v9 -->\nmine, not scc's\n" + rtk.Markers.Close + "\n"
+	entry := filepath.Join(root, paths.Claude.EntryFile)
+	if err := os.WriteFile(entry, []byte(readEntry(t, root, paths.Claude.EntryFile)+"\n"+mine), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	stdout, stderr, code := run(t, "update", "--root", root, "--yes")
+	if code != ExitOK {
+		t.Fatalf("exit = %d (%s)", code, stderr)
+	}
+	if strings.Contains(stdout, "RTK") {
+		t.Errorf("update planned a block that is already there:\n%s", stdout)
+	}
+	if got := readEntry(t, root, paths.Claude.EntryFile); !strings.Contains(got, "mine, not scc's") {
+		t.Errorf("update replaced a block it did not write:\n%s", got)
+	}
+}
+
+// --no-rtk leaves the entry file exactly as it is.
+func TestUpdateNoRTKLeavesTheEntryFileAlone(t *testing.T) {
+	root := initWorkspace(t)
+	before := readEntry(t, root, paths.Claude.EntryFile)
+	stdout, stderr, code := run(t, "update", "--root", root, "--yes", "--no-rtk")
+	if code != ExitOK {
+		t.Fatalf("exit = %d (%s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "nothing to do") {
+		t.Errorf("stdout = %q, want nothing to do under --no-rtk", stdout)
+	}
+	if readEntry(t, root, paths.Claude.EntryFile) != before {
+		t.Error("--no-rtk still edited the entry file")
 	}
 }
