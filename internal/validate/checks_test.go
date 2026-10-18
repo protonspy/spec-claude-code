@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/protonspy/spec-claude-code/internal/assets"
+	"github.com/protonspy/spec-claude-code/internal/finding"
 	"github.com/protonspy/spec-claude-code/internal/gate"
 	sccmanifest "github.com/protonspy/spec-claude-code/internal/manifest"
 	"github.com/protonspy/spec-claude-code/internal/paths"
@@ -349,5 +350,43 @@ func TestClipSubjectKeepsTheLineReadable(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("a clipped subject does not say it was clipped: %q", got)
+	}
+}
+
+// A gate passed over for one run is silent the way a declined one is, and only that
+// gate: the push that skips a suite the machine cannot run still has its build held.
+func TestWithoutGatesPassesOverOnlyTheNamedGates(t *testing.T) {
+	root := gateWorkspace(t)
+	cfg := gate.Config{Commands: map[gate.Kind]string{}}
+	for _, k := range gate.Kinds() {
+		cfg.Commands[k] = gate.Skipped
+	}
+	cfg.Commands[gate.Build] = "exit 3"
+	cfg.Commands[gate.Test] = "exit 4"
+	if _, err := gate.Save(root, cfg); err != nil {
+		t.Fatalf("gate.Save: %v", err)
+	}
+
+	checks := func(opts ...Option) *finding.Set {
+		t.Helper()
+		for _, v := range All(append([]Option{WithChecks()}, opts...)...) {
+			if v.Name == "checks" {
+				set, err := v.Run(root)
+				if err != nil {
+					t.Fatalf("checks: %v", err)
+				}
+				return set
+			}
+		}
+		t.Fatal("WithChecks added no checks validator")
+		return nil
+	}
+
+	if set := checks(WithoutGates(gate.Build, gate.Test)); !set.Empty() {
+		t.Errorf("skipping both recorded gates still reported %+v", set.Sorted())
+	}
+	set := checks(WithoutGates(gate.Test))
+	if set.Len() != 1 || !strings.Contains(set.Sorted()[0].Message, "the build gate") {
+		t.Errorf("skipping only the test gate let the build through: %+v", set.Sorted())
 	}
 }

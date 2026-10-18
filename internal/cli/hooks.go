@@ -78,7 +78,9 @@ The git hooks need a git repository; outside a workspace the artifact validators
 have nothing to read and the checks on the record still run. A hook scc did not
 write is reported and left alone; --force appends to it, and only when it is a
 POSIX sh script. Skip every scc git hook for one command with %s=1, or use git's
---no-verify where that applies.
+--no-verify where that applies. To push past only the build, format, lint or test
+gate this machine cannot run, %s=<gate>[,<gate>] (or =1 for all four) skips
+those gates and keeps every other check.
 
 The harness stages are entries in the harness's own settings file, spliced in
 beside whatever else is there and removed the same way. Only a harness with a
@@ -87,7 +89,7 @@ never block a turn, and they never push or open a pull request: delivery is an
 act the agent takes in the open, where you can stop it.
 `, prog(), prog(), prog(), prog(), prog(),
 		hooks.PreCommit.Why(), hooks.CommitMsg.Why(), hooks.PrePush.Why(),
-		hooks.SessionStart.Why(), hooks.UserPromptSubmit.Why(), hooks.Stop.Why(), hooks.SkipEnv)
+		hooks.SessionStart.Why(), hooks.UserPromptSubmit.Why(), hooks.Stop.Why(), hooks.SkipEnv, hooks.SkipChecksEnv)
 }
 
 // hooksReport is the frozen JSON shape for install, check and remove: one entry
@@ -335,7 +337,12 @@ func runHooksRun(args []string) int {
 			// on the command somebody reaches for to tidy up.
 			return ExitOK
 		}
-		return runGate(target, *jsonOut, true)
+		skip, err := skippedGates(os.Getenv(hooks.SkipChecksEnv))
+		if err != nil {
+			render.Err(fmt.Sprintf("%s: %v", hooks.SkipChecksEnv, err))
+			return ExitError
+		}
+		return runGate(target, *jsonOut, true, skip...)
 	case hooks.StageSessionStart, hooks.StageUserPrompt, hooks.StageStop:
 		// A different protocol downstream of the same command: the harness hands
 		// the event in on stdin and reads a document back, where git reads an exit
@@ -393,10 +400,45 @@ func pushingAnything(in io.Reader) bool {
 	return false
 }
 
+// skippedGates reads SCC_SKIP_CHECKS: empty is none, `1` or `all` is the four, and
+// anything else is a comma list of gate names. An unknown name is an error rather
+// than ignored, because a push that meant to skip `tests` and ran the suite anyway
+// fails for the reason it was trying to get past, and says nothing about why.
+func skippedGates(v string) ([]gate.Kind, error) {
+	v = strings.TrimSpace(v)
+	switch strings.ToLower(v) {
+	case "":
+		return nil, nil
+	case "1", "all", "true":
+		return gate.Kinds(), nil
+	}
+	var out []gate.Kind
+	for _, name := range strings.Split(v, ",") {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		k, err := gate.ParseKind(name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, nil
+}
+
 // runGate is the pre-commit and pre-push check: the same run `scc validate` does,
-// reported the same way, exiting on the same contract.
-func runGate(root string, jsonOut, pr bool) int {
-	set, err := gateFindings(root, pr)
+// reported the same way, exiting on the same contract. The gates in skip are not
+// run, and the run says so: a push past the suite must not read as a verified one.
+func runGate(root string, jsonOut, pr bool, skip ...gate.Kind) int {
+	if len(skip) > 0 {
+		names := make([]string, len(skip))
+		for i, k := range skip {
+			names[i] = string(k)
+		}
+		render.Warn(fmt.Sprintf("%s: not running the %s gate(s) on this push — CI has to",
+			hooks.SkipChecksEnv, strings.Join(names, ", ")))
+	}
+	set, err := gateFindings(root, pr, validate.WithoutGates(skip...))
 	if err != nil {
 		render.Err(fmt.Sprintf("validate: %v", err))
 		return ExitError
@@ -410,8 +452,23 @@ func runGate(root string, jsonOut, pr bool) int {
 	set.Report("validate")
 	if !set.Empty() {
 		render.Detail(fmt.Sprintf("  fix these, or pass %s=1 for this one command", hooks.SkipEnv))
+		if gateFailed(set) {
+			render.Detail(fmt.Sprintf("  or, for a gate this machine cannot run, %s=<gate> skips only that gate (=1 all four)",
+				hooks.SkipChecksEnv))
+		}
 	}
 	return set.ExitCode()
+}
+
+// gateFailed reports whether any finding came from the delivery gate's commands,
+// the only ones SCC_SKIP_CHECKS reaches.
+func gateFailed(set *finding.Set) bool {
+	for _, f := range set.Sorted() {
+		if strings.HasPrefix(f.Rule, "check.") || strings.HasPrefix(f.Rule, "tests.") {
+			return true
+		}
+	}
+	return false
 }
 
 // gateFindings runs everything that applies here: every validator in a workspace,

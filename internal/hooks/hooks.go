@@ -147,6 +147,12 @@ const Prog = "scc"
 // is a gate people remove instead of skipping.
 const SkipEnv = "SCC_SKIP_HOOKS"
 
+// SkipChecksEnv passes over the delivery gate's commands at pre-push for one push:
+// `1` or `all` for the four, or a comma list of gate names. It is the narrow way
+// past a gate this machine cannot run — a suite needing a database the checkout
+// does not have — where SkipEnv would also drop every validator that reads a file.
+const SkipChecksEnv = "SCC_SKIP_CHECKS"
+
 // State is what a hook file is, from scc's point of view.
 type State string
 

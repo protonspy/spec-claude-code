@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/protonspy/spec-claude-code/internal/finding"
+	"github.com/protonspy/spec-claude-code/internal/gate"
 )
 
 // Validator is one named check over a workspace.
@@ -57,6 +58,7 @@ type options struct {
 	pr            bool
 	checks        bool
 	timeout       time.Duration
+	skipGates     []gate.Kind
 	noAttribution bool
 }
 
@@ -88,6 +90,14 @@ func WithChecks() Option { return func(o *options) { o.checks = true } }
 // It adds no check of its own, so it is not a third reason to pay a cost.
 func WithTimeout(d time.Duration) Option { return func(o *options) { o.timeout = d } }
 
+// WithoutGates passes over the named gates as if this run had declined them. It is
+// the pre-push hook's narrow way past a gate the machine cannot run — a suite that
+// needs a database this checkout does not have — without dropping the validators
+// that read files, which is what skipping the whole hook would cost.
+func WithoutGates(kinds ...gate.Kind) Option {
+	return func(o *options) { o.skipGates = append(o.skipGates, kinds...) }
+}
+
 func extra(opts []Option) []Validator {
 	var o options
 	for _, fn := range opts {
@@ -97,9 +107,9 @@ func extra(opts []Option) []Validator {
 	// Checks before pr: they are the slow ones, and a run that is going to fail on
 	// a broken build should say so before it spends a network round trip on the forge.
 	if o.checks {
-		limit := o.timeout
+		limit, skip := o.timeout, o.skipGates
 		out = append(out, Validator{Name: "checks", Run: func(root string) (*finding.Set, error) {
-			return checksWithin(root, limit)
+			return checksWithin(root, limit, skip)
 		}})
 	}
 	if o.pr {

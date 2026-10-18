@@ -32,6 +32,15 @@ reports success it did not verify — and they name the way past themselves
 (`SCC_SKIP_HOOKS=1`), because a gate with no documented escape is a gate people
 delete the first time it is wrong.
 
+That escape is too wide for the commonest reason to want one: a suite that cannot
+run on this machine — a database it does not have — while CI runs it fine. Skipping
+the whole hook to get past one gate also drops the artifact, attribution and
+pull-request checks. **`SCC_SKIP_CHECKS` is the narrow one**: at pre-push,
+`SCC_SKIP_CHECKS=test` (a comma list, or `1` for all four) passes over only those
+[[delivery-gate]] commands, keeps every validator that reads a file, and says on
+stderr which gates it did not run — a push past the suite must not read as verified.
+A misspelled gate is exit `1`, not a skip that silently did not happen.
+
 Where the hooks go is **asked of git** (`core.hooksPath`, then
 `rev-parse --git-path hooks`) rather than assumed to be `.git/hooks`: writing a hook
 where git will not read it is the kind of failure that looks like success for weeks.

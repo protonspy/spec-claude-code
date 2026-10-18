@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/protonspy/spec-claude-code/internal/gate"
 	"github.com/protonspy/spec-claude-code/internal/hooks"
 )
 
@@ -303,6 +305,45 @@ func TestPrePushRunsTheSuiteAndPreCommitDoesNot(t *testing.T) {
 	}
 }
 
+// SCC_SKIP_CHECKS is the narrow way past a gate this machine cannot run: the suite
+// is not run, the push says so, and a misspelled gate is an error rather than a
+// skip that silently did not happen.
+func TestPrePushSkipsOnlyTheGatesNamed(t *testing.T) {
+	root := gitWorkspace(t)
+	skipRest(t, root, "test")
+	marker := filepath.Join(root, "ran.txt")
+	setTest(t, root, "echo ran > "+filepath.ToSlash(marker))
+
+	// Unset, the failing suite blocks the push and the hint names the narrow way out.
+	_, stderr, code := run(t, "hooks", "run", "pre-push", "--root", root)
+	if code != ExitFindings {
+		t.Fatalf("pre-push: exit = %d, want %d (stderr: %s)", code, ExitFindings, stderr)
+	}
+	if !strings.Contains(stderr, hooks.SkipChecksEnv) {
+		t.Errorf("a failed gate did not offer %s: %q", hooks.SkipChecksEnv, stderr)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("remove marker: %v", err)
+	}
+
+	t.Setenv(hooks.SkipChecksEnv, "test")
+	_, stderr, code = run(t, "hooks", "run", "pre-push", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("pre-push with %s=test: exit = %d, want %d (stderr: %s)", hooks.SkipChecksEnv, code, ExitOK, stderr)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the pre-push hook ran a suite it was told to skip")
+	}
+	if !strings.Contains(stderr, "test gate") {
+		t.Errorf("the push did not say which gate it skipped: %q", stderr)
+	}
+
+	t.Setenv(hooks.SkipChecksEnv, "tests")
+	if _, stderr, code = run(t, "hooks", "run", "pre-push", "--root", root); code != ExitError {
+		t.Errorf("an unknown gate name: exit = %d, want %d (stderr: %s)", code, ExitError, stderr)
+	}
+}
+
 // A workspace that never wired its tests up pushes exactly as it did before. The
 // gate is a default here rather than something asked for by name, and a default
 // that blocked every push over configuration nobody chose would be scc deciding
@@ -370,5 +411,31 @@ func TestTheGateNarrowsOutsideAWorkspace(t *testing.T) {
 	decode(t, stdout, &doc)
 	if doc.Count == 0 {
 		t.Errorf("the document reports no findings though the command exited %d", ExitFindings)
+	}
+}
+
+// `1` and `all` are the four, a comma list is those, blanks are nothing, and a name
+// that is not a gate is refused.
+func TestSkippedGatesReadsTheEnvironmentValue(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want []gate.Kind
+		bad  bool
+	}{
+		{in: "", want: nil},
+		{in: "1", want: gate.Kinds()},
+		{in: " ALL ", want: gate.Kinds()},
+		{in: "test", want: []gate.Kind{gate.Test}},
+		{in: "lint, Test,", want: []gate.Kind{gate.Lint, gate.Test}},
+		{in: "tests", bad: true},
+	} {
+		got, err := skippedGates(tc.in)
+		if (err != nil) != tc.bad {
+			t.Errorf("skippedGates(%q): err = %v, want error %v", tc.in, err, tc.bad)
+			continue
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("skippedGates(%q) = %v, want %v", tc.in, got, tc.want)
+		}
 	}
 }
