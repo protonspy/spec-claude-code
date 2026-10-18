@@ -10,7 +10,7 @@ nobody recorded a reason, this file says so rather than inventing one.
 ## The module
 
 - **Go 1.25** — `go.mod` declares `go 1.25.0`; CI pins the toolchain ahead of it at
-  `1.25.13`, deliberately, so `GOTOOLCHAIN=auto` still installs for older setups.
+  `1.26.9`, deliberately, so `GOTOOLCHAIN=auto` still installs for older setups.
   Chosen for what the product is: one static binary, cross-compiled to six targets,
   that an agent or a CI job can run with nothing installed underneath it.
 - **The standard library, and nothing else** — `go.mod` has no `require` block at
