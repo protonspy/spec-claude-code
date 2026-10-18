@@ -49,18 +49,19 @@ wires both places a check can run without anybody remembering it:
 | | Where | What it does |
 |---|---|---|
 | **git** | `.git/hooks` | `pre-commit` runs `scc validate`, `commit-msg` reads the message being written, `pre-push` runs `scc validate --pr --checks`. These **refuse** — a commit is a decision with a natural place to stand in front of. |
-| **harness** | `.claude/settings.json` | `SessionStart` says once that this workspace has recorded no commands and reports methodology drift; `UserPromptSubmit` says how to read an artifact the prompt named, and nothing otherwise; `Stop` hands back `scc validate` findings and undelivered work at the end of a turn — the moment they are cheapest to fix. |
+| **harness** | `.claude/settings.json` | `SessionStart` says once that this workspace has recorded no commands and reports methodology drift; `UserPromptSubmit` says how to read an artifact the prompt named, and nothing otherwise; `Stop` hands back `scc validate` findings at the end of a turn — the moment they are cheapest to fix. Unpushed work is said once, at `SessionStart`. |
 
-The harness hooks **never refuse**, and they **never push or open a PR** — the Stop
-hook says the branch has commits that never left the machine, and the agent pushes in
-its next turn, in the open, where you can still stop it. Publishing on an event nobody
+The harness hooks **never refuse**, and they **never push or open a PR** — the
+SessionStart hook says the branch has commits that never left the machine, and the
+agent pushes when its delivery sequence says to, in the open, where you can still stop it. Publishing on an event nobody
 is watching is not a thing scc does on your behalf.
 
 **On `Stop`, saying anything is a continuation**, not a passive report: the harness
 keeps the conversation going so the agent can act on it. So the Stop hook honours
 `stop_hook_active` and carries only what the next turn can *resolve* — a finding clears
-when it is fixed, unpushed work clears when it is pushed. v0.24.0 got this wrong and
-looped; v0.24.1 is the fix.
+when it is fixed. v0.24.0 got this wrong and looped; v0.24.1 is the fix. Unpushed work is
+no longer on Stop: a push is not always the next move, and the line held every turn
+spent waiting on reviews or on you until it was obeyed.
 
 **Drift is the half no validator can reach**, because none of them reads source: code
 changed on this branch with no box ticked, a `TODO` left behind, commits sitting on the

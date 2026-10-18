@@ -7,6 +7,8 @@ thing it describes moved.
 A page named here that no longer exists is reported, so a rename is recorded as a
 change rather than left pointing at the old slug.
 
+- 2026-10-18 — [[hooks]]: unpushed work moved from `Stop` to `SessionStart`, and the
+  line points at the delivery sequence rather than at a bare push.
 - 2026-10-18 — [[hooks]]: `SCC_SKIP_CHECKS`, the narrow escape past a delivery-gate
   command this machine cannot run, beside `SCC_SKIP_HOOKS`.
 - 2026-09-19 — `CLAUDE.md` went back to being the entry file the binary ships, so
