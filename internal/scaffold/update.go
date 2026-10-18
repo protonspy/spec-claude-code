@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 
 	"github.com/protonspy/spec-claude-code/internal/assets"
+	"github.com/protonspy/spec-claude-code/internal/codegraph"
 	"github.com/protonspy/spec-claude-code/internal/manifest"
 	"github.com/protonspy/spec-claude-code/internal/paths"
+	"github.com/protonspy/spec-claude-code/internal/rtk"
 	"github.com/protonspy/spec-claude-code/internal/workspace"
 )
 
@@ -138,6 +140,9 @@ func planOne(root string, f assets.File, want string, prior *manifest.Manifest) 
 	// decides what may be done about it.
 	if f.Owned {
 		item.Action = UpOwned
+		if bare, err := withoutEntryBlocks(filepath.Join(root, filepath.FromSlash(f.Rel))); err == nil && manifest.Hash(bare) == manifest.Hash(want) {
+			item.Action = UpCurrent
+		}
 		return item, nil
 	}
 	if e, ok := prior.Get(f.Rel); ok && got == e.Hash {
@@ -305,4 +310,22 @@ func carry(next, prior *manifest.Manifest, rel string) {
 	if e, ok := prior.Get(rel); ok {
 		next.Set(rel, e.Hash, e.Version)
 	}
+}
+
+// withoutEntryBlocks reads an owned file with the usage blocks scc splices into an
+// entry file taken out.
+//
+// Those blocks are scc's own writes — `init` and `update` add RTK's, `launch` adds
+// CodeGraph's — so a file that differs from its template only by them was never
+// authored into. Counting them as an edit would report every wired workspace as
+// pending forever, and "nothing to do" would be a message nobody ever sees.
+func withoutEntryBlocks(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	doc := string(raw)
+	doc, _ = rtk.Markers.Remove(doc)
+	doc, _ = codegraph.Markers.Remove(doc)
+	return doc, nil
 }

@@ -203,7 +203,7 @@ func mustCwd() string {
 }
 
 // initRTK puts RTK's usage block in the entry file the agent is about to load,
-// and makes sure the binary that block names is actually there.
+// and offers to build the binary that block names when it is missing.
 //
 // Setup is where this belongs. The block is what makes RTK work at all — an agent
 // that never read it never types the prefix — so a workspace scaffolded without it
@@ -214,46 +214,46 @@ func mustCwd() string {
 // and it means a workspace is wired whether the first session starts through
 // `scc launch` or by typing `claude`.
 //
-// What stays a decision is the install, and the two halves are settled in that
-// order. cargo is a Rust toolchain and minutes of build, so a bare `init` asks
-// before running it and takes silence for no; `--rtk` is that consent given in
-// advance, and `--no-rtk` declines the whole step. Nothing is written when the
-// binary is absent, because guidance naming a command the machine cannot run is
-// worse than no guidance: an agent that tries the prefix, watches it fail, and
-// then reads the same file's rules learns to discount all of them.
+// The block is written whether or not the binary is there. It travels with the
+// repository rather than with this machine, so the next clone, the CI image, or
+// this machine after a `cargo install` reads a file already wired — and RTK passes
+// a command through unchanged when it has no filter for it. `--no-rtk` is the one
+// way to scaffold without it.
 //
-// It degrades rather than fails. A missing cargo, a declined prompt, or a failed
-// build all end in a scaffolded workspace and one line saying what is not wired —
-// except under --rtk, where the user asked for this by name and a failure is an
-// answer they need in the exit code.
+// What stays a decision is the install. cargo is a Rust toolchain and minutes of
+// build, so a bare `init` asks before running it and takes silence for no; `--rtk`
+// is that consent given in advance. A missing cargo, a declined prompt, or a failed
+// build all end in a scaffolded workspace carrying the block and one line saying
+// the binary is not there — except under --rtk, where the user asked for the build
+// by name and a failure is an answer they need in the exit code.
 func initRTK(root string, yes, disabled, quiet bool) (*rtkReport, int) {
 	if disabled {
 		return nil, ExitOK
 	}
+	failed := false
+	noInstall := false
 	if _, ok := rtk.Path(); !ok {
 		if reason := rtkInstallOK(rtkAsk{yes: yes, quiet: quiet}); reason != "" {
-			// --rtk named this step, so not getting it is an error and is said as
+			// --rtk named the build, so not getting it is an error and is said as
 			// one — on stderr, which is also the only stream left when the caller is
-			// emitting JSON on stdout. Without the flag it is a status line: the
-			// workspace is scaffolded and complete, and RTK is the part that is not
-			// wired yet.
+			// emitting JSON on stdout. The block is still written below: the build
+			// is what failed, not the workspace.
 			if yes {
 				render.Err("--rtk: " + reason)
 				render.Detail("  " + rtk.InstallCmd())
-				return nil, ExitError
+				failed = true
 			}
-			if !quiet {
-				render.Info("no RTK block: " + reason)
-				render.Detail(fmt.Sprintf("  wire it in later with: %s rtk", prog()))
-			}
-			return nil, ExitOK
+			noInstall = true
 		}
 	}
 	// keep, because a re-run of `init` is not the moment to replace a block
 	// somebody put there themselves — `scc rtk` is where that trade-off is made
 	// deliberately, and it is the same call `scc launch` makes for the same reason.
-	report, code := applyRTK(root, rtkOptions{keep: true, quiet: quiet})
-	if !yes {
+	report, code := applyRTK(root, rtkOptions{keep: true, noInstall: noInstall, quiet: quiet})
+	switch {
+	case failed:
+		return report, ExitError
+	case !yes:
 		return report, ExitOK
 	}
 	return report, code

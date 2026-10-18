@@ -348,24 +348,24 @@ func TestInitSplicesTheBlockWhenRTKIsAlreadyThere(t *testing.T) {
 	}
 }
 
-// Nothing is written when the binary is absent and nobody can be asked about
-// building it. Guidance naming a command the machine cannot run is worse than no
-// guidance: the agent tries the prefix, watches it fail, and discounts the rest of
-// the file with it.
-func TestInitWritesNoBlockWithoutTheBinary(t *testing.T) {
+// The block is written when the binary is absent and nobody can be asked about
+// building it. It travels with the repository, not with this machine: the next
+// clone, the CI image, or this machine after a `cargo install` reads an entry file
+// already wired.
+func TestInitWritesTheBlockWithoutTheBinary(t *testing.T) {
 	isolatedPath(t)
 	root := t.TempDir()
 	stdout, stderr, code := run(t, "init", "--claude", "--root", root)
 	if code != ExitOK {
 		t.Fatalf("exit = %d, want a scaffolded workspace anyway (stderr: %s)", code, stderr)
 	}
-	if got := readEntry(t, root, paths.Claude.EntryFile); strings.Contains(got, "rtk-instructions") {
-		t.Error("init wrote a block naming a binary that is not there")
+	if got := readEntry(t, root, paths.Claude.EntryFile); !strings.Contains(got, "<!-- rtk-instructions") {
+		t.Errorf("init left no block in %s without rtk on PATH", paths.Claude.EntryFile)
 	}
-	// Said once, and it names the way to wire it in later: a step that was skipped
-	// in silence is one nobody knows to take.
-	if !strings.Contains(stdout+stderr, "rtk") {
-		t.Errorf("init never said why RTK was skipped: %q", stdout+stderr)
+	// Said once, and it names how to get the binary: a block whose command is not
+	// on this machine is one nobody knows to install.
+	if !strings.Contains(stdout+stderr, rtk.InstallCmd()) {
+		t.Errorf("init never said rtk is missing: %q", stdout+stderr)
 	}
 }
 
@@ -446,16 +446,21 @@ func TestInitJSONCarriesTheRTKReport(t *testing.T) {
 	}
 }
 
-// --rtk named the step, so a machine that cannot take it says so in the exit code
+// --rtk named the build, so a machine that cannot take it says so in the exit code
 // rather than scaffolding and moving on. Without the flag the same situation is a
-// status line: the workspace is finished, and RTK is the part that is not wired.
+// status line: the workspace is finished, and the binary is the part that is missing.
 func TestInitWithRTKFailsWhenItCannotBeBuilt(t *testing.T) {
 	isolatedPath(t)
-	_, stderr, code := run(t, "init", "--claude", "--rtk", "--root", t.TempDir())
+	root := t.TempDir()
+	_, stderr, code := run(t, "init", "--claude", "--rtk", "--root", root)
 	if code != ExitError {
 		t.Fatalf("exit = %d, want %d with neither rtk nor cargo on PATH", code, ExitError)
 	}
 	if !strings.Contains(stderr, "cargo") {
 		t.Errorf("stderr does not say what is missing: %q", stderr)
+	}
+	// The build failed, not the workspace: the block is there all the same.
+	if got := readEntry(t, root, paths.Claude.EntryFile); !strings.Contains(got, "<!-- rtk-instructions") {
+		t.Errorf("init --rtk left no block in %s when the build failed", paths.Claude.EntryFile)
 	}
 }
