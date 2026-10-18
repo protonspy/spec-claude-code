@@ -139,8 +139,8 @@ type hookSpecific struct {
 // emitHook writes the document, or nothing at all.
 //
 // Nothing at all is the common case and the important one: a workspace with no
-// findings and nothing undelivered has no business adding a line to every turn of
-// every session. Silence is what keeps the line that does appear worth reading.
+// findings, no drift and nothing undelivered has no business adding a line to a
+// turn or a session. Silence is what keeps the line that does appear worth reading.
 func emitHook(stage hooks.Stage, lines []string) int {
 	if len(lines) == 0 {
 		return ExitOK
