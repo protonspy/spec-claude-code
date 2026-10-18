@@ -35,11 +35,11 @@ jobs:
           # Build/test with a current, patched toolchain. Keep this pin AHEAD of
           # go.mod's directive and do NOT switch to go-version-file: go.mod —
           # install-compat with older toolchains rides on GOTOOLCHAIN=auto.
-          # Pinned to .13 for the GO-2026-6088 encoding/xml fix, which the pom
-          # reader reaches through xml.Unmarshal (.12 was the GO-2026-5856
-          # crypto/tls fix). The float '1.25' lags on hosted runners; float back
-          # once runners catch up.
-          go-version: '1.25.13'
+          # Pinned to 1.26.9: 1.25 is out of support, and GO-2026-6603..6617
+          # (net/http, net/textproto, crypto/tls) are fixed only from 1.26.9.
+          # Earlier pins: 1.25.13 for GO-2026-6088 encoding/xml, 1.25.12 for
+          # GO-2026-5856 crypto/tls.
+          go-version: '1.26.9'
           cache: true
 
       - name: go vet
@@ -74,7 +74,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: '1.25.13' # GO-2026-6088 encoding/xml fix; see the test job's note
+          go-version: '1.26.9' # see the test job's note
           cache: true
 
       - name: gofmt
