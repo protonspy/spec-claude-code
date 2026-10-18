@@ -33,18 +33,18 @@ import (
 //
 //   - `stop_hook_active` is honoured unconditionally. Once the harness says it is
 //     already continuing because of this hook, the hook has been heard.
-//   - Stop may only carry what the next turn can *resolve*. A finding clears when
-//     it is fixed; unpushed work clears when it is pushed. A fact about the
-//     branch clears for nobody, which is why drift is reported at SessionStart.
+//   - Stop may only carry what the next turn can *resolve*, and should. A
+//     finding clears when it is fixed. A fact about the branch clears for nobody,
+//     and unpushed work clears only by a push the agent may rightly not be ready
+//     for, which is why both are reported at SessionStart.
 //
 // The git hooks are where refusal belongs, because a commit is a decision with a
 // natural place to stand in front of.
 //
 // **They never publish.** The end of a turn is a plausible moment to `git push`,
-// and scc does not: that sends work on an event nobody is watching. What the Stop
-// stage does instead is say the branch has commits that never left the machine,
-// so the agent pushes in its next turn — in the open, where a person can still
-// stop it.
+// and scc does not: that sends work on an event nobody is watching. SessionStart
+// says the branch has commits that never left the machine, and the agent pushes
+// when delivery.md says to — in the open, where a person can still stop it.
 //
 // **And they cost nothing a turn cannot afford.** No network: the pull-request
 // check and the test suite are both off here, and undelivered work is answered
@@ -139,8 +139,8 @@ type hookSpecific struct {
 // emitHook writes the document, or nothing at all.
 //
 // Nothing at all is the common case and the important one: a workspace with no
-// findings and nothing undelivered has no business adding a line to every turn of
-// every session. Silence is what keeps the line that does appear worth reading.
+// findings, no drift and nothing undelivered has no business adding a line to a
+// turn or a session. Silence is what keeps the line that does appear worth reading.
 func emitHook(stage hooks.Stage, lines []string) int {
 	if len(lines) == 0 {
 		return ExitOK
@@ -191,6 +191,14 @@ func sessionStartContext(root string) []string {
 	// until the harness cuts it off. Said once, at the start, where it is
 	// information rather than an instruction the agent cannot carry out.
 	out = append(out, driftLines(root)...)
+	// Unpushed work is here for the same reason. At Stop it read as an order, and
+	// the next turn obeyed it: a push while reviews were still running, while the
+	// user had not answered, on a branch nobody wanted pushed yet — and while the
+	// agent waited, the line came back at the end of every turn. Whether the work
+	// is finished is the agent's call and delivery.md's sequence, not the tree's.
+	if line := undeliveredLine(root); line != "" {
+		out = append(out, line)
+	}
 
 	cfg, err := gate.Load(root)
 	if err != nil || cfg.Any() {
@@ -248,15 +256,18 @@ func unattendedLines() []string {
 	}
 }
 
-// stopContext is what the end of a turn has to say: what the validators found,
-// and whether finished work is still sitting on this machine.
+// stopContext is what the end of a turn has to say: what the validators found.
 //
 // **Only things the agent can resolve now.** Anything here continues the
 // conversation, so whatever it says has to be something the next turn can act on
 // and thereby make go away — otherwise the same line comes back on the next stop,
 // and the next, until the harness overrides the hook at its consecutive-block
-// cap. A finding clears when it is fixed; unpushed work clears when it is pushed.
-// Both terminate.
+// cap. A finding clears when it is fixed, so it terminates.
+//
+// Unpushed work used to be here too, on the reasoning that a push clears it. It
+// does, but a push is not always the right next move — reviews still running, a
+// question to the user still open — and the line held every one of those turns
+// open until it was obeyed. It moved to SessionStart beside drift.
 //
 // Drift used to be here and is not any more, for exactly that reason: "source
 // changed on this branch with no box ticked" is a fact about the branch, not
@@ -265,18 +276,15 @@ func unattendedLines() []string {
 // agent — correctly — kept answering that the work was not orphaned. It moved to
 // SessionStart, which is said once and cannot hold a turn open.
 //
-// Both halves are silent when they have nothing to say, and that is the property
-// to protect: sections that each speak sometimes are a report worth reading, and
-// sections that always speak are a banner.
+// It is silent when it has nothing to say, and that is the property to protect: a
+// stage that speaks sometimes is a report worth reading, and one that always
+// speaks is a banner.
 func stopContext(root string) []string {
 	var out []string
 	if set := stopFindings(root); set != nil && !set.Empty() {
 		out = append(out, fmt.Sprintf("scc validate: %s.", finding.Count(set.Len())))
 		out = append(out, stopFindingLines(set)...)
 		out = append(out, fmt.Sprintf("Run `%s validate` for the rest, and fix these before the commit.", prog()))
-	}
-	if line := undeliveredLine(root); line != "" {
-		out = append(out, line)
 	}
 	return out
 }
@@ -364,17 +372,14 @@ func stopFindingLines(set *finding.Set) []string {
 	return out
 }
 
-// undeliveredLine says that finished work has not left the machine, and stops
-// there. It names the commands rather than running them: publishing is the
-// agent's act, in its next turn, where a person can see it happen.
+// undeliveredLine says that committed work has not left the machine, and stops
+// there. It states a fact and points at the sequence rather than naming a push:
+// whether the work is finished, and whether the reviews have run, is not
+// something the tree can tell.
 //
-// **Finished is the word that does the work, and a dirty tree is not it.** Said on
-// the first commit of a unit of work, this asks for a push in the middle of it —
-// and because Stop is a continuation, the ask is acted on: a push per turn, each
-// one paying for the pre-push gate's build, lint and suite, and a pull request
-// opened on a third of a feature. Uncommitted changes are the cheapest available
-// evidence that the work is still in hand, so the line waits for them to be gone.
-// A clean tree with commits the remote does not have is the state this is for.
+// A dirty tree says nothing: uncommitted changes are the cheapest evidence that
+// the work is still in hand. A clean tree with commits the remote does not have
+// is the state this is for.
 func undeliveredLine(root string) string {
 	if git.Dirty(root) {
 		return ""
@@ -388,10 +393,10 @@ func undeliveredLine(root string) string {
 		what += "s"
 	}
 	if !u.Pushed {
-		return fmt.Sprintf("scc: `%s` has %s and has never been pushed — `git push -u origin %s`, then open the PR per delivery.md.",
-			u.Branch, what, u.Branch)
+		return fmt.Sprintf("scc: `%s` has %s never pushed. When its work is done, deliver it per delivery.md: reviews, then push and the PR.",
+			u.Branch, what)
 	}
-	return fmt.Sprintf("scc: `%s` has %s that origin does not have — `git push`, then check the PR per delivery.md.",
+	return fmt.Sprintf("scc: `%s` has %s that origin does not have. When its work is done, deliver it per delivery.md: reviews, then push and the PR.",
 		u.Branch, what)
 }
 

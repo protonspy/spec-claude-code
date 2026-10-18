@@ -66,8 +66,11 @@ cap: measured in a real session, the agent answered `.` to itself nine times.
 
 Two rules now hold it: **`stop_hook_active` is honoured unconditionally**, and
 **Stop may only carry what the next turn can resolve.** A finding clears when fixed;
-unpushed work clears when pushed; a fact about the branch clears for nobody, which
-is why drift moved to `SessionStart`.
+a fact about the branch clears for nobody, which is why drift moved to `SessionStart`.
+Unpushed work followed it there: a push clears it, but a push is not always the right
+next move — reviews still running, a question to the user still open — and at Stop the
+line held every one of those turns open until it was obeyed, a push ahead of the
+reviews [[delivery-gate]] puts first.
 
 That second rule had two more violations of the same shape. The stage ran every
 validator, `attribution` included — whose subject is commits already made, so the
@@ -111,10 +114,11 @@ it, which a test pins.
 ### They never publish
 
 The end of a turn is a plausible moment to `git push`, and doing it would send work
-on an event nobody is watching. So the Stop stage *says* the branch has commits that
-never left the machine, and the agent pushes in its next turn, in the open, where a
-person can still stop it. The question is answered from refs already in the
-repository — no fetch, no `gh` — because this runs at the end of every turn.
+on an event nobody is watching. So `SessionStart` *says* the branch has commits that
+never left the machine, and the agent pushes when the delivery sequence says to, in
+the open, where a person can still stop it. The question is answered from refs
+already in the repository — no fetch, no `gh` — so the session starts without waiting
+on the network.
 
 ## No `SubagentStart`
 

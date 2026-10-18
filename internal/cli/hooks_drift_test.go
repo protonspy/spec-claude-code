@@ -381,11 +381,11 @@ func TestAHostilePathIsRenderedAsOneOrdinaryLine(t *testing.T) {
 func TestStopIsSilentWhileTheHarnessIsAlreadyContinuing(t *testing.T) {
 	root := driftRepo(t)
 	gitDo(t, root, "checkout", "-q", "-b", "feat/x")
-	write(t, root, "internal/thing/thing.go", "package thing\n")
-	// Committed but never pushed, so the Stop stage genuinely has something to
-	// say. Without that this test passes for the wrong reason — a silent stage is
-	// silent whether or not the flag is honoured, and the first cut of this proved
-	// exactly nothing.
+	// A plan this branch wrote with a heading the format does not allow, so the
+	// Stop stage genuinely has something to say. Without that this test passes for
+	// the wrong reason — a silent stage is silent whether or not the flag is
+	// honoured, and the first cut of this proved exactly nothing.
+	write(t, root, "plans/broken.md", "# Broken\n\nA plan.\n\n## Notes\n\nnot a section this format allows.\n")
 	gitDo(t, root, "add", "-A")
 	gitDo(t, root, "commit", "-q", "-m", "feat: a thing")
 
@@ -441,5 +441,39 @@ func TestDriftIsReportedWhereItCanBeHeardOnce(t *testing.T) {
 	}
 	if strings.Contains(stop, "ticked no box") {
 		t.Errorf("Stop still carries a fact the next turn cannot resolve: %q", stop)
+	}
+}
+
+// Unpushed work is said once, at SessionStart, and never at Stop. At Stop it read
+// as an order the next turn obeyed — a push while reviews were still running or a
+// question was still open — and it came back at the end of every turn spent
+// waiting. The line points at delivery.md's sequence rather than at a bare push.
+func TestUnpushedWorkIsReportedAtSessionStartOnly(t *testing.T) {
+	root := driftRepo(t)
+	gitDo(t, root, "checkout", "-q", "-b", "feat/x")
+	write(t, root, "internal/thing/thing.go", "package thing\n")
+	gitDo(t, root, "add", "-A")
+	gitDo(t, root, "commit", "-q", "-m", "feat: a thing")
+
+	start, _, code := runStdin(t, `{"hook_event_name":"SessionStart"}`,
+		"hooks", "run", "session-start", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("session-start exit = %d", code)
+	}
+	ctx := additionalContext(t, start)
+	if !strings.Contains(ctx, "`feat/x` has 1 commit never pushed") {
+		t.Errorf("SessionStart does not report the unpushed branch: %q", ctx)
+	}
+	if !strings.Contains(ctx, "reviews, then push") {
+		t.Errorf("the line skips the reviews delivery.md puts before the push: %q", ctx)
+	}
+
+	stop, _, code := runStdin(t, `{"hook_event_name":"Stop","stop_hook_active":false}`,
+		"hooks", "run", "stop", "--root", root)
+	if code != ExitOK {
+		t.Fatalf("stop exit = %d", code)
+	}
+	if strings.Contains(stop, "never pushed") {
+		t.Errorf("Stop still asks for a push: %q", stop)
 	}
 }

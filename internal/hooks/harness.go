@@ -81,11 +81,11 @@ func (e Event) Stage() Stage {
 func (e Event) Why() string {
 	switch e {
 	case SessionStart:
-		return "syncs the graph, reports drift, says when nobody is watching, and names what this workspace is missing"
+		return "syncs the graph, reports drift and unpushed work, says when nobody is watching, and names what this workspace is missing"
 	case UserPromptSubmit:
 		return "says how to read an artifact the prompt named, and nothing otherwise"
 	case Stop:
-		return "syncs the graph, then reports findings and undelivered work"
+		return "syncs the graph, then reports findings"
 	}
 	return ""
 }
