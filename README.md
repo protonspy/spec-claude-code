@@ -112,7 +112,9 @@ pass. **The floor is 86%** unless the workspace records another (`--min`).
 
 The commands live in `<harness>/scc-manifest.json` — no second config file. They run
 where they are worth their cost: a bare `scc validate` never touches them; the
-`pre-push` hook does, which is where a branch becomes a pull request. Writing them is
+`pre-push` hook does, which is where a branch becomes a pull request — and
+`SCC_SKIP_CHECKS=test` (or `=1`) passes over a gate this machine cannot run for one
+push, leaving every other check in place. Writing them is
 the agent's job — `/scc-init` derives them from the project's language, and every
 "no command recorded" finding says what to record *and* how to decline it.
 

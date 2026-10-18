@@ -3,6 +3,7 @@ package validate
 import (
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/protonspy/spec-claude-code/internal/finding"
@@ -25,10 +26,11 @@ import (
 // --checks` and the pre-push hook run them, and those are the two moments they
 // are worth their cost: the second is where a branch becomes a pull request,
 // which is where this methodology says the claim is actually made.
-func Checks(root string) (*finding.Set, error) { return checksWithin(root, 0) }
+func Checks(root string) (*finding.Set, error) { return checksWithin(root, 0, nil) }
 
-// checksWithin is Checks with each gate bounded by limit; zero is the default.
-func checksWithin(root string, limit time.Duration) (*finding.Set, error) {
+// checksWithin is Checks with each gate bounded by limit, zero being the default,
+// and the gates in skip passed over as if declined for this run alone.
+func checksWithin(root string, limit time.Duration, skip []gate.Kind) (*finding.Set, error) {
 	cfg, err := gate.Load(root)
 	if err != nil {
 		return nil, err
@@ -41,7 +43,7 @@ func checksWithin(root string, limit time.Duration) (*finding.Set, error) {
 		// A gate somebody declined is silence. A language with no formatter and no
 		// linter is a real answer, and a project that recorded it has already had
 		// this conversation.
-		if cfg.Declined(k) {
+		if cfg.Declined(k) || slices.Contains(skip, k) {
 			continue
 		}
 		// A gate nobody has decided on is a finding, which is the one place this
